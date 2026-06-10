@@ -7,18 +7,15 @@
  */
 
 export const ZONES = [
-  { id: 'head',  label: 'Голова', icon: '🗡' },
-  { id: 'chest', label: 'Грудь',  icon: '🗡' },
-  { id: 'belly', label: 'Живот',  icon: '🗡' },
-  { id: 'waist', label: 'Пояс',   icon: '🗡' },
-  { id: 'legs',  label: 'Ноги',   icon: '🗡' },
+  { id: 'high', label: 'Вверх', hint: 'голова' },
+  { id: 'mid',  label: 'Центр', hint: 'корпус' },
+  { id: 'low',  label: 'Вниз',  hint: 'ноги' },
 ];
 
 export const BLOCKS = [
-  { id: 'b-head',  zones: ['head', 'chest'],  label: 'Голова и грудь' },
-  { id: 'b-chest', zones: ['chest', 'belly'], label: 'Грудь и живот' },
-  { id: 'b-belly', zones: ['belly', 'waist'], label: 'Живот и пояс' },
-  { id: 'b-legs',  zones: ['waist', 'legs'],  label: 'Пояс и ноги' },
+  { id: 'b-high', zones: ['high'], label: 'Вверх', hint: 'голова' },
+  { id: 'b-mid',  zones: ['mid'],  label: 'Центр', hint: 'корпус' },
+  { id: 'b-low',  zones: ['low'],  label: 'Вниз',  hint: 'ноги' },
 ];
 
 const rnd = (min, max) => min + Math.random() * (max - min);

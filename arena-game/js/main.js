@@ -8,6 +8,7 @@
 import { Arena } from './arena/Arena.js';
 import { BattleSystem } from './arena/BattleSystem.js';
 import { BattleUI } from './arena/BattleUI.js';
+import { DressingRoom } from './arena/DressingRoom.js';
 
 // ---------------------------------------------------------------------------
 // БИБЛИОТЕКА КОНТЕНТА — сюда добавляются новые модели и фоны
@@ -23,6 +24,8 @@ const FIGHTERS = {
       idle:   { file: 'assets/models/fighter.fbx' },
       // анимация из другого файла "надевается" на скелет модели
       attack: { file: 'assets/models/martelo2.fbx', hitTime: 0.58, reach: 1.25, inPlace: true },
+      // боевой клич для примерочной; lazy — не грузится при старте боя
+      taunt:  { file: 'assets/models/taunt.fbx', inPlace: true, lazy: true },
     },
   },
   // тот же меш, другие статы — пример того, что боец = конфиг
@@ -34,6 +37,8 @@ const FIGHTERS = {
     animations: {
       idle:   { file: 'assets/models/fighter.fbx' },
       attack: { file: 'assets/models/martelo2.fbx', hitTime: 0.58, reach: 1.25, inPlace: true },
+      // боевой клич для примерочной; lazy — не грузится при старте боя
+      taunt:  { file: 'assets/models/taunt.fbx', inPlace: true, lazy: true },
     },
   },
 };
@@ -52,8 +57,10 @@ const ITEMS = {
     icon: '🛡️',
     slot: 'torso',
     model: 'assets/models/bronze_armor.fbx',
-    // у модели Meshy "перёд" вдоль локальной -X, поэтому доворот на 90°
-    attach: { bone: /Spine1$/i, cover: 1.35, scale: 1, offset: [0, 0, 0], rotation: [0, 90, 0] },
+    // у модели Meshy "перёд" вдоль локальной -X, поэтому доворот на 90°;
+    // cover/offset подобраны в примерочной. Материал — родной из FBX:
+    // с PBR-картами из архива металл пересвечивается (см. README).
+    attach: { bone: /Spine1$/i, cover: 1.5, scale: 1, offset: [0.02, -0.02, 0], rotation: [0, 90, 0] },
   },
 };
 
@@ -73,10 +80,14 @@ if (tg) {
 // ---------------------------------------------------------------------------
 
 const arenaRoot = document.getElementById('arena-root');
+const arenaStage = document.getElementById('arena-stage');
 const loadingEl = document.getElementById('arena-loading');
 
-const arena = new Arena(arenaRoot);
+// канвас живёт в stage; боевой UI добавляет в arenaRoot док ПОД канвасом,
+// поэтому панель управления и журнал не перекрывают сцену
+const arena = new Arena(arenaStage);
 window.__arena = arena; // отладочный доступ из консоли
+window.__debug = () => ({ arena, dressing, ITEMS, equipState, fighters });
 arena.setBackground(BACKGROUNDS.village);
 
 let battle = null;
@@ -139,7 +150,7 @@ async function startBattle() {
   battle.start();
 }
 
-const ZONE_LABELS = { head: 'голову', chest: 'грудь', belly: 'живот', waist: 'пояс', legs: 'ноги' };
+const ZONE_LABELS = { high: 'голову', mid: 'корпус', low: 'ноги' };
 
 async function playStrike(s, sides) {
   const attacker = fighters[s.attacker];
@@ -196,8 +207,15 @@ function syncEquipment(side) {
       const fighter = fighters[side];
       if (!fighter) return;
       for (const [slot, key] of Object.entries(equipState[side])) {
-        if (key && !fighter.hasEquipped(slot)) await fighter.equip(ITEMS[key]);
-        else if (!key && fighter.hasEquipped(slot)) fighter.unequip(slot);
+        try {
+          if (key && !fighter.hasEquipped(slot)) await fighter.equip(ITEMS[key]);
+          else if (!key && fighter.hasEquipped(slot)) fighter.unequip(slot);
+        } catch (e) {
+          // предмет не загрузился — откатываем желаемое состояние,
+          // иначе каждый рестарт боя будет повторять ошибку
+          console.error(`Не удалось надеть «${ITEMS[key]?.name || key}»:`, e);
+          equipState[side][slot] = null;
+        }
       }
     } finally {
       busySides.delete(side);
@@ -213,12 +231,67 @@ function toggleEquip(side, itemKey) {
   return syncEquipment(side);
 }
 
-const inventoryEl = document.getElementById('inventory');
-const inventoryList = document.getElementById('inventory-list');
+// --- примерочная: персонаж лицом к камере, вещи меряются на нём ---
+
+const dressingEl = document.getElementById('dressing');
+const dressingItemsEl = document.getElementById('dressing-items');
+const dressing = new DressingRoom(document.getElementById('dressing-view'));
+let dressingSide = 'left';
+let dressingBusy = false;
+
+async function openDressing(side) {
+  dressingSide = side;
+  document.querySelectorAll('.dressing-tab').forEach((t) =>
+    t.classList.toggle('active', t.dataset.side === side));
+  dressingEl.classList.remove('hidden');
+  dressing.start();
+  dressingBusy = true;
+  renderInventory();
+  try {
+    await dressing.show(side === 'left' ? FIGHTERS.brawler : FIGHTERS.brawlerElite);
+    await syncDressing(false);
+  } finally {
+    dressingBusy = false;
+    renderInventory();
+  }
+}
+
+/** Привести персонажа в примерочной к equipState (желаемому состоянию). */
+async function syncDressing(withTaunt = true) {
+  const f = dressing.fighter;
+  if (!f) return;
+  for (const [slot, key] of Object.entries(equipState[dressingSide])) {
+    try {
+      if (key && !f.hasEquipped(slot)) {
+        if (withTaunt) await dressing.equip(ITEMS[key]);
+        else await f.equip(ITEMS[key]);
+      } else if (!key && f.hasEquipped(slot)) {
+        dressing.unequip(slot);
+      }
+    } catch (e) {
+      console.error(`Примерочная: не удалось надеть «${ITEMS[key]?.name || key}»:`, e);
+      equipState[dressingSide][slot] = null;
+    }
+  }
+}
+
+async function toggleDressingEquip(itemKey) {
+  if (dressingBusy) return;
+  dressingBusy = true;
+  renderInventory();
+  try {
+    toggleEquip(dressingSide, itemKey);   // состояние + бойцы на арене (очередь)
+    await syncDressing();                 // персонаж в примерочной
+  } finally {
+    dressingBusy = false;
+    renderInventory();
+  }
+}
 
 function renderInventory() {
-  inventoryList.innerHTML = '';
+  dressingItemsEl.innerHTML = '';
   for (const [key, item] of Object.entries(ITEMS)) {
+    const equipped = equipState[dressingSide][item.slot] === key;
     const row = document.createElement('div');
     row.className = 'inv-item';
     row.innerHTML = `
@@ -227,28 +300,27 @@ function renderInventory() {
         <span class="inv-name">${item.name}</span>
       </div>
       <div class="inv-actions"></div>`;
-    const actions = row.querySelector('.inv-actions');
-    for (const side of ['left', 'right']) {
-      const b = document.createElement('button');
-      const equipped = equipState[side][item.slot] === key;
-      const who = side === 'left' ? 'игрока' : 'врага';
-      const busy = busySides.has(side);
-      b.className = 'inv-btn' + (equipped ? ' equipped' : '');
-      b.disabled = busy;
-      b.textContent = busy ? 'Загрузка…' : (equipped ? `Снять с ${who}` : `Надеть на ${who}`);
-      b.addEventListener('click', () => toggleEquip(side, key));
-      actions.appendChild(b);
-    }
-    inventoryList.appendChild(row);
+    const b = document.createElement('button');
+    b.className = 'inv-btn' + (equipped ? ' equipped' : '');
+    b.disabled = dressingBusy;
+    b.textContent = dressingBusy ? 'Загрузка…' : (equipped ? 'Снять' : 'Надеть');
+    b.addEventListener('click', () => toggleDressingEquip(key));
+    row.querySelector('.inv-actions').appendChild(b);
+    dressingItemsEl.appendChild(row);
   }
 }
 
 document.getElementById('inventory-btn').addEventListener('click', () => {
-  inventoryEl.classList.toggle('hidden');
-  renderInventory();
+  openDressing(dressingSide);
 });
-document.getElementById('inventory-close').addEventListener('click', () => {
-  inventoryEl.classList.add('hidden');
+document.querySelectorAll('.dressing-tab').forEach((tab) => {
+  tab.addEventListener('click', () => {
+    if (!dressingBusy && tab.dataset.side !== dressingSide) openDressing(tab.dataset.side);
+  });
+});
+document.getElementById('dressing-close').addEventListener('click', () => {
+  dressingEl.classList.add('hidden');
+  dressing.stop(); // рендер-цикл примерочной не жрёт GPU, пока она закрыта
 });
 
 // ---------------------------------------------------------------------------

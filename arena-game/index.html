@@ -15,6 +15,50 @@
   </script>
 </head>
 <body>
+  <script>
+    // Открыто двойным кликом (file://)? Браузер в этом режиме блокирует
+    // ES-модули и загрузку моделей — игра не может стартовать. Показываем
+    // подсказку и сами переходим на локальный сервер (start.bat), как
+    // только он поднимется. На http/https (GitHub Pages) скрипт молчит.
+    (function () {
+      var test = location.search.indexOf('fallback-test') !== -1;
+      if (location.protocol !== 'file:' && !test) return;
+
+      var PORTS = [8765, 8000];
+
+      document.addEventListener('DOMContentLoaded', function () {
+        var el = document.createElement('div');
+        el.className = 'file-helper';
+        el.innerHTML =
+          '<div class="fh-card">' +
+            '<div class="fh-title">⚜ DRAGON ARENA</div>' +
+            '<p class="fh-sub">Игра открыта как файл (file://) — в этом режиме браузер запрещает загружать модули и 3D-модели, поэтому бой не стартует.</p>' +
+            '<div class="fh-steps">' +
+              '<div class="fh-step"><b>1.</b> Запустите <b>start.bat</b> в этой же папке</div>' +
+              '<div class="fh-step"><b>2.</b> Эта вкладка сама перейдёт в игру</div>' +
+            '</div>' +
+            '<div class="fh-status">Ищу запущенный сервер…</div>' +
+            '<a class="fh-link" href="http://localhost:8765/">Открыть вручную → localhost:8765</a>' +
+            '<p class="fh-note">На GitHub Pages и любом http-хостинге игра работает сразу — ограничение касается только file://.</p>' +
+          '</div>';
+        document.body.appendChild(el);
+        var status = el.querySelector('.fh-status');
+
+        function ping(i) {
+          var url = 'http://localhost:' + PORTS[i % PORTS.length] + '/';
+          fetch(url, { mode: 'no-cors', cache: 'no-store' }).then(function () {
+            status.textContent = 'Сервер найден — открываю игру…';
+            status.className = 'fh-status ok';
+            if (!test) location.replace(url);
+          }).catch(function () {
+            status.textContent = 'Жду start.bat… (сервер пока не запущен)';
+            setTimeout(function () { ping(i + 1); }, 1200);
+          });
+        }
+        ping(0);
+      });
+    })();
+  </script>
   <div class="game">
 
     <header class="game-header">
@@ -25,7 +69,7 @@
         <span class="stat">Ур. 15</span>
       </div>
       <label class="bg-picker">
-        Фон арены
+        <span class="bg-picker-label">Фон арены</span>
         <select id="bg-select"></select>
       </label>
     </header>
@@ -33,36 +77,49 @@
     <div class="game-body">
 
       <nav class="side-panel left-panel">
-        <button class="side-btn" data-module="Персонаж">🧙<span>Персонаж</span></button>
-        <button class="side-btn" id="inventory-btn">🎒<span>Рюкзак</span></button>
-        <button class="side-btn" data-module="Аукцион">⚖️<span>Аукцион</span></button>
-        <button class="side-btn" data-module="Почта">✉️<span>Почта</span></button>
+        <button class="side-btn" data-module="Персонаж" title="Персонаж">🧙<span>Персонаж</span></button>
+        <button class="side-btn" id="inventory-btn" title="Рюкзак">🎒<span>Рюкзак</span></button>
+        <button class="side-btn" data-module="Аукцион" title="Аукцион">⚖️<span>Аукцион</span></button>
+        <button class="side-btn" data-module="Почта" title="Почта">✉️<span>Почта</span></button>
       </nav>
 
       <main class="arena-module" id="arena-root">
-        <div class="arena-loading" id="arena-loading">
-          <div class="arena-loading-spinner"></div>
-          Загрузка бойцов…
+        <div class="arena-stage" id="arena-stage">
+          <div class="arena-loading" id="arena-loading">
+            <div class="arena-loading-spinner"></div>
+            Загрузка бойцов…
+          </div>
         </div>
       </main>
 
       <nav class="side-panel right-panel">
-        <button class="side-btn" data-module="Гильдия">🏰<span>Гильдия</span></button>
-        <button class="side-btn" data-module="Карта">🗺️<span>Карта</span></button>
-        <button class="side-btn" data-module="Чат">💬<span>Чат</span></button>
-        <button class="side-btn" data-module="Настройки">⚙️<span>Опции</span></button>
+        <button class="side-btn" data-module="Гильдия" title="Гильдия">🏰<span>Гильдия</span></button>
+        <button class="side-btn" data-module="Карта" title="Карта">🗺️<span>Карта</span></button>
+        <button class="side-btn" data-module="Чат" title="Чат">💬<span>Чат</span></button>
+        <button class="side-btn" data-module="Настройки" title="Опции">⚙️<span>Опции</span></button>
       </nav>
 
     </div>
   </div>
 
-  <aside class="inventory hidden" id="inventory">
-    <div class="inventory-head">
-      <span>🎒 Рюкзак</span>
-      <button class="inventory-close" id="inventory-close">✕</button>
+  <div class="dressing hidden" id="dressing">
+    <div class="dressing-card">
+      <div class="dressing-head">
+        <span class="dressing-title">🎒 Гардероб</span>
+        <div class="dressing-tabs">
+          <button class="dressing-tab active" data-side="left">Игрок</button>
+          <button class="dressing-tab" data-side="right">Противник</button>
+        </div>
+        <button class="dressing-close" id="dressing-close">✕</button>
+      </div>
+      <div class="dressing-body">
+        <div class="dressing-view" id="dressing-view">
+          <div class="dressing-hint">⟲ потяните, чтобы повернуть</div>
+        </div>
+        <div class="dressing-items" id="dressing-items"></div>
+      </div>
     </div>
-    <div class="inventory-list" id="inventory-list"></div>
-  </aside>
+  </div>
 
   <div class="toast" id="toast"></div>
 

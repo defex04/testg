@@ -104,3 +104,42 @@ export async function loadClip(spec, defaultFile, label) {
   const clip = extractClip(gltf, url, spec.clip, label);
   return spec.inPlace ? makeInPlace(clip) : clip;
 }
+
+// ---------------------------------------------------------------------------
+// Текстуры и PBR-материалы предметов
+// ---------------------------------------------------------------------------
+
+const texLoader = new THREE.TextureLoader();
+const texCache = new Map();
+
+export function loadTexture(url, { srgb = false } = {}) {
+  const key = url + (srgb ? '|srgb' : '');
+  if (!texCache.has(key)) {
+    const t = texLoader.load(url);
+    if (srgb) t.colorSpace = THREE.SRGBColorSpace;
+    t.anisotropy = 4;
+    texCache.set(key, t);
+  }
+  return texCache.get(key);
+}
+
+/**
+ * Собирает MeshStandardMaterial из набора карт
+ * { map, normalMap, metalnessMap, roughnessMap, emissiveMap }.
+ * FBX из генераторов (Meshy и т.п.) дают только Phong с цветом — отдельные
+ * PBR-карты делают металл металлом.
+ */
+export function buildItemMaterial(cfg) {
+  const m = new THREE.MeshStandardMaterial();
+  if (cfg.map) m.map = loadTexture(cfg.map, { srgb: true });
+  if (cfg.normalMap) m.normalMap = loadTexture(cfg.normalMap);
+  if (cfg.metalnessMap) m.metalnessMap = loadTexture(cfg.metalnessMap);
+  m.metalness = cfg.metalness ?? (cfg.metalnessMap ? 1 : 0.2);
+  if (cfg.roughnessMap) m.roughnessMap = loadTexture(cfg.roughnessMap);
+  m.roughness = cfg.roughness ?? 1;
+  if (cfg.emissiveMap) {
+    m.emissiveMap = loadTexture(cfg.emissiveMap, { srgb: true });
+    m.emissive = new THREE.Color(0xffffff);
+  }
+  return m;
+}

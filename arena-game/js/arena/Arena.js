@@ -7,7 +7,15 @@
  * (телефон/десктоп), и рисует поверх сменяемого 2D-фона.
  */
 import * as THREE from 'three';
+import { RoomEnvironment } from '../../vendor/three/examples/jsm/environments/RoomEnvironment.js';
 import { Fighter } from './Fighter.js';
+
+/** Окружение для PBR-материалов: без него metalness=1 выглядит чёрным. */
+export function applyEnvironment(renderer, scene) {
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  scene.environment = pmrem.fromScene(new RoomEnvironment(renderer), 0.04).texture;
+  pmrem.dispose();
+}
 
 export class Arena {
   constructor(container, opts = {}) {
@@ -28,6 +36,7 @@ export class Arena {
 
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(36, 1, 0.1, 100);
+    applyEnvironment(renderer, this.scene);
 
     // свет: тёплый небесный + ключевой с тенями + холодная подсветка сзади
     this.scene.add(new THREE.HemisphereLight(0xfff1dc, 0x44392c, 1.25));

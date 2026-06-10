@@ -8,7 +8,7 @@
  */
 import * as THREE from 'three';
 import { clone as cloneSkeleton } from '../../vendor/three/examples/jsm/utils/SkeletonUtils.js';
-import { loadGLTF, loadClip } from './loaders.js';
+import { loadGLTF, loadClip, buildItemMaterial } from './loaders.js';
 
 const FLASH_COLOR = new THREE.Color(0xff2211);
 
@@ -62,12 +62,24 @@ export class Fighter {
 
     const anims = this.def.animations || {};
     for (const [name, spec] of Object.entries(anims)) {
-      const clip = await loadClip(spec, this.def.model, name);
-      const action = this.mixer.clipAction(clip);
-      this.actions[name] = { action, spec };
+      if (spec.lazy) continue; // загрузится при первом play()
+      await this._ensureAction(name);
     }
 
     this._normalize();
+  }
+
+  /** Создаёт action по имени из конфига; lazy-анимации грузятся здесь. */
+  async _ensureAction(name) {
+    if (this.actions[name]) return this.actions[name];
+    const spec = (this.def.animations || {})[name];
+    if (!spec) return null;
+    const clip = await loadClip(spec, this.def.model, name);
+    // пока ждали загрузку, могли запросить ещё раз
+    if (!this.actions[name]) {
+      this.actions[name] = { action: this.mixer.clipAction(clip), spec };
+    }
+    return this.actions[name];
   }
 
   /**
@@ -119,9 +131,10 @@ export class Fighter {
     return target.copy(this.root.position).add(new THREE.Vector3(0, this.height + 0.25, 0));
   }
 
-  play(name, opts = {}) {
-    const entry = this.actions[name];
-    if (!entry || !this.alive && !opts.force) return Promise.resolve();
+  async play(name, opts = {}) {
+    if (!this.alive && !opts.force) return;
+    const entry = this.actions[name] || await this._ensureAction(name);
+    if (!entry) return;
     const { action, spec } = entry;
     const fade = opts.fade ?? 0.25;
     const prev = this.current;
@@ -210,13 +223,15 @@ export class Fighter {
 
     const { scene } = await loadGLTF(itemDef.model);
     const item = scene.clone(true);
+    // свой PBR-материал предмета (metallic/roughness), если задан в конфиге
+    const override = itemDef.material ? buildItemMaterial(itemDef.material) : null;
     item.traverse((o) => {
       if (o.isMesh) {
         o.castShadow = true;
-        // клонируем материалы: вспышка урона красит и броню, но только этого бойца
-        o.material = Array.isArray(o.material)
+        // материалы свои у каждого бойца: вспышка урона не задевает соседа
+        o.material = override || (Array.isArray(o.material)
           ? o.material.map((m) => m.clone())
-          : o.material.clone();
+          : o.material.clone());
       }
     });
 
@@ -224,19 +239,31 @@ export class Fighter {
     const bone = this.findBone(cfg.bone || /Spine1$/i);
     if (!bone) throw new Error(`Кость для предмета не найдена у ${this.def.name}`);
 
-    // меряем торс в текущей позе
+    // Меряем и крепим в bind-позе (симметричная Т-поза), а не в случайном
+    // кадре играющей анимации: боевая стойка скручивает корпус, и перекос
+    // "замораживался" бы в привязке — броня сидела бы криво и каждый раз
+    // по-разному. Текущую позу сохраняем и восстанавливаем после привязки.
+    const savedPose = new Map();
+    this.model.traverse((o) => {
+      if (o.isBone) {
+        savedPose.set(o, {
+          p: o.position.clone(), q: o.quaternion.clone(), s: o.scale.clone(),
+        });
+      }
+    });
+    this.model.traverse((o) => { if (o.isSkinnedMesh) o.skeleton.pose(); });
     this.model.updateMatrixWorld(true);
+
     const neck = this.findBone(/Neck$/i).getWorldPosition(new THREE.Vector3());
     const hips = this.findBone(/Hips$/i).getWorldPosition(new THREE.Vector3());
-    const armL = this.findBone(/LeftArm$/i).getWorldPosition(new THREE.Vector3());
-    const armR = this.findBone(/RightArm$/i).getWorldPosition(new THREE.Vector3());
     const torsoH = neck.distanceTo(hips);
 
     const box = new THREE.Box3().setFromObject(item);
     const size = box.getSize(new THREE.Vector3());
     const scale = (torsoH * (cfg.cover ?? 1.35)) / size.y * (cfg.scale ?? 1);
 
-    // куда смотрит боец (мир)
+    // куда смотрит боец (мир); в bind-позе корпус не скручен,
+    // поэтому "ровно по направлению взгляда" = ровно по груди
     const yaw = this.root.rotation.y;
     const fwd = new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw));
     const up = new THREE.Vector3(0, 1, 0);
@@ -247,8 +274,6 @@ export class Fighter {
       .addScaledVector(fwd, offset[0])
       .addScaledVector(up, offset[1])
       .addScaledVector(left, offset[2]);
-    // центр плеч точнее центрует кирасу по ширине
-    target.x = (armL.x + armR.x) / 2 + fwd.x * offset[0];
 
     const rot = (cfg.rotation || [0, 0, 0]).map(THREE.MathUtils.degToRad);
     const holder = new THREE.Group();
@@ -261,6 +286,15 @@ export class Fighter {
     holder.updateMatrixWorld(true);
 
     bone.attach(holder); // three сам пересчитает трансформ в систему кости
+
+    // вернуть текущую позу анимации
+    for (const [b, t] of savedPose) {
+      b.position.copy(t.p);
+      b.quaternion.copy(t.q);
+      b.scale.copy(t.s);
+    }
+    this.model.updateMatrixWorld(true);
+
     this.equipment[slot] = { holder, itemDef };
     return this;
   }
