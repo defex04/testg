@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <title>Арена — демо боевого модуля</title>
+  <link rel="stylesheet" href="css/game.css">
+  <script src="https://telegram.org/js/telegram-web-app.js" defer></script>
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "./vendor/three/build/three.module.js"
+      }
+    }
+  </script>
+</head>
+<body>
+  <div class="game">
+
+    <header class="game-header">
+      <div class="game-logo">⚜ DRAGON ARENA</div>
+      <div class="game-stats">
+        <span class="stat">🪙 12 450</span>
+        <span class="stat">💎 87</span>
+        <span class="stat">Ур. 15</span>
+      </div>
+      <label class="bg-picker">
+        Фон арены
+        <select id="bg-select"></select>
+      </label>
+    </header>
+
+    <div class="game-body">
+
+      <nav class="side-panel left-panel">
+        <button class="side-btn" data-module="Персонаж">🧙<span>Персонаж</span></button>
+        <button class="side-btn" id="inventory-btn">🎒<span>Рюкзак</span></button>
+        <button class="side-btn" data-module="Аукцион">⚖️<span>Аукцион</span></button>
+        <button class="side-btn" data-module="Почта">✉️<span>Почта</span></button>
+      </nav>
+
+      <main class="arena-module" id="arena-root">
+        <div class="arena-loading" id="arena-loading">
+          <div class="arena-loading-spinner"></div>
+          Загрузка бойцов…
+        </div>
+      </main>
+
+      <nav class="side-panel right-panel">
+        <button class="side-btn" data-module="Гильдия">🏰<span>Гильдия</span></button>
+        <button class="side-btn" data-module="Карта">🗺️<span>Карта</span></button>
+        <button class="side-btn" data-module="Чат">💬<span>Чат</span></button>
+        <button class="side-btn" data-module="Настройки">⚙️<span>Опции</span></button>
+      </nav>
+
+    </div>
+  </div>
+
+  <aside class="inventory hidden" id="inventory">
+    <div class="inventory-head">
+      <span>🎒 Рюкзак</span>
+      <button class="inventory-close" id="inventory-close">✕</button>
+    </div>
+    <div class="inventory-list" id="inventory-list"></div>
+  </aside>
+
+  <div class="toast" id="toast"></div>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>

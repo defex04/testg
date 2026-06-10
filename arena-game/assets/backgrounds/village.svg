@@ -1,0 +1,95 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" preserveAspectRatio="xMidYMax slice">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#7adfd4"/>
+      <stop offset="0.45" stop-color="#bfe8d2"/>
+      <stop offset="0.72" stop-color="#f6dfa8"/>
+      <stop offset="1" stop-color="#f3c684"/>
+    </linearGradient>
+    <linearGradient id="hillfar" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#a8c6a0"/>
+      <stop offset="1" stop-color="#8fb18c"/>
+    </linearGradient>
+    <linearGradient id="hillmid" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#d9b87a"/>
+      <stop offset="1" stop-color="#b99a5e"/>
+    </linearGradient>
+    <linearGradient id="grass" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#7d9a58"/>
+      <stop offset="1" stop-color="#55703c"/>
+    </linearGradient>
+    <linearGradient id="hut" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#9a7448"/>
+      <stop offset="1" stop-color="#6e4f2e"/>
+    </linearGradient>
+    <linearGradient id="roof" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#c89858"/>
+      <stop offset="1" stop-color="#8a6234"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1600" height="900" fill="url(#sky)"/>
+  <circle cx="1180" cy="240" r="90" fill="#fff3cf" opacity="0.9"/>
+  <circle cx="1180" cy="240" r="140" fill="#ffe9b3" opacity="0.35"/>
+
+  <ellipse cx="260" cy="210" rx="150" ry="38" fill="#ffffff" opacity="0.65"/>
+  <ellipse cx="420" cy="180" rx="100" ry="26" fill="#ffffff" opacity="0.5"/>
+  <ellipse cx="900" cy="130" rx="130" ry="30" fill="#ffffff" opacity="0.55"/>
+
+  <path d="M0 560 Q 200 480 430 530 T 900 520 T 1600 540 V 900 H 0 Z" fill="url(#hillfar)"/>
+
+  <!-- часовня на холме -->
+  <path d="M1150 560 Q 1300 470 1450 545 L 1600 560 V 700 H 1100 Z" fill="url(#hillmid)"/>
+  <g>
+    <rect x="1318" y="350" width="74" height="160" rx="8" fill="#e8e4f2"/>
+    <path d="M1310 360 L1355 270 L1400 360 Z" fill="#dcd6ee"/>
+    <path d="M1355 230 Q 1385 255 1355 300 Q 1325 255 1355 230 Z" fill="#e9b94e"/>
+    <rect x="1352" y="208" width="6" height="26" fill="#e9b94e"/>
+    <rect x="1340" y="430" width="30" height="56" rx="14" fill="#5d4a33"/>
+  </g>
+
+  <!-- избы -->
+  <path d="M0 640 Q 300 580 650 615 T 1200 630 T 1600 620 V 900 H 0 Z" fill="url(#hillmid)"/>
+
+  <g>
+    <rect x="270" y="480" width="150" height="110" fill="url(#hut)"/>
+    <path d="M250 490 L345 400 L440 490 Z" fill="url(#roof)"/>
+    <rect x="300" y="520" width="34" height="32" fill="#3c2a18"/>
+    <rect x="370" y="520" width="28" height="28" fill="#54401f"/>
+  </g>
+  <g>
+    <rect x="540" y="450" width="190" height="150" fill="url(#hut)"/>
+    <path d="M510 465 L635 340 L760 465 Z" fill="url(#roof)"/>
+    <path d="M600 372 L600 330 L625 330 L625 350 Z" fill="#8a6234"/>
+    <rect x="575" y="495" width="40" height="38" fill="#3c2a18"/>
+    <rect x="655" y="495" width="34" height="34" fill="#54401f"/>
+  </g>
+  <g>
+    <rect x="830" y="490" width="140" height="100" fill="url(#hut)"/>
+    <path d="M810 500 L900 415 L990 500 Z" fill="url(#roof)"/>
+    <rect x="860" y="525" width="30" height="30" fill="#3c2a18"/>
+  </g>
+  <g opacity="0.85">
+    <rect x="1060" y="520" width="110" height="80" fill="url(#hut)"/>
+    <path d="M1045 528 L1115 462 L1185 528 Z" fill="url(#roof)"/>
+  </g>
+
+  <!-- частокол -->
+  <g fill="#6e5634">
+    <path d="M120 640 l14 -34 14 34 v70 h-28 Z"/>
+    <path d="M160 648 l14 -34 14 34 v66 h-28 Z"/>
+    <path d="M200 642 l14 -34 14 34 v70 h-28 Z"/>
+    <path d="M1380 645 l14 -34 14 34 v70 h-28 Z"/>
+    <path d="M1420 652 l14 -34 14 34 v66 h-28 Z"/>
+    <path d="M1460 646 l14 -34 14 34 v70 h-28 Z"/>
+  </g>
+
+  <!-- передний план: луг -->
+  <path d="M0 700 Q 400 650 800 680 T 1600 670 V 900 H 0 Z" fill="url(#grass)"/>
+  <g fill="#46603a" opacity="0.75">
+    <path d="M80 760 q 10 -46 20 0 q 8 -38 16 0 q 10 -30 18 0 Z"/>
+    <path d="M1430 770 q 10 -46 20 0 q 8 -38 16 0 q 10 -30 18 0 Z"/>
+    <path d="M700 880 q 12 -52 24 0 q 10 -42 20 0 Z"/>
+  </g>
+  <path d="M0 900 Q 800 840 1600 900 Z" fill="#3c5230" opacity="0.8"/>
+</svg>

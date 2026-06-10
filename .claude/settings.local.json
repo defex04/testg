@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(node --version)",
+      "PowerShell(npm --version)",
+      "mcp__Claude_Preview__preview_start",
+      "PowerShell(Copy-Item \"C:\\\\Users\\\\andre\\\\Downloads\\\\Meshy_AI_Bronze_Plate_Armor_0609225947_texture.fbx\" \"C:\\\\Users\\\\andre\\\\Downloads\\\\new\\\\arena-game\\\\assets\\\\models\\\\bronze_armor.fbx\"; \\(Get-Item \"C:\\\\Users\\\\andre\\\\Downloads\\\\new\\\\arena-game\\\\assets\\\\models\\\\bronze_armor.fbx\"\\).Length)"
+    ]
+  }
+}

@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" preserveAspectRatio="xMidYMax slice">
+  <defs>
+    <linearGradient id="csky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#9fc8e8"/>
+      <stop offset="0.5" stop-color="#e8d9b8"/>
+      <stop offset="1" stop-color="#eec27f"/>
+    </linearGradient>
+    <linearGradient id="rockfar" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#d9a877"/>
+      <stop offset="1" stop-color="#b97f4e"/>
+    </linearGradient>
+    <linearGradient id="rocknear" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#c08049"/>
+      <stop offset="1" stop-color="#8e5a30"/>
+    </linearGradient>
+    <linearGradient id="sand" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#cf9a5d"/>
+      <stop offset="1" stop-color="#a8753f"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1600" height="900" fill="url(#csky)"/>
+  <circle cx="430" cy="200" r="70" fill="#fff6da" opacity="0.85"/>
+  <ellipse cx="1000" cy="160" rx="160" ry="26" fill="#ffffff" opacity="0.4"/>
+  <ellipse cx="250" cy="120" rx="120" ry="22" fill="#ffffff" opacity="0.35"/>
+
+  <!-- дальние скалы -->
+  <path d="M0 300 L90 420 L60 430 L180 560 H0 Z" fill="url(#rockfar)" opacity="0.8"/>
+  <path d="M1600 260 L1480 400 L1530 410 L1380 580 H1600 Z" fill="url(#rockfar)" opacity="0.85"/>
+  <path d="M700 480 L850 330 L1000 470 L940 480 L1060 600 H640 L760 490 Z" fill="url(#rockfar)" opacity="0.7"/>
+
+  <!-- ближние скалы-кулисы -->
+  <path d="M0 180 L260 280 L200 300 L420 460 L340 470 L520 640 L300 660 L380 760 H0 Z" fill="url(#rocknear)"/>
+  <path d="M1600 150 L1330 290 L1410 310 L1190 480 L1290 495 L1100 660 L1330 680 L1240 780 H1600 Z" fill="url(#rocknear)"/>
+
+  <!-- трещины и тени на скалах -->
+  <g stroke="#6e4423" stroke-width="6" opacity="0.5" fill="none">
+    <path d="M120 260 L180 360 L150 430"/>
+    <path d="M1460 240 L1390 360 L1430 430"/>
+    <path d="M250 330 L310 430"/>
+  </g>
+
+  <!-- сухое дерево -->
+  <g stroke="#5c3d22" stroke-width="10" fill="none" stroke-linecap="round">
+    <path d="M580 620 Q 575 520 560 470 Q 555 440 575 410"/>
+    <path d="M563 480 Q 540 450 520 445"/>
+    <path d="M567 510 Q 600 480 615 450"/>
+  </g>
+
+  <!-- песок -->
+  <path d="M0 660 Q 400 610 800 645 T 1600 640 V 900 H 0 Z" fill="url(#sand)"/>
+  <ellipse cx="500" cy="760" rx="200" ry="16" fill="#8e5a30" opacity="0.35"/>
+  <ellipse cx="1150" cy="800" rx="260" ry="18" fill="#8e5a30" opacity="0.3"/>
+  <g fill="#7c4e28" opacity="0.6">
+    <ellipse cx="320" cy="720" rx="34" ry="12"/>
+    <ellipse cx="1300" cy="740" rx="44" ry="14"/>
+    <ellipse cx="900" cy="860" rx="60" ry="16"/>
+  </g>
+</svg>
