@@ -4,6 +4,10 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
   <title>Арена — демо боевого модуля</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <!-- декоративный шрифт с кириллицей; офлайн просто откатится на Georgia -->
+  <link href="https://fonts.googleapis.com/css2?family=Philosopher:wght@400;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="css/game.css">
   <script src="https://telegram.org/js/telegram-web-app.js" defer></script>
   <script type="importmap">
@@ -59,49 +63,155 @@
       });
     })();
   </script>
+
   <div class="game">
 
-    <header class="game-header">
-      <div class="game-logo">⚜ DRAGON ARENA</div>
-      <div class="game-stats">
-        <span class="stat">🪙 12 450</span>
-        <span class="stat">💎 87</span>
-        <span class="stat">Ур. 15</span>
+    <!-- ── панель персонажа: уровень, имя, опыт / PvP-опыт, медь ────── -->
+    <header class="hud-top">
+      <div class="player-plate">
+        <div class="pp-level" id="pp-level">15</div>
+        <div class="pp-main">
+          <div class="pp-name" id="pp-name">ИгрокА</div>
+          <div class="pp-bar pp-xp" title="Опыт"><div class="pp-fill" id="pp-xp-fill"></div><span class="pp-bar-text" id="pp-xp-text"></span></div>
+          <div class="pp-bar pp-pvp" title="Опыт PvP"><div class="pp-fill" id="pp-pvp-fill"></div><span class="pp-bar-text" id="pp-pvp-text"></span></div>
+        </div>
+        <div class="pp-money">
+          <span class="pp-money-row"><span class="coin"></span><span id="pp-money">0</span></span>
+          <span class="pp-money-label">медь</span>
+        </div>
       </div>
-      <label class="bg-picker">
-        <span class="bg-picker-label">Фон арены</span>
-        <select id="bg-select"></select>
-      </label>
     </header>
 
-    <div class="game-body">
+    <!-- ── навигация: один симметричный ряд медальонов ──────────────── -->
+    <nav class="hud-nav">
+      <button class="nav-circle" id="nav-location">
+        <span class="nc-ring"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.2"/><path d="M15 9 13.2 13.2 9 15l1.8-4.2L15 9Z"/></svg></span>
+        <span class="nc-label">Локация</span>
+      </button>
+      <button class="nav-circle" id="nav-bag">
+        <span class="nc-ring"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 7.3V6a3 3 0 0 1 6 0v1.3"/><rect x="5" y="7.3" width="14" height="13" rx="2.6"/><path d="M8.6 14.2h6.8v3.4H8.6z"/></svg></span>
+        <span class="nc-label">Рюкзак</span>
+      </button>
+      <button class="nav-circle" id="nav-hunt">
+        <span class="nc-ring"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 4.5 15.5 15.5M19.5 4.5 8.5 15.5"/><path d="M14 17.2 17.2 14M10 17.2 6.8 14"/><path d="M16.2 16.2 19 19M7.8 16.2 5 19"/></svg></span>
+        <span class="nc-label">Охота</span>
+      </button>
+      <button class="nav-circle" data-stub="Битвы">
+        <span class="nc-ring"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 3.5h11V18l-5.5-3.2L6.5 18V3.5Z"/></svg></span>
+        <span class="nc-label">Битвы</span>
+      </button>
+      <button class="nav-circle" data-stub="Почта">
+        <span class="nc-ring"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="5.5" width="17" height="13" rx="2.2"/><path d="m4.8 7.2 7.2 5.8 7.2-5.8"/></svg></span>
+        <span class="nc-label">Почта</span>
+      </button>
+      <button class="nav-circle" data-stub="Аукцион">
+        <span class="nc-ring"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4.5v15M8.5 19.5h7M5.5 7.5h13"/><path d="M5.5 7.5 3 13a2.6 2.6 0 0 0 5.2 0L5.5 7.5ZM18.5 7.5 15.8 13a2.6 2.6 0 0 0 5.2 0l-2.5-5.5Z"/></svg></span>
+        <span class="nc-label">Аукцион</span>
+      </button>
+      <button class="nav-circle" data-stub="Информация">
+        <span class="nc-ring"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.4"/><path d="M12 11v5.2"/><path d="M12 7.6h.01"/></svg></span>
+        <span class="nc-label">Инфо</span>
+      </button>
+    </nav>
 
-      <nav class="side-panel left-panel">
-        <button class="side-btn" data-module="Персонаж" title="Персонаж">🧙<span>Персонаж</span></button>
-        <button class="side-btn" id="inventory-btn" title="Рюкзак">🎒<span>Рюкзак</span></button>
-        <button class="side-btn" data-module="Аукцион" title="Аукцион">⚖️<span>Аукцион</span></button>
-        <button class="side-btn" data-module="Почта" title="Почта">✉️<span>Почта</span></button>
-      </nav>
+    <!-- ── середина: главная панель (страница симметрична) ──────────── -->
+    <div class="game-mid">
 
-      <main class="arena-module" id="arena-root">
-        <div class="arena-stage" id="arena-stage">
-          <div class="arena-loading" id="arena-loading">
-            <div class="arena-loading-spinner"></div>
-            Загрузка бойцов…
+      <main class="main-panel">
+
+        <!-- экран локации (вне боя) -->
+        <section class="screen screen-location" id="screen-location">
+          <div class="loc-picture" id="loc-picture">
+            <span class="loc-name" id="loc-name"></span>
           </div>
-        </div>
+          <div class="loc-actions" id="loc-actions"></div>
+        </section>
+
+        <!-- экран боя -->
+        <section class="screen screen-battle hidden" id="screen-battle">
+          <div class="battle-head" id="battle-head"></div>
+          <div class="arena-stage" id="arena-stage">
+            <!-- пояс эликсиров: оверлей у левого края сцены, только в бою -->
+            <div class="elixir-belt">
+              <div class="belt-slot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 3.5h4M10.8 3.5v5L5.6 17a3.2 3.2 0 0 0 2.9 4.6h7a3.2 3.2 0 0 0 2.9-4.6l-5.2-8.5v-5"/><path d="M7.5 14.5h9"/></svg></div>
+              <div class="belt-slot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 3.5h4M10.8 3.5v5L5.6 17a3.2 3.2 0 0 0 2.9 4.6h7a3.2 3.2 0 0 0 2.9-4.6l-5.2-8.5v-5"/><path d="M7.5 14.5h9"/></svg></div>
+              <div class="belt-slot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 3.5h4M10.8 3.5v5L5.6 17a3.2 3.2 0 0 0 2.9 4.6h7a3.2 3.2 0 0 0 2.9-4.6l-5.2-8.5v-5"/><path d="M7.5 14.5h9"/></svg></div>
+              <div class="belt-slot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 3.5h4M10.8 3.5v5L5.6 17a3.2 3.2 0 0 0 2.9 4.6h7a3.2 3.2 0 0 0 2.9-4.6l-5.2-8.5v-5"/><path d="M7.5 14.5h9"/></svg></div>
+            </div>
+            <div class="arena-loading hidden" id="arena-loading">
+              <div class="arena-loading-spinner"></div>
+              Загрузка бойцов…
+            </div>
+          </div>
+          <!-- слоты скиллов: компактная плашка по центру, без подписи -->
+          <div class="skill-bar">
+            <div class="skill-plate">
+              <div class="belt-slot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true"><path d="M12 4l1.8 5.4L19 12l-5.2 2.6L12 20l-1.8-5.4L5 12l5.2-2.6L12 4Z"/></svg></div>
+              <div class="belt-slot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true"><path d="M12 4l1.8 5.4L19 12l-5.2 2.6L12 20l-1.8-5.4L5 12l5.2-2.6L12 4Z"/></svg></div>
+              <div class="belt-slot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true"><path d="M12 4l1.8 5.4L19 12l-5.2 2.6L12 20l-1.8-5.4L5 12l5.2-2.6L12 4Z"/></svg></div>
+              <div class="belt-slot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true"><path d="M12 4l1.8 5.4L19 12l-5.2 2.6L12 20l-1.8-5.4L5 12l5.2-2.6L12 4Z"/></svg></div>
+              <div class="belt-slot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true"><path d="M12 4l1.8 5.4L19 12l-5.2 2.6L12 20l-1.8-5.4L5 12l5.2-2.6L12 4Z"/></svg></div>
+            </div>
+          </div>
+        </section>
+
       </main>
 
-      <nav class="side-panel right-panel">
-        <button class="side-btn" data-module="Гильдия" title="Гильдия">🏰<span>Гильдия</span></button>
-        <button class="side-btn" data-module="Карта" title="Карта">🗺️<span>Карта</span></button>
-        <button class="side-btn" data-module="Чат" title="Чат">💬<span>Чат</span></button>
-        <button class="side-btn" data-module="Настройки" title="Опции">⚙️<span>Опции</span></button>
-      </nav>
-
     </div>
+
+    <!-- ── нижняя панель с вкладками ─────────────────────────────────── -->
+    <section class="bottom-dock">
+      <div class="dock-tabs" id="dock-tabs">
+        <button class="dock-tab" data-pane="members" data-battle-only>Участники боя (2)</button>
+        <button class="dock-tab" data-pane="battlelog" data-battle-only>Лог боя</button>
+        <button class="dock-tab" data-pane="chat">Чат</button>
+        <button class="dock-tab" data-pane="players">Список игроков в локации</button>
+      </div>
+      <div class="dock-body">
+
+        <div class="dock-pane" id="pane-members">
+          <div class="members-grid hide-dead" id="members-grid">
+            <div class="team">
+              <div class="team-title">1я команда</div>
+              <div class="team-list" id="team-left"></div>
+            </div>
+            <div class="members-center">
+              <button class="ghost-btn" id="show-dead">Показать убитых</button>
+            </div>
+            <div class="team">
+              <div class="team-title">2я команда</div>
+              <div class="team-list" id="team-right"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="dock-pane" id="pane-battlelog">
+          <div class="battle-log" id="battle-log" aria-live="polite"></div>
+        </div>
+
+        <div class="dock-pane" id="pane-chat">
+          <div class="chat-tabs">
+            <button class="chat-tab active" data-chat="common">Общий</button>
+            <button class="chat-tab" data-chat="clan">Клановый</button>
+          </div>
+          <div class="chat-log" id="chat-log"></div>
+          <form class="chat-input-row" id="chat-form">
+            <input class="chat-input" id="chat-input" type="text"
+                   placeholder="Введите сообщение…" autocomplete="off" maxlength="200">
+            <button class="chat-send" type="submit">Отправить</button>
+          </form>
+        </div>
+
+        <div class="dock-pane" id="pane-players">
+          <div class="players-list" id="players-list"></div>
+        </div>
+
+      </div>
+    </section>
+
   </div>
 
+  <!-- гардероб (примерочная) -->
   <div class="dressing hidden" id="dressing">
     <div class="dressing-card">
       <div class="dressing-head">

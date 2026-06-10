@@ -1,9 +1,12 @@
 /**
- * Боевой интерфейс арены.
+ * Боевой интерфейс арены (под дизайн-макет «чёрная панель с белыми контурами»).
  *
- * Поверх сцены — только лёгкий оверлей (имена, HP, таймер, всплывающий урон,
- * экран победы). Управление и журнал боя живут в нижней панели («доке»),
- * которая стоит в потоке ПОД канвасом и не перекрывает ни бойцов, ни лог.
+ * Рендерит:
+ *  - шапку боя в `head`: плашки бойцов (уровень, имя, HP/MP), «Урон: N», таймер;
+ *  - «штурвал» атаки/блока по центру сцены `stage` + всплывающий урон + экран
+ *    конца боя;
+ *  - журнал боя в `log` (вкладка «Лог боя» нижней панели);
+ *  - составы команд в `teams.left / teams.right` (вкладка «Участники боя»).
  *
  * Схема боя: 3 удара × 3 блока (вверх / центр / вниз).
  * Блок — переключатель; удар наносится сразу по нажатию зоны атаки,
@@ -27,7 +30,7 @@ const ZONE_ICONS = {
   </svg>`,
 };
 
-/* Иконки заголовков групп (эмодзи в заголовках рендерятся нестабильно). */
+/* Иконки рядов штурвала (эмодзи в UI рендерятся нестабильно). */
 const SWORD_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
   <path d="M19 5 9.2 14.8M19 5l-.2 3.2M19 5l-3.2.2"/>
   <path d="M6.8 12.4l4.8 4.8M9.2 17.8 6.2 20.8M5.2 15.8l3 3"/>
@@ -37,96 +40,113 @@ const SHIELD_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" 
 </svg>`;
 
 export class BattleUI {
-  constructor(container, opts = {}) {
-    this.container = container;
+  /**
+   * opts: {
+   *   head, stage, log: HTMLElement,
+   *   teams: { left, right: HTMLElement },
+   *   left, right: { name, level },
+   *   onStrike(move),
+   * }
+   */
+  constructor(opts) {
+    this.headEl = opts.head;
+    this.stageEl = opts.stage;
+    this.logEl = opts.log;
+    this.teamEls = opts.teams;
     this.onStrike = opts.onStrike || (() => {});
     this.block = null;    // выбранный блок (id или null)
     this._locked = true;  // до первого turnStart кнопки неактивны
     this._build(opts);
-    if (opts.leftName && opts.rightName) {
-      this.log(`<b>${opts.leftName}</b> против <b>${opts.rightName}</b> — бой начинается!`);
-    }
+    this.log(`<b>${opts.left.name}</b> против <b>${opts.right.name}</b> — бой начинается!`);
   }
 
   _build(opts) {
-    // --- нижний док: журнал + управление, стоит в потоке под канвасом ---
-    const dock = document.createElement('div');
-    dock.className = 'bui-dock';
-    dock.innerHTML = `
-      <div class="bui-log" aria-live="polite"></div>
-      <div class="bui-controls">
-        <div class="bui-group bui-attack">
-          <div class="bui-group-title">${SWORD_ICON}Удар</div>
-          <div class="bui-zone-row"></div>
+    // --- шапка: плашки бойцов + урон + таймер ---
+    this.headEl.innerHTML = `
+      <div class="bh-plates">
+        <div class="bh-plate bh-left">
+          <div class="bh-level">${opts.left.level ?? ''}</div>
+          <div class="bh-info">
+            <div class="bh-name">${opts.left.name}</div>
+            <div class="bh-bar bh-hp"><div class="bh-fill"></div><span class="bh-text"></span></div>
+            <div class="bh-bar bh-mp"><div class="bh-fill"></div></div>
+          </div>
         </div>
-        <div class="bui-sep"></div>
-        <div class="bui-group bui-block">
-          <div class="bui-group-title">${SHIELD_ICON}Блок</div>
-          <div class="bui-zone-row"></div>
-        </div>
-        <div class="bui-status"></div>
-      </div>`;
-
-    // --- лёгкий оверлей поверх сцены: панели HP, урон, финал ---
-    const overlay = document.createElement('div');
-    overlay.className = 'bui';
-    overlay.innerHTML = `
-      <div class="bui-top">
-        <div class="bui-plate bui-left">
-          <div class="bui-name">${opts.leftName || 'Игрок'}</div>
-          <div class="bui-bar"><div class="bui-fill"></div><span class="bui-bar-text"></span></div>
-        </div>
-        <div class="bui-vs">
-          <div class="bui-turn">Ход 1</div>
-          <div class="bui-timer">0:30</div>
-        </div>
-        <div class="bui-plate bui-right">
-          <div class="bui-name">${opts.rightName || 'Противник'}</div>
-          <div class="bui-bar"><div class="bui-fill"></div><span class="bui-bar-text"></span></div>
+        <div class="bh-plate bh-right">
+          <div class="bh-level">${opts.right.level ?? ''}</div>
+          <div class="bh-info">
+            <div class="bh-name">${opts.right.name}</div>
+            <div class="bh-bar bh-hp"><div class="bh-fill"></div><span class="bh-text"></span></div>
+            <div class="bh-bar bh-mp"><div class="bh-fill"></div></div>
+          </div>
         </div>
       </div>
-      <div class="bui-popups"></div>
-      <div class="bui-end hidden">
-        <div class="bui-end-card">
-          <div class="bui-end-title"></div>
-          <button class="bui-restart">В бой снова</button>
+      <div class="bh-damage">Урон: 0</div>
+      <div class="bh-timer">—:——</div>`;
+
+    // --- штурвал атаки/блока по центру сцены ---
+    const wheel = document.createElement('div');
+    wheel.className = 'strike-wheel';
+    wheel.innerHTML = `
+      <div class="sw-row sw-attack"><span class="sw-tag" title="Удар">${SWORD_ICON}</span><div class="sw-btns"></div></div>
+      <div class="sw-row sw-block"><span class="sw-tag" title="Блок">${SHIELD_ICON}</span><div class="sw-btns"></div></div>
+      <button class="sw-skip" type="button" title="Не бить в этот ход (выбранный блок остаётся)">Пропустить ход</button>
+      <div class="sw-status"></div>`;
+
+    // --- пилюля «ожидание противника» (штурвал на это время скрыт) ---
+    const wait = document.createElement('div');
+    wait.className = 'bui-wait hidden';
+
+    // --- всплывающий урон + экран конца боя ---
+    const popups = document.createElement('div');
+    popups.className = 'bui-popups';
+
+    const end = document.createElement('div');
+    end.className = 'bui-end hidden';
+    end.innerHTML = `
+      <div class="bui-end-card">
+        <div class="bui-end-title"></div>
+        <div class="bui-end-actions">
+          <button class="bui-end-btn bui-restart">В бой снова</button>
+          <button class="bui-end-btn secondary bui-leave">В локацию</button>
         </div>
       </div>`;
 
-    this.container.appendChild(dock);
-    this.container.appendChild(overlay);
-    this.dock = dock;
-    this.el = overlay;
+    this.stageEl.appendChild(wheel);
+    this.stageEl.appendChild(wait);
+    this.stageEl.appendChild(popups);
+    this.stageEl.appendChild(end);
+    this.wheel = wheel;
+    this.waitEl = wait;
 
     this.refs = {
       hpFill: {
-        left: overlay.querySelector('.bui-left .bui-fill'),
-        right: overlay.querySelector('.bui-right .bui-fill'),
+        left: this.headEl.querySelector('.bh-left .bh-hp .bh-fill'),
+        right: this.headEl.querySelector('.bh-right .bh-hp .bh-fill'),
       },
       hpText: {
-        left: overlay.querySelector('.bui-left .bui-bar-text'),
-        right: overlay.querySelector('.bui-right .bui-bar-text'),
+        left: this.headEl.querySelector('.bh-left .bh-text'),
+        right: this.headEl.querySelector('.bh-right .bh-text'),
       },
-      turn: overlay.querySelector('.bui-turn'),
-      timer: overlay.querySelector('.bui-timer'),
-      popups: overlay.querySelector('.bui-popups'),
-      end: overlay.querySelector('.bui-end'),
-      endTitle: overlay.querySelector('.bui-end-title'),
-      restart: overlay.querySelector('.bui-restart'),
-      log: dock.querySelector('.bui-log'),
-      controls: dock.querySelector('.bui-controls'),
-      status: dock.querySelector('.bui-status'),
+      damage: this.headEl.querySelector('.bh-damage'),
+      timer: this.headEl.querySelector('.bh-timer'),
+      status: wheel.querySelector('.sw-status'),
+      popups,
+      end,
+      endTitle: end.querySelector('.bui-end-title'),
+      restart: end.querySelector('.bui-restart'),
+      leave: end.querySelector('.bui-leave'),
     };
 
     // зоны атаки: нажатие = немедленный удар (с текущим блоком или без него)
     this._atkButtons = [];
-    const atkRow = dock.querySelector('.bui-attack .bui-zone-row');
+    const atkRow = wheel.querySelector('.sw-attack .sw-btns');
     for (const z of ZONES) {
       const b = document.createElement('button');
       b.type = 'button';
-      b.className = 'bz bz-attack';
+      b.className = 'swb';
       b.title = `Удар: ${z.hint}`;
-      b.innerHTML = `<span class="bz-ico">${ZONE_ICONS[z.id]}</span><span class="bz-label">${z.label}</span>`;
+      b.innerHTML = ZONE_ICONS[z.id];
       b.addEventListener('click', () => this._strike(z.id, b));
       atkRow.appendChild(b);
       this._atkButtons.push(b);
@@ -134,19 +154,35 @@ export class BattleUI {
 
     // зоны блока: переключатель, можно вовсе не выбирать
     this._blkButtons = [];
-    const blkRow = dock.querySelector('.bui-block .bui-zone-row');
+    const blkRow = wheel.querySelector('.sw-block .sw-btns');
     for (const blk of BLOCKS) {
       const b = document.createElement('button');
       b.type = 'button';
-      b.className = 'bz bz-block';
+      b.className = 'swb';
       b.dataset.block = blk.id;
       b.title = `Блок: ${blk.hint}`;
-      b.innerHTML = `<span class="bz-ico">${ZONE_ICONS[blk.zones[0]]}</span><span class="bz-label">${blk.label}</span>`;
+      b.innerHTML = ZONE_ICONS[blk.zones[0]];
       b.addEventListener('click', () => this._selectBlock(blk.id));
       blkRow.appendChild(b);
       this._blkButtons.push(b);
     }
 
+    // пропуск хода: удара нет, выбранный блок продолжает защищать
+    this._skipBtn = wheel.querySelector('.sw-skip');
+    this._skipBtn.addEventListener('click', () => this._skip());
+
+    // --- вкладка «Участники боя»: составы команд ---
+    this._members = {};
+    for (const side of ['left', 'right']) {
+      this.teamEls[side].innerHTML = '';
+      const m = document.createElement('div');
+      m.className = 'member';
+      m.innerHTML = `${opts[side].name} <span class="m-lvl">[${opts[side].level ?? '?'}]</span>`;
+      this.teamEls[side].appendChild(m);
+      this._members[side] = m;
+    }
+
+    this.logEl.innerHTML = '';
     this._setLocked(true, null);
   }
 
@@ -155,6 +191,12 @@ export class BattleUI {
     this._locked = true; // защита от двойного клика до hideControls()
     btn.classList.add('chosen');
     this.onStrike({ attack: zoneId, block: this.block });
+  }
+
+  _skip() {
+    if (this._locked) return;
+    this._locked = true;
+    this.onStrike({ attack: null, block: this.block, pass: true });
   }
 
   _selectBlock(id) {
@@ -167,10 +209,11 @@ export class BattleUI {
 
   _setLocked(locked, statusText) {
     this._locked = locked;
-    this.refs.controls.classList.toggle('waiting', !!statusText);
+    this.wheel.classList.toggle('waiting', !!statusText);
     this.refs.status.textContent = statusText || '';
     for (const b of this._atkButtons) b.disabled = locked;
     for (const b of this._blkButtons) b.disabled = locked;
+    this._skipBtn.disabled = locked;
   }
 
   setHP(side, cur, max) {
@@ -178,10 +221,15 @@ export class BattleUI {
     this.refs.hpFill[side].style.width = pct + '%';
     this.refs.hpFill[side].classList.toggle('low', pct < 30);
     this.refs.hpText[side].textContent = `${Math.round(cur)} / ${max}`;
+    this._members[side].classList.toggle('dead', cur <= 0);
+  }
+
+  /** Строка «Урон: N» в шапке боя. */
+  setDamage(value) {
+    this.refs.damage.textContent = `Урон: ${value}`;
   }
 
   setTurn(n) {
-    this.refs.turn.textContent = 'Ход ' + n;
     const sep = document.createElement('div');
     sep.className = 'bui-log-turn';
     sep.textContent = `ход ${n}`;
@@ -194,9 +242,15 @@ export class BattleUI {
     this.refs.timer.classList.toggle('urgent', s <= 5);
   }
 
-  /** Кнопки блокируются на время удара (панель не исчезает — без скачков). */
+  /**
+   * Штурвал плавно исчезает на время удара; пока ждём выбор противника,
+   * вместо него видна пилюля статуса.
+   */
   hideControls(showWait = true) {
-    this._setLocked(true, showWait ? '⏳ Ход противника…' : '⚔ Обмен ударами…');
+    this._setLocked(true, null);
+    this.wheel.classList.add('off');
+    this.waitEl.textContent = '⏳ Ход противника…';
+    this.waitEl.classList.toggle('hidden', !showWait);
   }
 
   showControls() {
@@ -204,9 +258,11 @@ export class BattleUI {
     for (const b of this._blkButtons) b.classList.remove('active');
     for (const b of this._atkButtons) b.classList.remove('chosen');
     this._setLocked(false, null);
+    this.wheel.classList.remove('off');
+    this.waitEl.classList.add('hidden');
   }
 
-  /** Всплывающая цифра урона в экранной точке {x, y}. */
+  /** Всплывающая цифра урона в экранной точке {x, y} (координаты сцены). */
   popup(pos, text, type = 'dmg') {
     const p = document.createElement('div');
     p.className = 'bui-popup ' + type;
@@ -226,27 +282,37 @@ export class BattleUI {
   }
 
   _appendLog(node) {
-    const el = this.refs.log;
+    const el = this.logEl;
     // автопрокрутка только если пользователь и так у нижнего края,
     // иначе не сбиваем его с чтения истории
-    const stick = el.scrollHeight - el.scrollTop - el.clientHeight < 36;
+    const pane = el.parentElement; // скроллится панель вкладки
+    const scroller = pane && pane.classList.contains('dock-pane') ? pane : el;
+    const stick = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 36;
     el.appendChild(node);
-    if (stick) el.scrollTop = el.scrollHeight;
+    if (stick) scroller.scrollTop = scroller.scrollHeight;
   }
 
-  showEnd(victory, onRestart) {
+  showEnd(victory, handlers = {}) {
     this.log(victory ? '🏆 <b>Победа!</b>' : '☠ <b>Поражение…</b>');
     this.refs.endTitle.textContent = victory ? '⚔ Победа! ⚔' : 'Поражение…';
     this.refs.endTitle.classList.toggle('defeat', !victory);
     this.refs.end.classList.remove('hidden');
     this.refs.restart.onclick = () => {
       this.refs.end.classList.add('hidden');
-      onRestart && onRestart();
+      handlers.onRestart && handlers.onRestart();
+    };
+    this.refs.leave.onclick = () => {
+      this.refs.end.classList.add('hidden');
+      handlers.onLeave && handlers.onLeave();
     };
   }
 
   destroy() {
-    this.el.remove();
-    this.dock.remove();
+    this.headEl.innerHTML = '';
+    this.wheel.remove();
+    this.waitEl.remove();
+    this.refs.popups.remove();
+    this.refs.end.remove();
+    for (const side of ['left', 'right']) this.teamEls[side].innerHTML = '';
   }
 }

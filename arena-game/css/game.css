@@ -1,134 +1,648 @@
 /* ============================================================
-   Демо-оболочка MMORPG + боевой UI арены.
-   Тёмная фэнтези-тема, адаптив: десктоп ⇄ телефон (Telegram).
+   Оболочка MMORPG + боевой UI арены.
+   Тема «тёмное золото»: глубокий зелёно-чёрный фон, панели с
+   золотыми рамками, медальоны-кнопки, зелёные резные кнопки
+   действий. Адаптив: десктоп ⇄ телефон (Telegram WebApp).
    ============================================================ */
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
 :root {
-  --gold: #c9a44c;
-  --gold-bright: #ffd97a;
-  --panel: #1a1310;
-  --panel-2: #241a14;
-  --border: #5a4423;
-  --text: #e8dcc3;
-  --ember: #ff9a3d;      /* акцент атаки */
-  --steel: #6fb3ff;      /* акцент блока */
+  /* палитра */
+  --bg: #0a0e07;
+  --panel-hi: #1d2513;       /* верх градиента панелей */
+  --panel-lo: #10150a;       /* низ градиента панелей */
+  --panel: #161c0f;          /* плоский фон элементов */
+  --panel-2: #1f2813;
+
+  --line: #8a6f3c;           /* золотая рамка (акценты) */
+  --line-soft: rgba(138, 111, 60, .45); /* мягкая рамка панелей */
+  --line-dim: #54451f;       /* приглушённая рамка */
+  --gold: #d8a93f;           /* основной акцент */
+  --gold-bright: #f4cd6f;    /* яркое золото (заголовки, активное) */
+  --gold-deep: #93702c;
+
+  --text: #efe3c2;
+  --muted: #a89c79;
+
+  --green-hi: #5a7a3c;       /* зелёные кнопки действий */
+  --green-md: #3c5628;
+  --green-lo: #2a3f1c;
+  --green-edge: #1c2a12;
+
+  --hp: #d6452e;             /* красная полоса HP */
+  --mp: #5d7fd6;             /* синяя полоса маны */
+  --ember: #ff9a3d;          /* акцент атаки */
+  --steel: #6fb3ff;          /* акцент блока */
+
+  /* совместимость со старыми именами */
+  --orange: var(--gold);
+  --orange-dark: var(--gold-deep);
+  --border: var(--line-dim);
+
+  --font-display: 'Philosopher', Georgia, 'Times New Roman', serif;
+
+  /* собранные тени рамок — мягкие, без жёстких контуров */
+  --frame-shadow:
+    0 10px 30px rgba(0, 0, 0, .45),
+    inset 0 1px 0 rgba(244, 205, 111, .07),
+    inset 0 0 50px rgba(0, 0, 0, .26);
+  --slot-shadow:
+    inset 0 2px 8px rgba(0, 0, 0, .65),
+    inset 0 0 0 1px rgba(0, 0, 0, .4);
 }
+
+.hidden { display: none !important; }
 
 html, body {
   height: 100%;
   overflow: hidden;
-  background: #0d0a08;
+  background-color: var(--bg);
+  background-image:
+    radial-gradient(130% 85% at 50% -15%, rgba(110, 140, 58, .26), transparent 58%),
+    radial-gradient(75% 55% at 10% 108%, rgba(170, 126, 44, .13), transparent 62%),
+    radial-gradient(75% 55% at 90% 108%, rgba(170, 126, 44, .13), transparent 62%),
+    linear-gradient(180deg, #0d120a 0%, #090d06 100%);
   color: var(--text);
-  font-family: Georgia, 'Times New Roman', serif;
+  font-family: 'Segoe UI', Tahoma, Arial, sans-serif;
   touch-action: manipulation;
   -webkit-user-select: none;
   user-select: none;
   -webkit-tap-highlight-color: transparent;
 }
 
+button { font-family: inherit; }
+
+/* тонкие золотистые скроллбары внутри панелей */
+.dock-pane, .chat-log, .dressing-items, .screen-location {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-dim) transparent;
+}
+.dock-pane::-webkit-scrollbar,
+.chat-log::-webkit-scrollbar,
+.dressing-items::-webkit-scrollbar,
+.screen-location::-webkit-scrollbar { width: 8px; }
+.dock-pane::-webkit-scrollbar-thumb,
+.chat-log::-webkit-scrollbar-thumb,
+.dressing-items::-webkit-scrollbar-thumb,
+.screen-location::-webkit-scrollbar-thumb {
+  background: var(--line-dim);
+  border-radius: 4px;
+}
+.dock-pane::-webkit-scrollbar-track,
+.chat-log::-webkit-scrollbar-track,
+.dressing-items::-webkit-scrollbar-track,
+.screen-location::-webkit-scrollbar-track { background: transparent; }
+
 .game {
   display: flex;
   flex-direction: column;
+  gap: 12px;
   height: 100dvh;
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 12px 14px;
 }
 
-/* ---------- шапка ---------- */
+/* ---------- панель персонажа (во всю ширину) + ряд навигации ---------- */
 
-.game-header {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 8px 14px;
-  background: linear-gradient(180deg, #2b2015, #1a1310);
-  border-bottom: 2px solid var(--border);
+.hud-top {
   flex: 0 0 auto;
   min-width: 0;
 }
 
-.game-logo {
-  font-weight: bold;
-  letter-spacing: 2px;
-  color: var(--gold-bright);
-  text-shadow: 0 0 12px rgba(255, 217, 122, .35);
-  white-space: nowrap;
-}
-
-.game-stats { display: flex; gap: 14px; flex: 1; min-width: 0; }
-.game-stats .stat { font-size: 14px; opacity: .9; white-space: nowrap; }
-
-.bg-picker { font-size: 13px; color: var(--gold); white-space: nowrap; }
-.bg-picker select {
-  margin-left: 6px;
-  background: var(--panel-2);
-  color: var(--text);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  padding: 3px 6px;
-  font-family: inherit;
-}
-
-/* ---------- корпус: боковые панели + арена ---------- */
-
-.game-body {
+.player-plate {
   display: flex;
-  flex: 1;
-  min-height: 0;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 10px 16px 10px 10px;
+  background:
+    radial-gradient(130% 90% at 50% 0%, rgba(216, 169, 63, .06), transparent 60%),
+    linear-gradient(180deg, var(--panel-hi), var(--panel-lo));
+  border: 1px solid var(--line-soft);
+  border-radius: 18px;
+  box-shadow:
+    0 6px 18px rgba(0, 0, 0, .4),
+    inset 0 1px 0 rgba(244, 205, 111, .09);
 }
 
-.side-panel {
-  flex: 0 0 86px;
+/* золотой медальон уровня (общий для плашки игрока и шапки боя) */
+.pp-level, .bh-level {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #5e4716;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 28%, #ffe9ab, #e3b34f 45%, #a97c25 80%, #7c5a18);
+  color: #33240a;
+  font-weight: 700;
+  text-shadow: 0 1px 0 rgba(255, 240, 190, .55);
+  box-shadow:
+    0 0 0 2px rgba(8, 10, 5, .85),
+    0 0 12px rgba(216, 169, 63, .35),
+    inset 0 -3px 5px rgba(0, 0, 0, .28);
+}
+.pp-level { width: 46px; height: 46px; font-size: 18px; }
+
+.pp-main {
+  flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 12px 8px;
-  background: linear-gradient(180deg, #221911, #15100c);
-  overflow-y: auto;
+  gap: 5px;
 }
-.left-panel  { border-right: 2px solid var(--border); }
-.right-panel { border-left: 2px solid var(--border); }
 
-.side-btn {
+.pp-name {
+  text-align: center;
+  font-family: var(--font-display);
+  font-size: 14.5px;
+  color: #f6ead0;
+  text-shadow: 0 1px 2px #000;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* полосы опыта (зелёная) и PvP-опыта (оранжевая) с цифрами поверх */
+.pp-bar {
+  position: relative;
+  height: 15px;
+  border-radius: 8px;
+  background: #0a0d06;
+  border: 1px solid rgba(0, 0, 0, .9);
+  box-shadow: inset 0 1px 3px #000, 0 0 0 1px rgba(138, 111, 60, .3);
+  overflow: hidden;
+}
+.pp-fill { height: 100%; width: 100%; border-radius: 7px; transition: width .4s ease; }
+.pp-xp .pp-fill {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, .38), rgba(255, 255, 255, 0) 45%),
+    linear-gradient(180deg, #9bd36e 0%, #5da23e 50%, #356b22 100%);
+}
+.pp-pvp .pp-fill {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, .35), rgba(255, 255, 255, 0) 45%),
+    linear-gradient(180deg, #ffc372 0%, #e08a2e 50%, #98551a 100%);
+}
+.pp-bar-text {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: .4px;
+  color: #fff7e3;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, .85);
+}
+
+/* полосы HP/MP в шапке боя (остаются красной и синей) */
+.bh-hp .bh-fill {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, .38), rgba(255, 255, 255, 0) 45%),
+    linear-gradient(180deg, #ff8d6e 0%, var(--hp) 50%, #8e1d10 100%);
+}
+.bh-mp .bh-fill {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, .35), rgba(255, 255, 255, 0) 45%),
+    linear-gradient(180deg, #9db7ff 0%, var(--mp) 50%, #2a4392 100%);
+}
+
+/* медь — бейдж справа */
+.pp-money {
+  flex: 0 0 auto;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 3px;
-  padding: 9px 4px;
-  font-size: 21px;
-  background: linear-gradient(180deg, #34261a, #221710);
-  color: var(--text);
-  border: 1px solid var(--border);
-  border-radius: 8px;
+  gap: 2px;
+  padding: 7px 14px;
+  background: rgba(244, 205, 111, .05);
+  border: 1px solid rgba(138, 111, 60, .35);
+  border-radius: 12px;
+}
+.pp-money-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: 700;
+  color: #f0d48a;
+  text-shadow: 0 1px 2px #000;
+}
+.pp-money-label {
+  font-size: 9.5px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+/* медная монетка */
+.coin {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #ffd9a0, #d28a3c 55%, #8a5219);
+  box-shadow: 0 0 5px rgba(210, 138, 60, .55), inset 0 -1px 1px rgba(0, 0, 0, .4);
+}
+
+/* ряд навигации: медальоны с подписью снизу, всегда по центру */
+
+.hud-nav {
+  flex: 0 0 auto;
+  display: flex;
+  justify-content: center;
+  gap: clamp(8px, 2.4vw, 20px);
+  min-width: 0;
+}
+
+.nav-circle {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  padding: 0;
+  background: none;
+  border: none;
   cursor: pointer;
-  font-family: inherit;
-  transition: transform .12s, box-shadow .12s;
-}
-.side-btn span { font-size: 11px; color: var(--gold); }
-.side-btn:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 0 10px rgba(201, 164, 76, .35);
 }
 
-/* ---------- модуль арены: сцена сверху, боевой док снизу ---------- */
+.nc-ring {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: clamp(46px, 6.5vw, 58px);
+  aspect-ratio: 1;
+  border-radius: 50%;
+  border: 1px solid rgba(216, 169, 63, .38);
+  background: radial-gradient(circle at 32% 26%, #313d1e 0%, #1a210f 58%, #10150a 100%);
+  color: var(--gold-bright);
+  transition: border-color .2s, box-shadow .2s, transform .15s;
+  box-shadow:
+    0 4px 12px rgba(0, 0, 0, .45),
+    inset 0 1px 1px rgba(244, 205, 111, .14),
+    inset 0 -5px 9px rgba(0, 0, 0, .45);
+}
+.nc-ring svg {
+  width: 42%;
+  height: 42%;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, .8));
+}
 
-.arena-module {
+.nc-label {
+  font-family: var(--font-display);
+  font-size: 10.5px;
+  letter-spacing: .3px;
+  color: #cdbd8d;
+  text-shadow: 0 1px 2px #000;
+  transition: color .2s;
+}
+
+.nav-circle:hover .nc-ring {
+  border-color: rgba(244, 205, 111, .85);
+  transform: translateY(-2px);
+  box-shadow:
+    0 0 18px rgba(216, 169, 63, .3),
+    0 6px 14px rgba(0, 0, 0, .45),
+    inset 0 1px 1px rgba(244, 205, 111, .18),
+    inset 0 -5px 9px rgba(0, 0, 0, .45);
+}
+.nav-circle:hover .nc-label { color: var(--gold-bright); }
+.nav-circle:active .nc-ring { transform: scale(.95); }
+
+/* ---------- середина: эликсиры | панель | правые кнопки ---------- */
+
+.game-mid {
+  flex: 1;
+  display: flex;
+  align-items: stretch;
+  gap: 14px;
+  min-height: 0;
+}
+
+/* общий вид слота (эликсиры, скиллы): тёмная ячейка с тёплой подсветкой
+   и полупрозрачной пиктограммой внутри */
+
+.belt-slot {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border: 1px solid rgba(138, 111, 60, .5);
+  border-radius: 11px;
+  background:
+    radial-gradient(circle at 50% 30%, rgba(216, 169, 63, .1), transparent 65%),
+    linear-gradient(180deg, #161c0e, #0b0f07);
+  box-shadow: var(--slot-shadow), inset 0 1px 0 rgba(244, 205, 111, .07);
+  transition: border-color .2s, box-shadow .2s;
+}
+.belt-slot svg {
+  width: 20px;
+  height: 20px;
+  color: rgba(244, 205, 111, .28);
+}
+.belt-slot:hover {
+  border-color: rgba(244, 205, 111, .6);
+  box-shadow: var(--slot-shadow), 0 0 10px rgba(216, 169, 63, .22);
+}
+
+/* пояс эликсиров — стеклянная колонка у левого края сцены боя */
+.elixir-belt {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 11;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 9px;
+  background: rgba(10, 13, 6, .62);
+  border: 1px solid rgba(138, 111, 60, .35);
+  border-radius: 16px;
+  backdrop-filter: blur(3px);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, .4), inset 0 1px 0 rgba(244, 205, 111, .07);
+}
+
+/* главная панель */
+
+.main-panel {
   position: relative;
   flex: 1;
   min-width: 0;
   min-height: 0;
   display: flex;
   flex-direction: column;
+  background:
+    radial-gradient(120% 50% at 50% 0%, rgba(216, 169, 63, .05), transparent 60%),
+    linear-gradient(180deg, var(--panel-hi) 0%, var(--panel-lo) 100%);
+  border: 1px solid var(--line-soft);
+  border-radius: 24px;
   overflow: hidden;
-  background: #11131a;
+  box-shadow: var(--frame-shadow);
 }
 
+/* ---------- экран локации ---------- */
+
+.screen { flex: 1; min-height: 0; }
+
+.screen-location {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 22px 26px;
+  overflow-y: auto;
+  animation: screen-in .35s ease;
+}
+@keyframes screen-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: none; }
+}
+
+.loc-picture {
+  position: relative;
+  flex: 0 0 auto;
+  width: 100%;
+  height: clamp(160px, 32vh, 260px);
+  border-radius: 16px;
+  border: 1px solid var(--line-soft);
+  background: #111 center / cover no-repeat;
+  overflow: hidden;
+  box-shadow: 0 10px 26px rgba(0, 0, 0, .45);
+}
+/* виньетка + затемнение под чипами и названием локации */
+.loc-picture::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(10, 12, 6, .5) 0%, transparent 30%, transparent 58%, rgba(8, 10, 5, .78) 100%);
+  pointer-events: none;
+}
+.loc-name {
+  position: absolute;
+  left: 18px;
+  bottom: 12px;
+  z-index: 2;
+  font-family: var(--font-display);
+  font-size: 21px;
+  font-weight: 700;
+  letter-spacing: .5px;
+  color: var(--gold-bright);
+  text-shadow: 0 2px 6px #000, 0 0 18px rgba(0, 0, 0, .85);
+}
+
+/* секции действий: Переходы / Действия / Жители */
+
+.loc-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.loc-group { display: flex; flex-direction: column; gap: 9px; }
+
+.loc-group-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--font-display);
+  font-size: 11px;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: #b3a574;
+  text-shadow: 0 1px 2px #000;
+}
+.loc-group-title::before,
+.loc-group-title::after { content: ''; flex: 1; height: 1px; }
+.loc-group-title::before { background: linear-gradient(90deg, transparent, rgba(138, 111, 60, .5)); }
+.loc-group-title::after  { background: linear-gradient(90deg, rgba(138, 111, 60, .5), transparent); }
+
+.loc-group-items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+/* иконка внутри кнопок локации */
+.lc-ico { display: flex; flex: 0 0 auto; transition: transform .2s; }
+.lc-ico svg { width: 16px; height: 16px; }
+
+/* единая основа всех кнопок локации: тёмные пилюли, различаются
+   только акцентом иконки (золото / зелень / медь / медальон NPC) */
+.loc-chip, .loc-btn, .npc-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  padding: 10px 19px;
+  font-family: var(--font-display);
+  font-size: 14px;
+  color: #e6dcba;
+  text-shadow: 0 1px 2px #000;
+  background: linear-gradient(180deg, #222b13, #141a0b);
+  border: 1px solid rgba(138, 111, 60, .42);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: border-color .2s, box-shadow .2s, color .2s, transform .15s;
+  box-shadow: 0 3px 9px rgba(0, 0, 0, .35), inset 0 1px 0 rgba(244, 205, 111, .08);
+}
+.loc-chip:hover, .loc-btn:hover, .npc-chip:hover {
+  color: var(--gold-bright);
+  border-color: rgba(244, 205, 111, .75);
+  box-shadow: 0 0 13px rgba(216, 169, 63, .22), 0 3px 9px rgba(0, 0, 0, .35);
+  transform: translateY(-1px);
+}
+.loc-chip:active, .loc-btn:active, .npc-chip:active { transform: translateY(0) scale(.97); }
+
+/* акценты: стрелка перехода — золото, действие — зелень, охота — медь */
+.loc-chip .lc-ico { color: var(--gold-bright); }
+.loc-chip:hover .lc-ico { transform: translateX(3px); }
+.loc-btn .lc-ico { color: #b9d48d; }
+.loc-btn.hunt .lc-ico { color: #ffb077; }
+.loc-btn.hunt:hover {
+  border-color: rgba(255, 176, 119, .6);
+  box-shadow: 0 0 13px rgba(255, 154, 61, .22), 0 3px 9px rgba(0, 0, 0, .35);
+}
+
+/* жители — медальон-инициал слева */
+.npc-chip { padding-left: 8px; }
+.npc-ava {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  font-size: 13px;
+  font-weight: 700;
+  color: #33240a;
+  text-shadow: 0 1px 0 rgba(255, 240, 190, .55);
+  background: radial-gradient(circle at 35% 28%, #ffe9ab, #e3b34f 45%, #a97c25 80%, #7c5a18);
+  border: 1px solid #5e4716;
+  box-shadow: inset 0 -2px 4px rgba(0, 0, 0, .25);
+}
+
+/* ---------- экран боя ---------- */
+
+.screen-battle {
+  display: flex;
+  flex-direction: column;
+  animation: screen-in .35s ease;
+}
+
+/* верх: плашки бойцов + урон + таймер */
+
+.battle-head {
+  flex: 0 0 auto;
+  padding: 14px 18px 6px;
+}
+
+.bh-plates {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 14px;
+}
+
+.bh-plate {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex: 1;
+  max-width: 300px;
+  min-width: 0;
+}
+.bh-plate.bh-right { flex-direction: row-reverse; }
+
+.bh-level { width: 36px; height: 36px; font-size: 14px; }
+
+.bh-info { flex: 1; min-width: 0; }
+
+.bh-name {
+  text-align: center;
+  font-family: var(--font-display);
+  font-size: 13px;
+  color: #f6ead0;
+  text-shadow: 0 1px 2px #000;
+  margin-bottom: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.bh-bar {
+  position: relative;
+  height: 13px;
+  border-radius: 7px;
+  background: #0a0d06;
+  border: 1px solid rgba(0, 0, 0, .9);
+  box-shadow: inset 0 1px 3px #000, 0 0 0 1px rgba(138, 111, 60, .35);
+  overflow: hidden;
+  margin-bottom: 3px;
+}
+.bh-fill { height: 100%; width: 100%; border-radius: 6px; transition: width .45s ease; }
+.bh-hp .bh-fill.low {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, .3), rgba(255, 255, 255, 0) 45%),
+    linear-gradient(180deg, #ff6a55 0%, #d6291a 50%, #7c0f08 100%);
+}
+.bh-text {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9.5px;
+  font-weight: 600;
+  color: #fff4e0;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, .85);
+}
+
+.bh-damage {
+  margin-top: 8px;
+  text-align: center;
+  font-size: 13px;
+  color: #e9c97e;
+}
+
+.bh-timer {
+  margin-top: 4px;
+  text-align: center;
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--gold-bright);
+  text-shadow: 0 0 10px rgba(216, 169, 63, .35);
+}
+.bh-timer.urgent { color: #ff5544; text-shadow: 0 0 10px rgba(255, 70, 50, .45); animation: pulse .5s infinite alternate; }
+@keyframes pulse { to { opacity: .45; } }
+
 /* 3D-сцена; фон арены назначается на этот элемент (Arena.setBackground) */
+
 .arena-stage {
   position: relative;
   flex: 1;
   min-height: 0;
   overflow: hidden;
+}
+
+/* виньетка по краям сцены: яркий фон арены мягко перетекает в панель */
+.arena-stage::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  pointer-events: none;
+  background:
+    linear-gradient(180deg, rgba(20, 26, 12, .55), transparent 14%),
+    linear-gradient(0deg, rgba(16, 21, 10, .6), transparent 16%);
+  box-shadow: inset 0 0 80px 18px rgba(10, 14, 7, .55);
 }
 
 .arena-canvas {
@@ -148,324 +662,174 @@ html, body {
   align-items: center;
   justify-content: center;
   gap: 14px;
-  background: rgba(10, 8, 6, .72);
+  background: rgba(8, 10, 5, .74);
+  font-family: var(--font-display);
   font-size: 16px;
   color: var(--gold-bright);
+  text-shadow: 0 1px 3px #000;
 }
-.arena-loading.hidden { display: none; }
 
 .arena-loading-spinner {
   width: 42px; height: 42px;
-  border: 3px solid rgba(201, 164, 76, .25);
-  border-top-color: var(--gold-bright);
+  border: 3px solid rgba(216, 169, 63, .25);
+  border-top-color: var(--gold);
   border-radius: 50%;
   animation: spin 1s linear infinite;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-/* ============================================================
-   Боевой UI (BattleUI)
-   ============================================================ */
+/* слоты скиллов под сценой — компактная стеклянная плашка по центру */
 
-/* прозрачный оверлей поверх модуля: панели HP, цифры урона, финал */
-.bui { position: absolute; inset: 0; pointer-events: none; z-index: 10; }
-.bui button { pointer-events: auto; font-family: inherit; }
-
-/* --- верх: имена, HP, таймер --- */
-
-.bui-top {
-  position: absolute;
-  top: 8px; left: 8px; right: 8px;
-  display: flex;
-  align-items: stretch;
-  gap: 8px;
-}
-
-.bui-plate {
-  flex: 1;
-  max-width: 330px;
-  min-width: 0;
-  padding: 7px 11px;
-  background: linear-gradient(180deg, rgba(40, 29, 17, .93), rgba(21, 14, 9, .93));
-  border: 1px solid #6b5226;
-  border-radius: 10px;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 224, 160, .14),
-    inset 0 0 0 1px rgba(0, 0, 0, .45),
-    0 3px 12px rgba(0, 0, 0, .55);
-}
-.bui-right { margin-left: auto; }
-
-.bui-name {
-  font-size: 13px;
-  letter-spacing: .5px;
-  color: var(--gold-bright);
-  margin-bottom: 5px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.bui-right .bui-name { text-align: right; }
-
-.bui-bar {
-  position: relative;
-  height: 16px;
-  background: #140909;
-  border: 1px solid #000;
-  border-radius: 8px;
-  overflow: hidden;
-  box-shadow: inset 0 2px 4px rgba(0, 0, 0, .7);
-}
-.bui-fill {
-  height: 100%;
-  width: 100%;
-  background: linear-gradient(180deg, #e25864 0%, #a31b29 55%, #7a0f1c 100%);
-  border-radius: 7px;
-  transition: width .45s ease;
-}
-.bui-fill.low { background: linear-gradient(180deg, #ff8a5c, #c62828 60%, #8e1414); }
-/* стеклянный блик поверх полосы */
-.bui-bar::after {
-  content: '';
-  position: absolute;
-  inset: 0 0 55% 0;
-  background: linear-gradient(180deg, rgba(255, 255, 255, .22), rgba(255, 255, 255, .03));
-  border-radius: 7px 7px 0 0;
-  pointer-events: none;
-  z-index: 1;
-}
-.bui-bar-text {
-  position: absolute;
-  inset: 0;
-  z-index: 2;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 11px;
-  color: #fff;
-  text-shadow: 0 1px 2px #000;
-}
-
-.bui-vs {
-  flex: 0 0 auto;
-  align-self: flex-start;
-  margin: 0 auto;
-  text-align: center;
-  padding: 5px 14px;
-  background: linear-gradient(180deg, rgba(40, 29, 17, .93), rgba(21, 14, 9, .93));
-  border: 1px solid #6b5226;
-  border-radius: 10px;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 224, 160, .14),
-    0 3px 12px rgba(0, 0, 0, .55);
-}
-.bui-turn { font-size: 11px; color: var(--gold); }
-.bui-timer {
-  font-size: 19px;
-  font-weight: bold;
-  color: #fff;
-  text-shadow: 0 0 8px rgba(255, 217, 122, .4);
-}
-.bui-timer.urgent { color: #ff5544; animation: pulse .5s infinite alternate; }
-@keyframes pulse { to { opacity: .45; } }
-
-/* ============================================================
-   Боевой док: журнал + управление. В потоке ПОД канвасом —
-   ничего не перекрывает и не перекрывается сам.
-   ============================================================ */
-
-.bui-dock {
-  position: relative;
-  z-index: 5;
+.skill-bar {
   flex: 0 0 auto;
   display: flex;
-  align-items: stretch;
-  gap: 14px;
-  padding: 10px 14px 12px;
-  background:
-    radial-gradient(140% 180% at 50% -60%, rgba(201, 164, 76, .12), transparent 55%),
-    linear-gradient(180deg, #281c10 0%, #1a120b 60%, #140d07 100%);
-  border-top: 1px solid #6b5226;
-  box-shadow: 0 -8px 22px rgba(0, 0, 0, .5), inset 0 1px 0 rgba(255, 224, 160, .14);
+  justify-content: center;
+  padding: 10px 18px 14px;
 }
-/* золотая кромка, угасающая к краям */
-.bui-dock::before {
-  content: '';
+.skill-plate {
+  display: flex;
+  gap: 7px;
+  padding: 8px 10px;
+  background: rgba(10, 13, 6, .62);
+  border: 1px solid rgba(138, 111, 60, .35);
+  border-radius: 16px;
+  backdrop-filter: blur(3px);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, .4), inset 0 1px 0 rgba(244, 205, 111, .07);
+}
+
+/* ---------- штурвал атаки/блока (по центру сцены) ---------- */
+
+.strike-wheel {
   position: absolute;
-  top: -1px; left: 0; right: 0;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(255, 217, 122, .75) 18% 82%, transparent);
-  pointer-events: none;
-}
-
-/* --- журнал боя: вся история, прокрутка --- */
-
-.bui-log {
-  flex: 1 1 320px;
-  min-width: 0;
-  max-width: 440px;
-  max-height: 134px;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  padding: 7px 12px;
-  background: rgba(10, 7, 4, .6);
-  border: 1px solid rgba(122, 94, 49, .55);
-  border-radius: 10px;
-  box-shadow: inset 0 2px 8px rgba(0, 0, 0, .5);
-  font-size: 13px;
-  line-height: 1.5;
-  scrollbar-width: thin;
-  scrollbar-color: #5a4423 transparent;
-}
-.bui-log::-webkit-scrollbar { width: 6px; }
-.bui-log::-webkit-scrollbar-thumb { background: #5a4423; border-radius: 3px; }
-
-.bui-log-entry { margin: 1px 0; color: #cfc1a2; }
-.bui-log-entry b { color: var(--gold-bright); font-weight: 600; }
-.bui-log-entry .crit { color: #ff8a50; font-weight: bold; }
-
-.bui-log-turn {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 5px 0 2px;
-  color: rgba(201, 164, 76, .8);
-  font-size: 10px;
-  letter-spacing: 2.5px;
-  text-transform: uppercase;
-}
-.bui-log-turn::before,
-.bui-log-turn::after { content: ''; flex: 1; height: 1px; }
-.bui-log-turn::before { background: linear-gradient(90deg, transparent, rgba(122, 94, 49, .7)); }
-.bui-log-turn::after  { background: linear-gradient(90deg, rgba(122, 94, 49, .7), transparent); }
-
-/* --- управление: удар / блок --- */
-
-.bui-controls {
-  position: relative;
-  flex: 1 1 auto;
-  display: flex;
-  align-items: stretch;
-  justify-content: center;
-  gap: 16px;
-}
-
-.bui-group { display: flex; flex-direction: column; gap: 7px; min-width: 0; }
-.bui-group-title {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  font-size: 12px;
-  letter-spacing: 3px;
-  text-transform: uppercase;
-  color: var(--gold);
-  text-shadow: 0 1px 2px #000;
-}
-.bui-group-title svg { width: 13px; height: 13px; flex: 0 0 auto; }
-.bui-zone-row { display: flex; gap: 9px; flex: 1; }
-
-/* кнопка зоны: кованая пластина с пиктограммой */
-.bz {
-  flex: 1;
+  left: 50%;
+  top: 44%;
+  transform: translate(-50%, -50%);
+  z-index: 12;
   display: flex;
   flex-direction: column;
+  gap: 7px;
+  padding: 12px 14px 9px;
+  background: rgba(10, 13, 6, .78);
+  border: 1px solid rgba(216, 169, 63, .45);
+  border-radius: 22px;
+  backdrop-filter: blur(3px);
+  box-shadow:
+    0 10px 30px rgba(0, 0, 0, .55),
+    inset 0 1px 0 rgba(244, 205, 111, .1);
+  transition: opacity .25s ease, transform .25s ease;
+}
+/* штурвал скрыт на время удара / ожидания противника */
+.strike-wheel.off {
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, -50%) scale(.92);
+}
+
+/* пилюля «ход противника» — видна, пока штурвал скрыт */
+.bui-wait {
+  position: absolute;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  z-index: 12;
+  padding: 8px 18px;
+  font-family: var(--font-display);
+  font-size: 13px;
+  color: var(--gold-bright);
+  text-shadow: 0 1px 2px #000;
+  background: rgba(10, 13, 6, .78);
+  border: 1px solid rgba(216, 169, 63, .4);
+  border-radius: 999px;
+  backdrop-filter: blur(3px);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, .45);
+  animation: statpulse 1.1s infinite alternate;
+  pointer-events: none;
+}
+
+.sw-row { display: flex; align-items: center; gap: 8px; }
+.sw-tag { display: flex; filter: drop-shadow(0 1px 2px #000); }
+.sw-tag svg { width: 17px; height: 17px; }
+.sw-attack .sw-tag { color: var(--ember); }
+.sw-block .sw-tag { color: var(--steel); }
+.sw-btns { display: flex; gap: 7px; }
+
+.swb {
+  width: 42px;
+  height: 42px;
+  display: flex;
   align-items: center;
   justify-content: center;
-  gap: 4px;
-  width: 86px;
-  padding: 8px 6px 7px;
-  background: linear-gradient(168deg, #3b2c1c 0%, #261a10 55%, #1c1209 100%);
-  border: 1px solid #6b5226;
-  border-radius: 11px;
-  color: #d9c9a6;
+  background: linear-gradient(180deg, #161c0e, #0d1108);
+  border: 1px solid #4c3f1e;
+  border-radius: 12px;
+  color: #cfc39b;
   cursor: pointer;
-  font-family: inherit;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 224, 160, .16),
-    inset 0 -9px 14px rgba(0, 0, 0, .38),
-    0 2px 6px rgba(0, 0, 0, .45);
-  transition: transform .09s, box-shadow .16s, border-color .16s, color .16s, background .16s;
+  transition: transform .09s, box-shadow .15s, border-color .15s, color .15s, background .15s;
+  box-shadow: inset 0 1px 0 rgba(244, 205, 111, .08), 0 2px 6px rgba(0, 0, 0, .45);
 }
-.bz:active:not(:disabled) { transform: translateY(1px) scale(.97); }
-.bz:disabled { cursor: default; }
-.bz-ico svg { width: 26px; height: 26px; display: block; }
-/* тёплые пиктограммы у атаки, холодные у блока — группы различимы сразу */
-.bz-attack .bz-ico { color: #ffac72; }
-.bz-block .bz-ico { color: #9fc3f0; }
-.bz-label { font-size: 10.5px; letter-spacing: 1.6px; text-transform: uppercase; }
+.swb svg { width: 24px; height: 24px; display: block; }
+.swb:active:not(:disabled) { transform: scale(.94); }
+.swb:disabled { cursor: default; }
+.sw-attack .swb { color: #ffb077; }
+.sw-block .swb { color: #9fc3f0; }
 
-.bz-attack:hover:not(:disabled) {
+.sw-attack .swb:hover:not(:disabled) {
   border-color: var(--ember);
-  color: #ffd9b0;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 224, 160, .2),
-    inset 0 -9px 14px rgba(0, 0, 0, .38),
-    0 0 14px rgba(255, 130, 50, .4);
+  box-shadow: 0 0 11px rgba(255, 130, 50, .45);
 }
-.bz-attack.chosen {
-  background: linear-gradient(168deg, #842c18 0%, #571a0f 55%, #43120b 100%);
-  border-color: #ff9358;
+.sw-attack .swb.chosen {
+  background: linear-gradient(180deg, #6e2c12, #481a08);
+  border-color: var(--ember);
   color: #fff;
-  box-shadow: inset 0 1px 0 rgba(255, 210, 170, .3), 0 0 16px rgba(255, 110, 50, .55);
+  box-shadow: 0 0 13px rgba(255, 110, 50, .55);
 }
 
-.bz-block:hover:not(:disabled) {
-  border-color: #5f8fc4;
-  color: #d6e7ff;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 224, 160, .2),
-    inset 0 -9px 14px rgba(0, 0, 0, .38),
-    0 0 14px rgba(90, 150, 255, .35);
+.sw-block .swb:hover:not(:disabled) {
+  border-color: var(--steel);
+  box-shadow: 0 0 11px rgba(90, 150, 255, .4);
 }
-.bz-block.active {
-  background: linear-gradient(168deg, #1f3f66 0%, #142a47 55%, #0e1f36 100%);
+.sw-block .swb.active {
+  background: linear-gradient(180deg, #1a3d68, #102844);
   border-color: var(--steel);
   color: #e3f0ff;
-  box-shadow: inset 0 1px 0 rgba(190, 220, 255, .28), 0 0 15px rgba(90, 160, 255, .5);
+  box-shadow: 0 0 12px rgba(90, 160, 255, .5);
 }
 
-/* разделитель групп */
-.bui-sep {
-  flex: 0 0 1px;
-  position: relative;
-  margin: 4px 2px;
-  background: linear-gradient(180deg, transparent, rgba(201, 164, 76, .55) 30% 70%, transparent);
+/* пропуск хода: удара нет, выбранный блок остаётся защищать */
+.sw-skip {
+  margin-top: 2px;
+  padding: 7px 12px;
+  font-family: var(--font-display);
+  font-size: 12px;
+  color: #cdbd8d;
+  text-shadow: 0 1px 2px #000;
+  background: rgba(255, 255, 255, .03);
+  border: 1px solid rgba(138, 111, 60, .4);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: color .15s, border-color .15s, box-shadow .15s;
 }
-.bui-sep::after {
-  content: '◆';
-  position: absolute;
-  top: 50%; left: 50%;
-  transform: translate(-50%, -50%);
-  font-size: 8px;
-  color: var(--gold);
-  text-shadow: 0 0 7px rgba(201, 164, 76, .9);
-}
-
-/* статус-вуаль на время хода противника / обмена ударами */
-.bui-status {
-  position: absolute;
-  inset: -3px;
-  display: none;
-  align-items: center;
-  justify-content: center;
-  background: rgba(14, 9, 5, .55);
-  backdrop-filter: blur(1.5px);
-  border-radius: 12px;
-  font-size: 15px;
-  letter-spacing: 1px;
+.sw-skip:hover:not(:disabled) {
   color: var(--gold-bright);
-  text-shadow: 0 1px 3px #000;
-  z-index: 2;
-  animation: statpulse 1.1s infinite alternate;
+  border-color: rgba(244, 205, 111, .7);
+  box-shadow: 0 0 9px rgba(216, 169, 63, .2);
 }
-@keyframes statpulse { to { opacity: .72; } }
-.bui-controls.waiting .bui-status { display: flex; }
-.bui-controls.waiting .bz { filter: saturate(.45) brightness(.8); }
+.sw-skip:disabled { opacity: .5; cursor: default; }
 
-/* --- всплывающий урон --- */
+.sw-status {
+  min-height: 15px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--gold-bright);
+  text-shadow: 0 1px 2px #000;
+}
+.strike-wheel.waiting .swb { filter: saturate(.4) brightness(.65); }
+.strike-wheel.waiting .sw-status { animation: statpulse 1.1s infinite alternate; }
+@keyframes statpulse { to { opacity: .55; } }
 
-.bui-popups { position: absolute; inset: 0; overflow: hidden; }
+/* ---------- всплывающий урон ---------- */
+
+.bui-popups { position: absolute; inset: 0; overflow: hidden; pointer-events: none; z-index: 15; }
 
 .bui-popup {
   position: absolute;
@@ -487,7 +851,7 @@ html, body {
   100% { opacity: 0; margin-top: -84px; transform: translate(-50%, -50%) scale(1); }
 }
 
-/* --- конец боя --- */
+/* ---------- конец боя ---------- */
 
 .bui-end {
   position: absolute;
@@ -495,39 +859,276 @@ html, body {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(8, 5, 3, .68);
-  pointer-events: auto;
+  background: rgba(5, 7, 3, .72);
   z-index: 20;
 }
-.bui-end.hidden { display: none; }
 
 .bui-end-card {
   text-align: center;
-  padding: 34px 54px;
-  background: linear-gradient(180deg, #2b2015, #17100b);
-  border: 2px solid var(--gold);
-  border-radius: 14px;
-  box-shadow: 0 0 44px rgba(201, 164, 76, .35);
+  padding: 30px 46px;
+  background: linear-gradient(180deg, var(--panel-hi), var(--panel-lo));
+  border: 1px solid var(--line-soft);
+  border-radius: 22px;
+  box-shadow:
+    0 0 60px rgba(0, 0, 0, .8),
+    0 0 30px rgba(216, 169, 63, .14),
+    inset 0 1px 0 rgba(244, 205, 111, .1);
 }
 .bui-end-title {
-  font-size: 34px;
+  font-family: var(--font-display);
+  font-size: 30px;
+  font-weight: 700;
   color: var(--gold-bright);
-  text-shadow: 0 0 18px rgba(255, 217, 122, .5);
+  text-shadow: 0 0 18px rgba(216, 169, 63, .5), 0 2px 4px #000;
   margin-bottom: 20px;
 }
-.bui-end-title.defeat { color: #b9b9c9; text-shadow: none; }
+.bui-end-title.defeat { color: #b9b3a0; text-shadow: 0 2px 4px #000; }
 
-.bui-restart {
-  padding: 11px 30px;
-  font-size: 16px;
-  font-family: inherit;
-  background: linear-gradient(180deg, #a8252c, #5e0e14);
-  color: #fff;
-  border: 2px solid var(--gold);
-  border-radius: 8px;
+.bui-end-actions { display: flex; gap: 12px; justify-content: center; }
+
+.bui-end-btn {
+  padding: 11px 24px;
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: 700;
+  background: linear-gradient(180deg, #f1c469 0%, #cf9a35 55%, #9c6f1f 100%);
+  color: #2c1f08;
+  text-shadow: 0 1px 0 rgba(255, 240, 190, .5);
+  border: 1px solid #6e5426;
+  border-radius: 12px;
   cursor: pointer;
+  transition: box-shadow .15s, transform .12s, filter .15s;
+  box-shadow: inset 0 1px 0 rgba(255, 240, 190, .6), 0 4px 10px rgba(0, 0, 0, .5);
 }
-.bui-restart:hover { box-shadow: 0 0 14px rgba(255, 217, 122, .5); }
+.bui-end-btn.secondary {
+  background: linear-gradient(180deg, var(--panel-2), var(--panel-lo));
+  color: var(--text);
+  text-shadow: 0 1px 2px #000;
+  border-color: var(--line-dim);
+  box-shadow: inset 0 1px 0 rgba(244, 205, 111, .1), 0 4px 10px rgba(0, 0, 0, .5);
+}
+.bui-end-btn:hover { box-shadow: 0 0 14px rgba(216, 169, 63, .5), 0 4px 10px rgba(0, 0, 0, .5); transform: translateY(-1px); }
+.bui-end-btn:active { transform: translateY(0) scale(.98); }
+
+/* ---------- нижняя панель с вкладками ---------- */
+
+.bottom-dock {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  height: clamp(190px, 28vh, 260px);
+  padding: 0 8px;
+}
+
+.dock-tabs {
+  display: flex;
+  gap: 6px;
+  padding: 0 16px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  position: relative;
+  z-index: 1;
+}
+.dock-tabs::-webkit-scrollbar { display: none; }
+
+.dock-tab {
+  flex: 0 0 auto;
+  padding: 9px 18px;
+  font-family: var(--font-display);
+  font-size: 13.5px;
+  color: #cdbd8d;
+  text-shadow: 0 1px 2px #000;
+  background: linear-gradient(180deg, #242c14, #161c0d);
+  border: 1px solid #5b4a23;
+  border-bottom: none;
+  border-radius: 10px 10px 0 0;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color .12s, background .15s;
+  box-shadow: inset 0 1px 0 rgba(244, 205, 111, .08);
+  margin-bottom: -1px;
+}
+.dock-tab:hover { color: var(--gold-bright); }
+.dock-tab.active {
+  background: linear-gradient(180deg, #f1c469 0%, #cf9a35 55%, #9c6f1f 100%);
+  color: #2c1f08;
+  font-weight: 700;
+  text-shadow: 0 1px 0 rgba(255, 240, 190, .5);
+  border-color: #6e5426;
+  box-shadow: 0 -2px 14px rgba(216, 169, 63, .22), inset 0 1px 0 rgba(255, 240, 190, .6);
+}
+
+.dock-body {
+  flex: 1;
+  min-height: 0;
+  padding: 14px 20px;
+  background:
+    radial-gradient(120% 60% at 50% 0%, rgba(216, 169, 63, .04), transparent 60%),
+    linear-gradient(180deg, var(--panel-hi) 0%, var(--panel-lo) 100%);
+  border: 1px solid var(--line-soft);
+  border-radius: 18px;
+  overflow: hidden;
+  box-shadow: var(--frame-shadow);
+}
+
+.dock-pane { display: none; height: 100%; overflow-y: auto; scrollbar-width: thin; }
+.dock-pane.active { display: block; animation: screen-in .25s ease; }
+#pane-chat.active { display: flex; flex-direction: column; overflow: hidden; }
+
+/* участники боя */
+
+.members-grid {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  gap: 10px;
+  text-align: center;
+}
+.team-title {
+  font-family: var(--font-display);
+  font-size: 14px;
+  color: var(--gold-bright);
+  text-shadow: 0 1px 2px #000;
+  margin-bottom: 12px;
+}
+.member { font-size: 13.5px; margin: 5px 0; }
+.member .m-lvl { color: #b89a55; font-size: 12px; }
+.member.dead { opacity: .5; text-decoration: line-through; }
+.members-grid.hide-dead .member.dead { display: none; }
+.members-center { padding-top: 2px; }
+
+.ghost-btn {
+  padding: 7px 14px;
+  font-size: 12px;
+  background: transparent;
+  border: 1px solid #6d572b;
+  border-radius: 10px;
+  color: #cdbd8d;
+  cursor: pointer;
+  transition: border-color .15s, color .15s;
+}
+.ghost-btn:hover { border-color: var(--gold); color: var(--gold-bright); }
+
+/* лог боя */
+
+.battle-log {
+  font-size: 13px;
+  line-height: 1.55;
+}
+.bui-log-entry { margin: 1px 0; color: #d8cfae; }
+.bui-log-entry b { color: var(--gold-bright); font-weight: 600; }
+.bui-log-entry .crit { color: #ff8a50; font-weight: bold; }
+
+.bui-log-turn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 0 2px;
+  color: #8d8366;
+  font-size: 10px;
+  letter-spacing: 2.5px;
+  text-transform: uppercase;
+}
+.bui-log-turn::before,
+.bui-log-turn::after { content: ''; flex: 1; height: 1px; }
+.bui-log-turn::before { background: linear-gradient(90deg, transparent, rgba(138, 111, 60, .55)); }
+.bui-log-turn::after  { background: linear-gradient(90deg, rgba(138, 111, 60, .55), transparent); }
+
+/* чат */
+
+.chat-tabs { display: flex; gap: 8px; margin-bottom: 10px; flex: 0 0 auto; }
+.chat-tab {
+  padding: 6px 16px;
+  font-family: var(--font-display);
+  font-size: 12.5px;
+  background: linear-gradient(180deg, #1d2511, #12170a);
+  border: 1px solid var(--line-dim);
+  border-radius: 8px;
+  color: #cdbd8d;
+  cursor: pointer;
+  transition: color .12s, border-color .15s;
+}
+.chat-tab:hover { color: var(--gold-bright); }
+.chat-tab.active {
+  background: linear-gradient(180deg, #2c3617, #1a210e);
+  border-color: #a9853f;
+  color: var(--gold-bright);
+  box-shadow: 0 0 8px rgba(216, 169, 63, .18);
+}
+
+.chat-log {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  font-size: 13px;
+  line-height: 1.6;
+  padding-right: 6px;
+}
+.chat-line { margin: 2px 0; color: #dcd2b2; }
+.chat-line b { color: var(--gold-bright); font-weight: 600; }
+.chat-line.system { color: #b6cf8e; font-style: italic; }
+.chat-line.system b { color: #9fd06a; }
+
+.chat-input-row { display: flex; gap: 8px; margin-top: 10px; flex: 0 0 auto; }
+.chat-input {
+  flex: 1;
+  min-width: 0;
+  padding: 9px 14px;
+  font-family: inherit;
+  font-size: 13px;
+  color: var(--text);
+  background: #0c1007;
+  border: 1px solid var(--line-dim);
+  border-radius: 10px;
+  outline: none;
+  box-shadow: inset 0 2px 6px rgba(0, 0, 0, .6);
+  -webkit-user-select: text;
+  user-select: text;
+  transition: border-color .15s, box-shadow .15s;
+}
+.chat-input::placeholder { color: #7a7257; }
+.chat-input:focus {
+  border-color: #a9853f;
+  box-shadow: inset 0 2px 6px rgba(0, 0, 0, .6), 0 0 8px rgba(216, 169, 63, .25);
+}
+.chat-send {
+  padding: 9px 18px;
+  font-family: var(--font-display);
+  font-size: 13px;
+  color: #eef3d8;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, .85);
+  background: linear-gradient(180deg, var(--green-hi), var(--green-md) 50%, var(--green-lo));
+  border: 1px solid var(--green-edge);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: filter .15s, box-shadow .15s;
+  box-shadow: 0 0 0 1px rgba(138, 111, 60, .5), inset 0 1px 0 rgba(255, 255, 255, .2);
+}
+.chat-send:hover { filter: brightness(1.15); box-shadow: 0 0 0 1px rgba(216, 169, 63, .7), 0 0 10px rgba(216, 169, 63, .25), inset 0 1px 0 rgba(255, 255, 255, .22); }
+.chat-send:active { filter: brightness(.95); }
+
+/* список игроков */
+
+.players-list { font-size: 13.5px; }
+.players-list .player-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 12px;
+  margin: 4px 0;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, .025);
+  border: 1px solid rgba(138, 111, 60, .18);
+}
+.players-list .player-row::before {
+  content: '';
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #7fb069;
+  box-shadow: 0 0 6px rgba(127, 176, 105, .7);
+}
+.players-list .player-row .m-lvl { color: #b89a55; font-size: 12px; }
 
 /* ---------- гардероб (примерочная) ---------- */
 
@@ -538,20 +1139,19 @@ html, body {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(8, 5, 3, .7);
+  background: rgba(5, 7, 3, .74);
   backdrop-filter: blur(2px);
 }
-.dressing.hidden { display: none; }
 
 .dressing-card {
   width: min(880px, calc(100vw - 32px));
   height: min(620px, calc(100dvh - 48px));
   display: flex;
   flex-direction: column;
-  background: linear-gradient(180deg, #2b2015, #17100b);
-  border: 2px solid var(--gold);
-  border-radius: 14px;
-  box-shadow: 0 12px 50px rgba(0, 0, 0, .8);
+  background: linear-gradient(180deg, var(--panel-hi), var(--panel-lo));
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  box-shadow: 0 12px 50px rgba(0, 0, 0, .8), inset 0 1px 0 rgba(244, 205, 111, .09);
   overflow: hidden;
 }
 
@@ -560,37 +1160,48 @@ html, body {
   align-items: center;
   gap: 14px;
   padding: 10px 16px;
-  border-bottom: 1px solid var(--border);
-  background: rgba(0, 0, 0, .25);
+  border-bottom: 1px solid rgba(138, 111, 60, .4);
+  background: rgba(244, 205, 111, .04);
 }
-.dressing-title { font-size: 16px; color: var(--gold-bright); white-space: nowrap; }
+.dressing-title {
+  font-family: var(--font-display);
+  font-size: 16px;
+  color: var(--gold-bright);
+  text-shadow: 0 1px 2px #000;
+  white-space: nowrap;
+}
 
 .dressing-tabs { display: flex; gap: 6px; flex: 1; }
 .dressing-tab {
   padding: 6px 16px;
+  font-family: var(--font-display);
   font-size: 13px;
-  font-family: inherit;
-  background: linear-gradient(180deg, #34261a, #221710);
-  color: var(--text);
-  border: 1px solid var(--border);
+  background: linear-gradient(180deg, #1d2511, #12170a);
+  color: #cdbd8d;
+  border: 1px solid var(--line-dim);
   border-radius: 16px;
   cursor: pointer;
+  transition: color .12s, border-color .15s;
 }
+.dressing-tab:hover { color: var(--gold-bright); }
 .dressing-tab.active {
-  background: linear-gradient(180deg, #7a5a1f, #4d3812);
-  border-color: var(--gold);
-  color: #fff;
+  background: linear-gradient(180deg, #f1c469, #cf9a35 55%, #9c6f1f);
+  border-color: #6e5426;
+  color: #2c1f08;
+  font-weight: 700;
+  text-shadow: 0 1px 0 rgba(255, 240, 190, .5);
 }
 
 .dressing-close {
   background: none;
   border: none;
-  color: var(--gold);
+  color: var(--text);
   font-size: 18px;
   cursor: pointer;
   padding: 2px 6px;
+  transition: color .12s;
 }
-.dressing-close:hover { color: #fff; }
+.dressing-close:hover { color: var(--gold-bright); }
 
 .dressing-body {
   flex: 1;
@@ -603,8 +1214,8 @@ html, body {
   flex: 1;
   min-width: 0;
   background:
-    radial-gradient(ellipse at 50% 78%, rgba(201, 164, 76, .14), transparent 55%),
-    linear-gradient(180deg, #181018 0%, #241722 55%, #181018 100%);
+    radial-gradient(ellipse at 50% 78%, rgba(216, 169, 63, .14), transparent 55%),
+    linear-gradient(180deg, #0f140a 0%, #171e10 55%, #0f140a 100%);
   cursor: grab;
 }
 .dressing-view:active { cursor: grabbing; }
@@ -622,7 +1233,7 @@ html, body {
   left: 50%;
   transform: translateX(-50%);
   font-size: 12px;
-  color: rgba(232, 220, 195, .55);
+  color: rgba(239, 227, 194, .5);
   pointer-events: none;
   z-index: 2;
 }
@@ -631,14 +1242,14 @@ html, body {
   flex: 0 0 300px;
   padding: 12px;
   overflow-y: auto;
-  border-left: 1px solid var(--border);
+  border-left: 1px solid rgba(138, 111, 60, .4);
 }
 
 .inv-item {
   padding: 10px;
-  background: rgba(255, 255, 255, .03);
-  border: 1px solid var(--border);
-  border-radius: 8px;
+  background: rgba(244, 205, 111, .04);
+  border: 1px solid var(--line-dim);
+  border-radius: 10px;
   margin-bottom: 8px;
 }
 .inv-item-head {
@@ -656,15 +1267,14 @@ html, body {
   flex: 1;
   padding: 6px 8px;
   font-size: 12px;
-  font-family: inherit;
-  background: linear-gradient(180deg, #3a2a1b, #241810);
+  background: linear-gradient(180deg, #1d2511, #12170a);
   color: var(--text);
-  border: 1px solid var(--border);
-  border-radius: 6px;
+  border: 1px solid var(--line-dim);
+  border-radius: 7px;
   cursor: pointer;
   transition: all .12s;
 }
-.inv-btn:hover:not(:disabled) { border-color: var(--gold); }
+.inv-btn:hover:not(:disabled) { border-color: var(--gold); color: var(--gold-bright); }
 .inv-btn.equipped {
   background: linear-gradient(180deg, #1f4d2a, #123018);
   border-color: #66bb6a;
@@ -683,24 +1293,25 @@ html, body {
   justify-content: center;
   padding: 20px;
   background:
-    radial-gradient(90% 70% at 50% 30%, rgba(201, 164, 76, .08), transparent 60%),
-    #0d0a08;
+    radial-gradient(90% 70% at 50% 30%, rgba(216, 169, 63, .08), transparent 60%),
+    #0a0e07;
 }
 
 .fh-card {
   max-width: 520px;
   padding: 28px 30px;
-  background: linear-gradient(180deg, #2b2015, #17100b);
-  border: 2px solid var(--gold);
-  border-radius: 14px;
-  box-shadow: 0 0 44px rgba(201, 164, 76, .25);
+  background: linear-gradient(180deg, var(--panel-hi), var(--panel-lo));
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  box-shadow: 0 0 44px rgba(0, 0, 0, .7), inset 0 1px 0 rgba(244, 205, 111, .09);
   text-align: center;
 }
 .fh-title {
+  font-family: var(--font-display);
   font-size: 22px;
   letter-spacing: 2px;
   color: var(--gold-bright);
-  text-shadow: 0 0 14px rgba(255, 217, 122, .4);
+  text-shadow: 0 0 14px rgba(216, 169, 63, .4);
   margin-bottom: 14px;
 }
 .fh-sub {
@@ -726,16 +1337,16 @@ html, body {
   font-size: 13px;
   color: var(--gold-bright);
   text-decoration: none;
-  background: linear-gradient(180deg, #34261a, #221710);
-  border: 1px solid var(--border);
+  background: linear-gradient(180deg, #1d2511, #12170a);
+  border: 1px solid var(--line-dim);
   border-radius: 8px;
 }
-.fh-link:hover { border-color: var(--gold); box-shadow: 0 0 10px rgba(201, 164, 76, .35); }
+.fh-link:hover { border-color: var(--gold); box-shadow: 0 0 10px rgba(216, 169, 63, .35); }
 .fh-note {
   margin-top: 14px;
   font-size: 11.5px;
   line-height: 1.5;
-  color: rgba(232, 220, 195, .55);
+  color: rgba(239, 227, 194, .5);
 }
 
 /* ---------- тосты ---------- */
@@ -745,10 +1356,10 @@ html, body {
   left: 50%;
   top: 64px;
   transform: translateX(-50%) translateY(-12px);
-  padding: 9px 20px;
-  background: rgba(25, 18, 11, .95);
-  border: 1px solid var(--gold);
-  border-radius: 8px;
+  padding: 10px 22px;
+  background: linear-gradient(180deg, rgba(29, 37, 17, .97), rgba(16, 21, 10, .97));
+  border: 1px solid #a9853f;
+  border-radius: 12px;
   font-size: 13px;
   color: var(--text);
   opacity: 0;
@@ -757,6 +1368,7 @@ html, body {
   z-index: 100;
   max-width: 90vw;
   text-align: center;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, .55), 0 0 16px rgba(216, 169, 63, .18);
 }
 .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 
@@ -764,74 +1376,83 @@ html, body {
    Мобильная раскладка (Telegram WebApp, портрет)
    ============================================================ */
 
-@media (max-width: 760px) {
-  .game-header { gap: 6px; padding: 6px 8px; }
-  .game-logo { font-size: 12px; letter-spacing: .5px; }
-  .game-stats { gap: 7px; overflow: hidden; }
-  .game-stats .stat { font-size: 11px; }
-  .bg-picker-label { display: none; }
-  .bg-picker select { margin-left: 0; font-size: 12px; max-width: 110px; }
+@media (max-width: 700px) {
+  .game { padding: 8px; gap: 8px; }
 
-  /* арена сверху, под ней одна строка из двух нав-панелей */
-  .game-body {
-    display: grid;
-    /* minmax(0,…): колонка может ужаться уже min-content панелей,
-       иначе 8 кнопок распирают страницу шире вьюпорта */
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    grid-template-rows: minmax(0, 1fr) auto;
-  }
-  .arena-module { grid-column: 1 / 3; grid-row: 1; }
-  .side-panel {
-    flex-direction: row;
-    justify-content: space-evenly;
-    align-items: center;
-    min-width: 0;
-    padding: 5px 4px;
-    gap: 4px;
-    overflow-x: auto;
-    overflow-y: hidden;
-  }
-  .left-panel  { grid-row: 2; grid-column: 1; border-right: none; border-top: 2px solid var(--border); }
-  .right-panel { grid-row: 2; grid-column: 2; border-left: 1px solid rgba(90, 68, 35, .45); border-top: 2px solid var(--border); }
-  .side-btn { padding: 7px 8px; font-size: 18px; border-radius: 9px; }
-  .side-btn span { display: none; }
+  .player-plate { gap: 9px; padding: 7px 9px 7px 7px; border-radius: 14px; }
+  .pp-level { width: 38px; height: 38px; font-size: 14px; }
+  .pp-main { gap: 4px; }
+  .pp-name { font-size: 12px; }
+  .pp-bar { height: 13px; }
+  .pp-bar-text { font-size: 8.5px; }
+  .pp-money { padding: 5px 10px; border-radius: 10px; }
+  .pp-money-row { font-size: 13px; gap: 4px; }
+  .pp-money-label { font-size: 8px; letter-spacing: 1.5px; }
+  .coin { width: 10px; height: 10px; }
 
-  /* верхние панели боя компактнее */
-  .bui-top { top: 6px; left: 6px; right: 6px; gap: 6px; }
-  .bui-plate { padding: 4px 8px; }
-  .bui-name { font-size: 11px; margin-bottom: 3px; }
-  .bui-bar { height: 13px; }
-  .bui-bar-text { font-size: 10px; }
-  .bui-vs { padding: 3px 10px; }
-  .bui-turn { font-size: 10px; }
-  .bui-timer { font-size: 15px; }
+  .hud-nav { gap: 5px; }
+  .nc-ring { width: 42px; }
+  .nc-ring svg { width: 46%; height: 46%; }
+  .nc-label { font-size: 8.5px; }
 
-  /* док: журнал сверху, управление под ним */
-  .bui-dock { flex-direction: column; gap: 8px; padding: 8px 8px 9px; }
-  .bui-log {
-    flex: 0 0 auto;
-    max-width: none;
-    height: 64px;
-    max-height: 64px;
-    padding: 5px 10px;
-    font-size: 12px;
-  }
-  .bui-controls { gap: 10px; }
-  .bui-group { flex: 1; gap: 5px; }
-  .bui-group-title { font-size: 10px; letter-spacing: 2px; }
-  .bui-zone-row { gap: 6px; }
-  .bz { width: auto; padding: 6px 2px 5px; border-radius: 9px; }
-  .bz-ico svg { width: 22px; height: 22px; }
-  .bz-label { font-size: 9px; letter-spacing: .8px; }
-  .bui-status { font-size: 13px; }
+  .game-mid { gap: 7px; }
+
+  .main-panel { border-radius: 18px; }
+
+  .screen-location { padding: 14px; gap: 12px; }
+  .loc-picture { height: clamp(120px, 26vh, 180px); border-radius: 12px; }
+  .loc-name { left: 12px; bottom: 9px; font-size: 16px; }
+  .loc-actions { gap: 11px; }
+  .loc-group { gap: 7px; }
+  .loc-group-title { font-size: 10px; letter-spacing: 2.5px; }
+  .loc-group-items { gap: 8px; }
+  .loc-chip, .loc-btn, .npc-chip { padding: 9px 15px; font-size: 13px; }
+  .npc-chip { padding-left: 7px; }
+  .npc-ava { width: 24px; height: 24px; font-size: 11.5px; }
+
+  .battle-head { padding: 10px 10px 4px; }
+  .bh-level { width: 30px; height: 30px; font-size: 12px; }
+  .bh-name { font-size: 11px; margin-bottom: 3px; }
+  .bh-bar { height: 11px; }
+  .bh-text { font-size: 8.5px; }
+  .bh-damage { font-size: 12px; margin-top: 5px; }
+  .bh-timer { font-size: 15px; }
+
+  .strike-wheel { padding: 9px 10px 7px; gap: 5px; border-radius: 18px; }
+  .swb { width: 36px; height: 36px; border-radius: 10px; }
+  .swb svg { width: 20px; height: 20px; }
+  .sw-skip { padding: 6px 10px; font-size: 11px; }
+  .sw-status { font-size: 11px; }
+  .bui-wait { bottom: 10px; padding: 6px 14px; font-size: 11.5px; }
+
+  .belt-slot { width: 36px; height: 36px; border-radius: 9px; }
+  .belt-slot svg { width: 16px; height: 16px; }
+  .elixir-belt { left: 7px; gap: 5px; padding: 7px; border-radius: 13px; }
+  .skill-bar { padding: 7px 10px 11px; }
+  .skill-plate { gap: 6px; padding: 7px 8px; border-radius: 13px; }
 
   .bui-popup { font-size: 21px; }
   .bui-popup.crit { font-size: 28px; }
+  .bui-end-card { padding: 22px 26px; border-radius: 18px; }
+  .bui-end-title { font-size: 24px; }
+  .bui-end-btn { padding: 9px 16px; font-size: 13px; }
 
-  .bui-end-card { padding: 24px 30px; }
-  .bui-end-title { font-size: 26px; }
+  .bottom-dock { height: clamp(170px, 26vh, 230px); padding: 0 2px; }
+  .dock-tabs { padding: 0 12px; gap: 5px; }
+  .dock-tab { padding: 8px 12px; font-size: 11.5px; }
+  .dock-body { border-radius: 14px; padding: 10px 14px; }
+  .team-title { font-size: 12px; margin-bottom: 8px; }
+  .member { font-size: 12px; }
+  .ghost-btn { font-size: 11px; padding: 6px 10px; }
+  .battle-log { font-size: 12px; }
 
-  /* гардероб на телефоне — во весь экран, список под вьюпортом */
+  .chat-tabs { margin-bottom: 8px; }
+  .chat-tab { padding: 5px 12px; font-size: 11.5px; }
+  .chat-log { font-size: 12px; }
+  .chat-input { padding: 8px 12px; font-size: 12px; }
+  .chat-send { padding: 8px 13px; font-size: 12px; }
+
+  /* гардероб на телефоне — во весь экран */
   .dressing-card {
     width: 100vw;
     height: 100dvh;
@@ -843,17 +1464,9 @@ html, body {
   .dressing-items {
     flex: 1 1 45%;
     border-left: none;
-    border-top: 1px solid var(--border);
+    border-top: 1px solid rgba(138, 111, 60, .4);
   }
   .dressing-tabs { justify-content: center; }
   .dressing-tab { padding: 6px 12px; font-size: 12px; }
   .dressing-title { display: none; }
-}
-
-/* очень узкие экраны: подписи зон прячем, остаются пиктограммы */
-@media (max-width: 390px) {
-  .bz-label { display: none; }
-  .bz { padding: 8px 2px; }
-  .bz-ico svg { width: 24px; height: 24px; }
-  .bui-controls { gap: 8px; }
 }

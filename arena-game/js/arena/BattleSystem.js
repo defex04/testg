@@ -42,6 +42,7 @@ export class BattleSystem extends EventTarget {
     this.turn = 0;
     this.phase = 'idle'; // idle | choose | resolving | ended
     this.moves = { left: null, right: null };
+    this._moveOrder = [];   // порядок, в котором стороны сделали выбор
     this._timerId = null;
     this.timeLeft = 0;
   }
@@ -55,6 +56,7 @@ export class BattleSystem extends EventTarget {
     this.turn += 1;
     this.phase = 'choose';
     this.moves = { left: null, right: null };
+    this._moveOrder = [];
     this.timeLeft = this.turnTime;
     this._emit('turnStart', { turn: this.turn, timeLeft: this.timeLeft });
 
@@ -62,9 +64,14 @@ export class BattleSystem extends EventTarget {
       this.timeLeft -= 1;
       this._emit('timer', { timeLeft: this.timeLeft });
       if (this.timeLeft <= 0) {
-        // время вышло — за игрока ходит случайность
+        // время вышло: ИИ бьёт наугад, а игрок без выбора пропускает удар
+        // (его в этот ход бьют, но сам он не отвечает)
         for (const side of ['left', 'right']) {
-          if (!this.moves[side]) this._setMove(side, this._randomMove());
+          if (!this.moves[side]) {
+            this._setMove(side, this.sides[side].isAI
+              ? this._randomMove()
+              : { attack: null, block: null, pass: true });
+          }
         }
       }
     }, 1000);
@@ -96,6 +103,7 @@ export class BattleSystem extends EventTarget {
 
   _setMove(side, move) {
     this.moves[side] = move;
+    this._moveOrder.push(side);
     if (this.moves.left && this.moves.right) this._resolve();
   }
 
@@ -103,11 +111,16 @@ export class BattleSystem extends EventTarget {
     this.phase = 'resolving';
     clearInterval(this._timerId);
 
-    // инициатива каждый ход случайна
-    const order = Math.random() < 0.5 ? ['left', 'right'] : ['right', 'left'];
+    // Инициатива: игрок, сделавший выбор, всегда бьёт раньше ИИ;
+    // между живыми игроками (PvP) — кто раньше нажал, тот и первый.
+    // Сторона, пропустившая ход (pass), не бьёт вовсе.
+    const order = [...this._moveOrder].sort((a, b) =>
+      (this.sides[a].isAI ? 1 : 0) - (this.sides[b].isAI ? 1 : 0));
+    const passed = order.filter((s) => this.moves[s].pass);
     const strikes = [];
 
     for (const attackerSide of order) {
+      if (this.moves[attackerSide].pass) continue;
       const defenderSide = attackerSide === 'left' ? 'right' : 'left';
       const attacker = this.sides[attackerSide];
       const defender = this.sides[defenderSide];
@@ -143,7 +156,7 @@ export class BattleSystem extends EventTarget {
       if (defender.hp <= 0) break;
     }
 
-    this._emit('resolve', { turn: this.turn, strikes, sides: this.sides });
+    this._emit('resolve', { turn: this.turn, strikes, passed, sides: this.sides });
   }
 
   /** Вызывается оркестратором после проигрывания всех анимаций хода. */

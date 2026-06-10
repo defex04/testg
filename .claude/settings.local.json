@@ -12,7 +12,8 @@
       "PowerShell(git -C \"C:\\\\Users\\\\andre\\\\Downloads\\\\new\" remote -v)",
       "PowerShell(\"---REMOTES---\")",
       "PowerShell(python \"C:\\\\Users\\\\andre\\\\Downloads\\\\new\\\\arena-game\\\\serve.py\" 8765; \"exit code: $LASTEXITCODE\")",
-      "PowerShell(Get-CimInstance Win32_Process -Filter \"Name like 'python%'\" | Where-Object { $_.CommandLine -match 'serve\\\\.py' } | ForEach-Object { \"killing PID $\\($_.ProcessId\\): $\\($_.CommandLine\\)\"; Stop-Process -Id $_.ProcessId -Force -Confirm:$false })"
+      "PowerShell(Get-CimInstance Win32_Process -Filter \"Name like 'python%'\" | Where-Object { $_.CommandLine -match 'serve\\\\.py' } | ForEach-Object { \"killing PID $\\($_.ProcessId\\): $\\($_.CommandLine\\)\"; Stop-Process -Id $_.ProcessId -Force -Confirm:$false })",
+      "PowerShell(Get-ChildItem -Recurse -Depth 2 | Where-Object { $_.FullName -notmatch 'node_modules|\\\\.git' } | Select-Object -ExpandProperty FullName)"
     ]
   }
 }
