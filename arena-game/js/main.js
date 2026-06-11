@@ -23,7 +23,8 @@ import { DressingRoom } from './arena/DressingRoom.js';
 const PLAYER = {
   name: 'ИгрокА',
   level: 15,
-  money: 0,
+  // кошелёк: медь / серебро / золото / бриллианты
+  wallet: { copper: 0, silver: 0, gold: 0, diamond: 0 },
   xp: 1240,    xpMax: 2000,    // опыт до следующего уровня
   pvpXp: 360,  pvpXpMax: 1000, // опыт PvP
 };
@@ -68,7 +69,7 @@ const FIGHTERS = {
 const LOCATIONS = {
   village: {
     name: 'Деревня',
-    image: 'assets/backgrounds/village.svg',
+    image: 'assets/backgrounds/village.webp',
     actions: [
       { label: 'Войти в город', go: true },
       { label: 'Пройти к мосту', goto: 'canyon' },
@@ -161,9 +162,15 @@ let totalDamage = 0;     // суммарный урон игрока за тек
 $('pp-name').textContent = PLAYER.name;
 $('pp-level').textContent = PLAYER.level;
 
-function setMoney(v) {
-  PLAYER.money = v;
-  $('pp-money').textContent = v;
+function renderMoney() {
+  for (const [cur, val] of Object.entries(PLAYER.wallet)) {
+    $('pp-' + cur).textContent = val;
+  }
+}
+
+function addMoney(cur, v) {
+  PLAYER.wallet[cur] += v;
+  renderMoney();
 }
 
 function renderXP() {
@@ -177,6 +184,8 @@ function renderXP() {
 
 function setMode(next) {
   mode = next;
+  // в бою шапка персонажа и навигация скрываются (см. body.in-battle в CSS)
+  document.body.classList.toggle('in-battle', next === 'battle');
   screenLocation.classList.toggle('hidden', next !== 'location');
   screenBattle.classList.toggle('hidden', next !== 'battle');
   document.querySelectorAll('[data-battle-only]').forEach((t) =>
@@ -325,7 +334,7 @@ async function initBattle() {
     ui.hideControls(false);
     const victory = e.detail.winner === 'left';
     if (victory) {
-      setMoney(PLAYER.money + 50);
+      addMoney('copper', 50);
       PLAYER.xp = Math.min(PLAYER.xpMax, PLAYER.xp + 120);
       renderXP();
     }
@@ -399,6 +408,87 @@ function activateTab(name) {
 document.querySelectorAll('.dock-tab').forEach((t) => {
   t.addEventListener('click', () => activateTab(t.dataset.pane));
 });
+
+// --- расширение нижнего окна жестом: зажать ручку (или ряд вкладок) и
+// повести вверх — окно растёт; вниз или тап по ручке — исходная высота ---
+
+const dockEl = $('bottom-dock');
+const dockGrip = $('dock-grip');
+const dockTabs = $('dock-tabs');
+let dockExpanded = false;
+let dockDrag = null;        // активный жест: { id, y, h, base, moved }
+let dockClickGuard = false; // после перетаскивания гасим случайный клик
+
+dockEl.classList.add('dock-anim');
+
+/** Высота панели по умолчанию — из CSS (--dock-h), без инлайн-стиля. */
+function dockBaseHeight() {
+  const prev = dockEl.style.height;
+  dockEl.style.height = '';
+  const h = dockEl.getBoundingClientRect().height;
+  dockEl.style.height = prev;
+  return h;
+}
+
+const dockMaxHeight = () => Math.round(window.innerHeight * 0.72);
+
+function dockSnap(expand) {
+  dockExpanded = expand;
+  dockEl.classList.add('dock-anim');
+  dockEl.style.height = expand ? dockMaxHeight() + 'px' : '';
+}
+
+function dockPointerDown(e) {
+  if (dockDrag || (e.pointerType === 'mouse' && e.button !== 0)) return;
+  dockDrag = {
+    id: e.pointerId,
+    y: e.clientY,
+    h: dockEl.getBoundingClientRect().height,
+    base: dockBaseHeight(),
+    moved: false,
+  };
+}
+
+function dockPointerMove(e) {
+  if (!dockDrag || e.pointerId !== dockDrag.id) return;
+  const dy = dockDrag.y - e.clientY; // вверх — положительное
+  if (!dockDrag.moved) {
+    if (Math.abs(dy) < 7) return;   // ещё не жест — не мешаем кликам
+    dockDrag.moved = true;
+    dockEl.classList.remove('dock-anim');
+  }
+  const h = Math.max(dockDrag.base, Math.min(dockMaxHeight(), dockDrag.h + dy));
+  dockEl.style.height = h + 'px';
+  if (e.cancelable) e.preventDefault();
+}
+
+function dockPointerUp(e) {
+  if (!dockDrag || e.pointerId !== dockDrag.id) return;
+  const drag = dockDrag;
+  dockDrag = null;
+  if (!drag.moved) return;
+  // дотягиваем до ближайшего состояния (порог — треть пути)
+  const h = dockEl.getBoundingClientRect().height;
+  dockSnap(h - drag.base > (dockMaxHeight() - drag.base) / 3);
+  dockClickGuard = true;
+  setTimeout(() => { dockClickGuard = false; }, 50);
+}
+
+dockGrip.addEventListener('pointerdown', dockPointerDown);
+dockTabs.addEventListener('pointerdown', dockPointerDown);
+window.addEventListener('pointermove', dockPointerMove, { passive: false });
+window.addEventListener('pointerup', dockPointerUp);
+window.addEventListener('pointercancel', dockPointerUp);
+
+// тап по ручке без движения — переключить развёрнутость
+dockGrip.addEventListener('click', () => {
+  if (!dockClickGuard) dockSnap(!dockExpanded);
+});
+
+// после жеста клик не должен переключать вкладку
+dockTabs.addEventListener('click', (e) => {
+  if (dockClickGuard) { e.stopPropagation(); e.preventDefault(); }
+}, true);
 
 // «Показать/Скрыть убитых» во вкладке участников
 const membersGrid = $('members-grid');
@@ -594,11 +684,6 @@ function showToast(text) {
   toastTimer = setTimeout(() => toast.classList.remove('show'), 2600);
 }
 
-$('nav-location').addEventListener('click', () => {
-  if (mode === 'battle') showToast('Сначала закончите бой!');
-  else showToast(`Вы в локации «${LOCATIONS[currentLoc].name}»`);
-});
-
 $('nav-bag').addEventListener('click', () => openDressing(dressingSide));
 
 $('nav-hunt').addEventListener('click', () => {
@@ -616,7 +701,7 @@ document.querySelectorAll('[data-stub]').forEach((btn) => {
 // Старт: игрок появляется в деревне
 // ---------------------------------------------------------------------------
 
-setMoney(0);
+renderMoney();
 renderXP();
 setLocation('village');
 setMode('location');

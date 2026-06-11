@@ -57,6 +57,7 @@
 html, body {
   height: 100%;
   overflow: hidden;
+  overscroll-behavior: none;
   background-color: var(--bg);
   background-image:
     radial-gradient(130% 85% at 50% -15%, rgba(110, 140, 58, .26), transparent 58%),
@@ -71,28 +72,41 @@ html, body {
   -webkit-tap-highlight-color: transparent;
 }
 
+/* страница никогда не прокручивается сама (iOS Safari игнорирует overflow
+   на body при резиновом скролле — фиксируем жёстко) */
+body {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+}
+
 button { font-family: inherit; }
 
+/* в бою верхняя панель персонажа и медальоны навигации не нужны —
+   освобождаем место под арену (см. setMode в main.js) */
+body.in-battle .hud-top,
+body.in-battle .hud-nav { display: none; }
+
 /* тонкие золотистые скроллбары внутри панелей */
-.dock-pane, .chat-log, .dressing-items, .screen-location {
+.dock-pane, .chat-log, .dressing-items, .loc-actions {
   scrollbar-width: thin;
   scrollbar-color: var(--line-dim) transparent;
 }
 .dock-pane::-webkit-scrollbar,
 .chat-log::-webkit-scrollbar,
 .dressing-items::-webkit-scrollbar,
-.screen-location::-webkit-scrollbar { width: 8px; }
+.loc-actions::-webkit-scrollbar { width: 8px; }
 .dock-pane::-webkit-scrollbar-thumb,
 .chat-log::-webkit-scrollbar-thumb,
 .dressing-items::-webkit-scrollbar-thumb,
-.screen-location::-webkit-scrollbar-thumb {
+.loc-actions::-webkit-scrollbar-thumb {
   background: var(--line-dim);
   border-radius: 4px;
 }
 .dock-pane::-webkit-scrollbar-track,
 .chat-log::-webkit-scrollbar-track,
 .dressing-items::-webkit-scrollbar-track,
-.screen-location::-webkit-scrollbar-track { background: transparent; }
+.loc-actions::-webkit-scrollbar-track { background: transparent; }
 
 .game {
   display: flex;
@@ -211,43 +225,56 @@ button { font-family: inherit; }
     linear-gradient(180deg, #9db7ff 0%, var(--mp) 50%, #2a4392 100%);
 }
 
-/* медь — бейдж справа */
+/* кошелёк — бейдж справа: медь / серебро / золото / бриллианты (2×2) */
 .pp-money {
   flex: 0 0 auto;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 2px;
-  padding: 7px 14px;
+  display: grid;
+  grid-template-columns: auto auto;
+  gap: 4px 12px;
+  padding: 7px 12px;
   background: rgba(244, 205, 111, .05);
   border: 1px solid rgba(138, 111, 60, .35);
   border-radius: 12px;
 }
-.pp-money-row {
+.pp-money-cell {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   font-family: var(--font-display);
-  font-size: 15px;
+  font-size: 12.5px;
   font-weight: 700;
   color: #f0d48a;
   text-shadow: 0 1px 2px #000;
 }
-.pp-money-label {
-  font-size: 9.5px;
-  letter-spacing: 2px;
-  text-transform: uppercase;
-  color: var(--muted);
-}
 
-/* медная монетка */
+/* монетки и бриллиант */
 .coin {
   display: inline-block;
-  width: 12px;
-  height: 12px;
+  flex: 0 0 auto;
+  width: 11px;
+  height: 11px;
   border-radius: 50%;
+}
+.coin-copper {
   background: radial-gradient(circle at 35% 30%, #ffd9a0, #d28a3c 55%, #8a5219);
   box-shadow: 0 0 5px rgba(210, 138, 60, .55), inset 0 -1px 1px rgba(0, 0, 0, .4);
+}
+.coin-silver {
+  background: radial-gradient(circle at 35% 30%, #ffffff, #b9c2cc 55%, #6e7a86);
+  box-shadow: 0 0 5px rgba(185, 194, 204, .45), inset 0 -1px 1px rgba(0, 0, 0, .4);
+}
+.coin-gold {
+  background: radial-gradient(circle at 35% 30%, #ffe9ab, #e3b34f 55%, #9c6f1f);
+  box-shadow: 0 0 5px rgba(227, 179, 79, .6), inset 0 -1px 1px rgba(0, 0, 0, .4);
+}
+.gem {
+  display: inline-block;
+  flex: 0 0 auto;
+  width: 12px;
+  height: 11px;
+  background: linear-gradient(135deg, #e8f9ff 0%, #7fd4f2 45%, #2e9dc9 100%);
+  clip-path: polygon(50% 100%, 0 32%, 22% 0, 78% 0, 100% 32%);
+  filter: drop-shadow(0 0 4px rgba(127, 212, 242, .55));
 }
 
 /* ряд навигации: медальоны с подписью снизу, всегда по центру */
@@ -398,7 +425,8 @@ button { font-family: inherit; }
   flex-direction: column;
   gap: 18px;
   padding: 22px 26px;
-  overflow-y: auto;
+  /* картинка локации закреплена: прокручивается только список действий */
+  overflow: hidden;
   animation: screen-in .35s ease;
 }
 @keyframes screen-in {
@@ -441,9 +469,13 @@ button { font-family: inherit; }
 /* секции действий: Переходы / Действия / Жители */
 
 .loc-actions {
+  flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   gap: 14px;
+  overflow-y: auto;
+  padding-right: 4px;
 }
 
 .loc-group { display: flex; flex-direction: column; gap: 9px; }
@@ -700,10 +732,11 @@ button { font-family: inherit; }
 /* ---------- штурвал атаки/блока (по центру сцены) ---------- */
 
 .strike-wheel {
+  --sw-scale: 1; /* на маленьких экранах уменьшается (см. медиа-запросы) */
   position: absolute;
   left: 50%;
   top: 44%;
-  transform: translate(-50%, -50%);
+  transform: translate(-50%, -50%) scale(var(--sw-scale));
   z-index: 12;
   display: flex;
   flex-direction: column;
@@ -722,7 +755,7 @@ button { font-family: inherit; }
 .strike-wheel.off {
   opacity: 0;
   pointer-events: none;
-  transform: translate(-50%, -50%) scale(.92);
+  transform: translate(-50%, -50%) scale(calc(var(--sw-scale) * .92));
 }
 
 /* пилюля «ход противника» — видна, пока штурвал скрыт */
@@ -913,12 +946,35 @@ button { font-family: inherit; }
 /* ---------- нижняя панель с вкладками ---------- */
 
 .bottom-dock {
+  --dock-h: clamp(190px, 28vh, 260px);
   flex: 0 0 auto;
   display: flex;
   flex-direction: column;
-  height: clamp(190px, 28vh, 260px);
+  height: var(--dock-h);
   padding: 0 8px;
 }
+/* плавное «дотягивание» после жеста; на время перетаскивания снимается */
+.bottom-dock.dock-anim { transition: height .28s ease; }
+
+/* ручка расширения: потянуть вверх — окно растёт, вниз/тап — назад */
+.dock-grip {
+  flex: 0 0 auto;
+  display: flex;
+  justify-content: center;
+  padding: 5px 0 4px;
+  cursor: grab;
+  touch-action: none;
+}
+.dock-grip:active { cursor: grabbing; }
+.dock-grip span {
+  width: 46px;
+  height: 5px;
+  border-radius: 3px;
+  background: rgba(216, 169, 63, .38);
+  box-shadow: inset 0 1px 0 rgba(244, 205, 111, .25);
+  transition: background .2s;
+}
+.dock-grip:hover span { background: rgba(244, 205, 111, .65); }
 
 .dock-tabs {
   display: flex;
@@ -928,6 +984,8 @@ button { font-family: inherit; }
   scrollbar-width: none;
   position: relative;
   z-index: 1;
+  /* горизонтальный скролл вкладок — браузеру, вертикальный жест — нам */
+  touch-action: pan-x;
 }
 .dock-tabs::-webkit-scrollbar { display: none; }
 
@@ -979,26 +1037,39 @@ button { font-family: inherit; }
 
 .members-grid {
   display: grid;
-  grid-template-columns: 1fr auto 1fr;
+  /* minmax(0,1fr): колонки ужимаются вместе с экраном, имена обрезаются
+     многоточием вместо вылезания за рамки */
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   gap: 10px;
   text-align: center;
 }
+.team { min-width: 0; }
 .team-title {
   font-family: var(--font-display);
-  font-size: 14px;
+  font-size: clamp(11px, 3.2vw, 14px);
   color: var(--gold-bright);
   text-shadow: 0 1px 2px #000;
   margin-bottom: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
-.member { font-size: 13.5px; margin: 5px 0; }
+.member {
+  font-size: clamp(11px, 3.4vw, 13.5px);
+  margin: 5px 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .member .m-lvl { color: #b89a55; font-size: 12px; }
 .member.dead { opacity: .5; text-decoration: line-through; }
 .members-grid.hide-dead .member.dead { display: none; }
 .members-center { padding-top: 2px; }
 
 .ghost-btn {
-  padding: 7px 14px;
-  font-size: 12px;
+  padding: 7px clamp(6px, 2vw, 14px);
+  font-size: clamp(10px, 3vw, 12px);
+  white-space: nowrap;
   background: transparent;
   border: 1px solid #6d572b;
   border-radius: 10px;
@@ -1108,7 +1179,7 @@ button { font-family: inherit; }
 
 /* список игроков */
 
-.players-list { font-size: 13.5px; }
+.players-list { font-size: clamp(11.5px, 3.4vw, 13.5px); }
 .players-list .player-row {
   display: flex;
   align-items: center;
@@ -1118,6 +1189,10 @@ button { font-family: inherit; }
   border-radius: 9px;
   background: rgba(255, 255, 255, .025);
   border: 1px solid rgba(138, 111, 60, .18);
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .players-list .player-row::before {
   content: '';
@@ -1385,10 +1460,10 @@ button { font-family: inherit; }
   .pp-name { font-size: 12px; }
   .pp-bar { height: 13px; }
   .pp-bar-text { font-size: 8.5px; }
-  .pp-money { padding: 5px 10px; border-radius: 10px; }
-  .pp-money-row { font-size: 13px; gap: 4px; }
-  .pp-money-label { font-size: 8px; letter-spacing: 1.5px; }
-  .coin { width: 10px; height: 10px; }
+  .pp-money { padding: 5px 8px; border-radius: 10px; gap: 3px 8px; }
+  .pp-money-cell { font-size: 10.5px; gap: 4px; }
+  .coin { width: 9px; height: 9px; }
+  .gem { width: 10px; height: 9px; }
 
   .hud-nav { gap: 5px; }
   .nc-ring { width: 42px; }
@@ -1411,6 +1486,9 @@ button { font-family: inherit; }
   .npc-ava { width: 24px; height: 24px; font-size: 11.5px; }
 
   .battle-head { padding: 10px 10px 4px; }
+  /* сцене гарантируется высота, при которой оверлеи (пояс эликсиров,
+     штурвал) не наезжают на шапку и слоты скиллов */
+  .arena-stage { min-height: 230px; }
   .bh-level { width: 30px; height: 30px; font-size: 12px; }
   .bh-name { font-size: 11px; margin-bottom: 3px; }
   .bh-bar { height: 11px; }
@@ -1437,7 +1515,7 @@ button { font-family: inherit; }
   .bui-end-title { font-size: 24px; }
   .bui-end-btn { padding: 9px 16px; font-size: 13px; }
 
-  .bottom-dock { height: clamp(170px, 26vh, 230px); padding: 0 2px; }
+  .bottom-dock { --dock-h: clamp(170px, 26vh, 230px); padding: 0 2px; }
   .dock-tabs { padding: 0 12px; gap: 5px; }
   .dock-tab { padding: 8px 12px; font-size: 11.5px; }
   .dock-body { border-radius: 14px; padding: 10px 14px; }
@@ -1469,4 +1547,28 @@ button { font-family: inherit; }
   .dressing-tabs { justify-content: center; }
   .dressing-tab { padding: 6px 12px; font-size: 12px; }
   .dressing-title { display: none; }
+}
+
+/* ============================================================
+   Очень маленькие / низкие экраны: боевой UI уменьшается,
+   чтобы элементы гарантированно не перекрывали друг друга
+   ============================================================ */
+
+@media (max-width: 420px) {
+  .strike-wheel { --sw-scale: .88; }
+}
+
+@media (max-width: 360px) {
+  .strike-wheel { --sw-scale: .78; }
+  .elixir-belt { transform: translateY(-50%) scale(.88); transform-origin: left center; }
+  .belt-slot { width: 32px; height: 32px; }
+  .skill-plate .belt-slot { width: 34px; height: 34px; }
+}
+
+@media (max-height: 640px) {
+  .strike-wheel { --sw-scale: .82; }
+  .battle-head { padding-top: 6px; }
+  .bh-damage { margin-top: 3px; }
+  .arena-stage { min-height: 190px; }
+  .bottom-dock { --dock-h: clamp(140px, 24vh, 190px); }
 }
