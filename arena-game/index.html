@@ -261,6 +261,12 @@
 
     function chooseServer() {
       if (location.protocol === 'file:') return Promise.resolve(null);
+      // внутри Telegram Mini App выбора нет: всегда боевой сервер (Azure)
+      const tg = window.Telegram && window.Telegram.WebApp;
+      if (tg && tg.initData) {
+        if (tg.expand) tg.expand();
+        return Promise.resolve(SERVERS.azure.url);
+      }
       // подсказка по умолчанию: с внешнего хостинга (GitHub Pages) — Azure
       const hinted = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname)
         ? 'local' : 'azure';

@@ -46,7 +46,10 @@ scp -i C:\Users\andre\Downloads\mygame_key.pem -r server\mmorpg-local azureuser@
 ssh -i C:\Users\andre\Downloads\mygame_key.pem azureuser@4.231.90.10 "chmod -R a+rX ~/mmorpg-local; cd ~/mmorpg-local; sudo docker compose -f docker-compose.yml -f docker-compose.azure.yml up -d --build"
 ```
 
-`.env` на VM не перезатирать: там боевой `ADMIN_PASSWORD` (выдан при деплое).
+`.env` на VM не перезатирать: там боевой `ADMIN_PASSWORD` (выдан при деплое),
+`BOT_TOKEN` бота @mymmorpg_defex_bot и `DEV_AUTH=0` — регистрация на Azure
+только через Telegram Mini App (кнопка меню бота открывает GitHub Pages).
+Локально dev-вход по имени работает как раньше (`DEV_AUTH=1` по умолчанию).
 В NSG виртуалки должны быть открыты порты 80 и 443.
 
 ## Что реализовано на сервере

@@ -949,6 +949,26 @@ document.querySelectorAll('[data-stub]').forEach((btn) => {
 renderMoney();
 renderXP();
 
+// Боевой сервер пускает только через Telegram Mini App (dev-вход выключен).
+// Если игру открыли в обычном браузере — показываем ссылку на бота.
+const TG_BOT = 'mymmorpg_defex_bot';
+
+function showTelegramGate() {
+  const el = document.createElement('div');
+  el.className = 'file-helper';
+  el.innerHTML =
+    '<div class="fh-card">' +
+      '<div class="fh-title">⚜ DRAGON ARENA</div>' +
+      '<p class="fh-sub">Регистрация и вход — только через Telegram. ' +
+        'Откройте игру внутри Telegram-бота, и персонаж создастся автоматически.</p>' +
+      '<a class="fh-link" href="https://t.me/' + TG_BOT + '" target="_blank" rel="noopener">' +
+        'Открыть бота → @' + TG_BOT + '</a>' +
+      '<p class="fh-note">Локальная разработка: запустите start.bat и выберите ' +
+        '«Локальный сервер» — там вход по имени работает без Telegram.</p>' +
+    '</div>';
+  document.body.appendChild(el);
+}
+
 (async () => {
   // если на сервере остался идущий бой (после F5/обрыва) — вернёмся в него
   api.onBattleResume((b) => resumeBattle(b).catch((e) => {
@@ -981,6 +1001,12 @@ renderXP();
     setLocation(LOC_BY_ID[ch.location_id] || 'village');
     refreshPlayers();
   } catch (e) {
+    if (e.message === 'dev_auth_disabled') {
+      showTelegramGate();
+      setLocation('village');
+      setMode('location');
+      return;
+    }
     console.error('Сервер недоступен, оффлайн-режим:', e);
     showToast('Сервер недоступен — игра в оффлайн-режиме');
     setLocation('village');

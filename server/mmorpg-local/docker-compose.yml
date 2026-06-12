@@ -44,7 +44,7 @@ services:
       AUTH_DB:  postgres://auth_svc:auth_svc_dev@postgres:5432/mmo_auth
       REDIS_URL: redis://redis:6379
       BOT_TOKEN: ${BOT_TOKEN:-}
-      DEV_AUTH: "1"
+      DEV_AUTH: ${DEV_AUTH:-1}
     ports:
       - "${API_PORT:-8080}:8080"
     volumes:
