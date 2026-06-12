@@ -1,0 +1,21 @@
+# Надстройка для Azure VM: HTTPS через Caddy (нужен GitHub Pages — он
+# блокирует http/ws с https-страницы). Запуск на виртуалке:
+#   docker compose -f docker-compose.yml -f docker-compose.azure.yml up -d --build
+services:
+  caddy:
+    image: caddy:2-alpine
+    container_name: mmo-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - api
+
+volumes:
+  caddy_data:
+  caddy_config:

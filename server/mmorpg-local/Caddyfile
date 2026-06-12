@@ -1,0 +1,5 @@
+# HTTPS-фасад для GitHub Pages: sslip.io отдаёт DNS на сам IP виртуалки,
+# Caddy сам получает и продлевает сертификат Let's Encrypt.
+4.231.90.10.sslip.io {
+	reverse_proxy api:8080
+}

@@ -235,6 +235,18 @@
     </div>
   </div>
 
+  <!-- окно информации о бое (открывается ссылкой «Бой #N» из чата) -->
+  <div class="binfo hidden" id="binfo">
+    <div class="binfo-card">
+      <div class="dressing-head">
+        <span class="dressing-title" id="binfo-title">Бой</span>
+        <span style="flex:1"></span>
+        <button class="dressing-close" id="binfo-close">✕</button>
+      </div>
+      <div class="binfo-body" id="binfo-body"></div>
+    </div>
+  </div>
+
   <div class="toast" id="toast"></div>
 
   <script type="module" src="js/main.js"></script>

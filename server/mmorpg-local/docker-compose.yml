@@ -1,0 +1,110 @@
+name: mmorpg-local
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: mmo-postgres
+    environment:
+      POSTGRES_USER: ${PG_SUPER_USER:-postgres}
+      POSTGRES_PASSWORD: ${PG_SUPER_PASSWORD:-postgres}
+      POSTGRES_DB: postgres
+    ports:
+      - "${PG_PORT:-5432}:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./initdb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PG_SUPER_USER:-postgres}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: mmo-redis
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec"]
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build: ./backend
+    container_name: mmo-api
+    restart: unless-stopped
+    environment:
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin}
+      ADMIN_DB: postgres://${PG_SUPER_USER:-postgres}:${PG_SUPER_PASSWORD:-postgres}@postgres:5432/mmo_game
+      GAME_DB:  postgres://game_rw:game_rw_dev@postgres:5432/mmo_game
+      AUTH_DB:  postgres://auth_svc:auth_svc_dev@postgres:5432/mmo_auth
+      REDIS_URL: redis://redis:6379
+      BOT_TOKEN: ${BOT_TOKEN:-}
+      DEV_AUTH: "1"
+    ports:
+      - "${API_PORT:-8080}:8080"
+    volumes:
+      - uploads_data:/app/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # ---------------------------------------------------------------
+  # Профиль "full" — на этапе 1 НЕ нужен. Логи боёв и чат живут
+  # в партиционированных таблицах PostgreSQL (battle_rounds,
+  # chat_messages). Когда нагрузка вырастет:
+  #   docker compose --profile full up -d
+  # и переключить writer-сервисы на Scylla/Kafka.
+  # ---------------------------------------------------------------
+
+  scylla:
+    image: scylladb/scylla:5.4
+    container_name: mmo-scylla
+    profiles: ["full"]
+    command: --smp 1 --memory 1G --overprovisioned 1 --developer-mode 1
+    ports:
+      - "${SCYLLA_PORT:-9042}:9042"
+    volumes:
+      - scylla_data:/var/lib/scylla
+      - ./scylla:/schema:ro
+
+  kafka:
+    image: bitnami/kafka:3.7
+    container_name: mmo-kafka
+    profiles: ["full"]
+    environment:
+      KAFKA_CFG_NODE_ID: 1
+      KAFKA_CFG_PROCESS_ROLES: broker,controller
+      KAFKA_CFG_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_CFG_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_CFG_ADVERTISED_LISTENERS: PLAINTEXT://localhost:${KAFKA_PORT:-9092}
+      KAFKA_CFG_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE: "true"
+    ports:
+      - "${KAFKA_PORT:-9092}:9092"
+    volumes:
+      - kafka_data:/bitnami/kafka
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.3-alpine
+    container_name: mmo-clickhouse
+    profiles: ["full"]
+    ports:
+      - "${CH_HTTP_PORT:-8123}:8123"
+      - "${CH_NATIVE_PORT:-9000}:9000"
+    volumes:
+      - ch_data:/var/lib/clickhouse
+
+volumes:
+  uploads_data:
+  pg_data:
+  redis_data:
+  scylla_data:
+  kafka_data:
+  ch_data:

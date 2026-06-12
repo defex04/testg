@@ -1,0 +1,788 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Гроссбух мира — админ</title>
+<style>
+  :root{
+    --ink:#12161F; --ink2:#181E2B; --panel:#1C2333; --line:#2A3147;
+    --paper:#E9E1CD; --dim:#9A937F; --brass:#C9953F; --brass2:#E7BD6E;
+    --credit:#7FBF7A; --debit:#E07A6A; --mono:"Cascadia Mono",ui-monospace,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{background:var(--ink);color:var(--paper);font:14px/1.45 system-ui,"Segoe UI",sans-serif}
+  ::selection{background:var(--brass);color:var(--ink)}
+  button{font:inherit;cursor:pointer;background:var(--panel);color:var(--paper);
+         border:1px solid var(--line);border-radius:3px;padding:5px 12px}
+  button:hover{border-color:var(--brass)}
+  button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{
+    outline:2px solid var(--brass2);outline-offset:1px}
+  button.brass{background:var(--brass);border-color:var(--brass);color:#1A1407;font-weight:600}
+  button.danger{color:var(--debit);border-color:#5A3530}
+  button.sm{padding:2px 8px;font-size:12px}
+  input,select,textarea{background:var(--ink2);color:var(--paper);
+    border:1px solid var(--line);border-radius:3px;padding:6px 9px;font:inherit}
+  textarea{font-family:var(--mono);font-size:12.5px;width:100%}
+  label{font-size:12px;color:var(--dim);display:block;margin-bottom:3px}
+
+  #app{display:none;height:100%;grid-template-columns:208px 1fr;grid-template-rows:46px 1fr}
+  aside{grid-row:1/3;background:var(--ink2);border-right:1px solid var(--line);
+        display:flex;flex-direction:column}
+  .wordmark{font-family:Georgia,'Times New Roman',serif;font-variant:small-caps;
+    letter-spacing:.14em;font-size:19px;color:var(--brass2);
+    padding:16px 18px 12px;border-bottom:1px solid var(--line)}
+  .wordmark small{display:block;font:11px/1.4 var(--mono);letter-spacing:.08em;
+    color:var(--dim);font-variant:normal}
+  nav{padding:10px 0;overflow:auto}
+  nav button{display:block;width:100%;text-align:left;background:none;border:none;
+    border-left:3px solid transparent;border-radius:0;padding:8px 18px;color:var(--dim)}
+  nav button:hover{color:var(--paper)}
+  nav button.active{color:var(--brass2);border-left-color:var(--brass);
+    background:rgba(201,149,63,.07)}
+  header{display:flex;align-items:center;gap:14px;padding:0 18px;
+    border-bottom:1px solid var(--line);background:var(--ink2)}
+  header h1{font-family:Georgia,serif;font-variant:small-caps;letter-spacing:.1em;
+    font-size:16px;font-weight:600;margin:0}
+  .stamp-env{font:11px var(--mono);letter-spacing:.18em;color:var(--brass2);
+    border:1px solid var(--brass);padding:2px 8px;border-radius:2px}
+  #hdr-online{margin-left:auto;font:12px var(--mono);color:var(--dim)}
+  main{overflow:auto;padding:18px 22px 70px}
+
+  table{border-collapse:collapse;width:100%;font-family:var(--mono);font-size:12.5px}
+  th{font:11px var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--dim);
+    text-align:left;padding:7px 10px;border-bottom:1px solid var(--brass);white-space:nowrap}
+  td{padding:6px 10px;border-bottom:1px solid var(--line);vertical-align:top;
+    font-variant-numeric:tabular-nums}
+  tr.click:hover td{background:rgba(201,149,63,.06);cursor:pointer}
+  .num{text-align:right}
+  .credit{color:var(--credit)} .debit{color:var(--debit)} .muted{color:var(--dim)}
+  .badge{font:11px var(--mono);padding:1px 7px;border:1px solid var(--line);border-radius:9px}
+  .badge.live{color:var(--credit);border-color:#2E5132}
+  .toolbar{display:flex;gap:10px;align-items:flex-end;margin:0 0 14px;flex-wrap:wrap}
+  .cards{display:flex;gap:14px;flex-wrap:wrap;margin-bottom:18px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:4px;
+    padding:12px 16px;min-width:148px;cursor:pointer;border-bottom:2px solid var(--line)}
+  .card:hover{border-color:var(--brass)}
+  .card b{display:block;font:600 22px var(--mono);color:var(--brass2)}
+  .card span{font-size:12px;color:var(--dim)}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:4px;
+    padding:14px 16px;margin-bottom:16px}
+  .panel h3{margin:0 0 10px;font-family:Georgia,serif;font-variant:small-caps;
+    letter-spacing:.08em;font-weight:600;color:var(--brass2)}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  .form{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
+  .form .wide{grid-column:1/-1}
+  .bars{display:flex;align-items:flex-end;gap:6px;height:120px;padding-top:6px}
+  .bars .bar{flex:1;display:flex;flex-direction:column;justify-content:flex-end;
+    align-items:center;gap:4px;font:11px var(--mono);color:var(--dim);min-width:26px}
+  .bars .bar i{display:block;width:100%;background:linear-gradient(180deg,var(--brass2),var(--brass));
+    border-radius:2px 2px 0 0;min-height:2px}
+  .bars .bar b{color:var(--paper);font-weight:400}
+  .logline{font-family:var(--mono);font-size:12.5px;padding:3px 0;border-bottom:1px dashed var(--line)}
+  .logline .turn{color:var(--brass2)}
+  @media (max-width:900px){#app{grid-template-columns:64px 1fr}
+    .wordmark{font-size:13px;padding:12px 8px}.wordmark small{display:none}
+    nav button{padding:8px 10px;font-size:12px}
+    .grid2{grid-template-columns:1fr}}
+
+  #toast{position:fixed;right:22px;bottom:22px;background:var(--ink2);
+    border:2px solid var(--brass);color:var(--brass2);
+    font:600 12px var(--mono);letter-spacing:.14em;text-transform:uppercase;
+    padding:10px 16px;border-radius:2px;transform:rotate(-1.2deg);
+    opacity:0;transition:opacity .18s;pointer-events:none;max-width:360px}
+  #toast.show{opacity:1}
+  #toast.err{border-color:var(--debit);color:var(--debit)}
+  @media (prefers-reduced-motion: reduce){#toast{transform:none;transition:none}}
+
+  #login{height:100%;display:flex;align-items:center;justify-content:center}
+  #login form{background:var(--ink2);border:1px solid var(--line);border-radius:4px;
+    padding:28px 30px;width:300px;text-align:center}
+  #login .wordmark{border:none;padding:0 0 14px}
+</style>
+</head>
+<body>
+
+<div id="login">
+  <form id="login-form">
+    <div class="wordmark">Гроссбух мира<small>панель управления · local</small></div>
+    <input id="login-pass" type="password" placeholder="Пароль администратора"
+           style="width:100%;margin-bottom:10px" autofocus>
+    <button class="brass" style="width:100%">Открыть книгу</button>
+    <div id="login-err" class="debit" style="margin-top:8px;font-size:12px"></div>
+  </form>
+</div>
+
+<div id="app">
+  <aside>
+    <div class="wordmark">Гроссбух мира<small>mmo_game · mmo_auth · redis</small></div>
+    <nav id="nav"></nav>
+  </aside>
+  <header><h1 id="hdr-title"></h1>
+    <span class="stamp-env">LOCAL</span><span id="hdr-online"></span></header>
+  <main id="main"></main>
+</div>
+
+<div id="toast"></div>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const esc = (v) => String(v ?? '').replace(/[&<>"]/g,
+  (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const dt = (v) => v ? new Date(v).toLocaleString('ru-RU',
+  {day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : '—';
+
+let KEY = sessionStorage.getItem('adminKey') || '';
+
+async function api(path, body){
+  const r = await fetch('/admin/api' + path, {
+    method: body === undefined ? 'GET' : 'POST',
+    headers: {'Content-Type':'application/json','x-admin-key':KEY},
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  if (r.status === 401){ logout(); throw new Error('нужен вход'); }
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.error || r.status);
+  return data;
+}
+async function upload(file){
+  const r = await fetch('/admin/api/upload?name=' + encodeURIComponent(file.name),
+    { method:'POST', headers:{'x-admin-key':KEY}, body:file });
+  const d = await r.json();
+  if (!r.ok) throw new Error(d.error || r.status);
+  return d.url;
+}
+
+let toastT = null;
+function stamp(text, err = false){
+  const t = $('#toast');
+  t.textContent = text; t.className = err ? 'err show' : 'show';
+  clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('show'), 2800);
+}
+const ok = (t) => stamp('Проведено · ' + t);
+const fail = (e) => stamp('Отказано · ' + e.message, true);
+
+/* словари кодов БД */
+const D = {
+  curReason:{1:'квест',2:'аукцион',3:'почта',4:'магазин',5:'ремонт',6:'биржа',7:'бой',8:'админ'},
+  itemReason:{1:'дроп',2:'квест',3:'обмен',4:'аукцион',5:'почта',6:'крафт',7:'израсходован',
+              8:'ремонт',9:'травма',10:'трофей',11:'админ'},
+  owner:{1:'инвентарь',2:'экипировка',3:'банк',4:'клан',5:'почта',6:'аукцион',7:'эскроу',8:'система'},
+  bType:{1:'охота/дуэль',2:'групповой',3:'хаотик',4:'ивент',5:'инстанс',6:'клановый',7:'фракционный'},
+  bStatus:{1:'набор',2:'идёт',3:'завершён',4:'прерван'},
+  result:{1:'победа',2:'поражение',3:'ничья',4:'покинул',5:'таймаут'},
+  itemType:{1:'оружие',2:'броня',3:'ресурс',4:'эликсир',5:'артефакт',6:'скальп',7:'подарок'},
+  slot:{1:'торс'},
+  zone:{high:'голову',mid:'корпус',low:'ноги'},
+  rep:{1:'однократное',2:'ежедневное',3:'еженедельное'},
+  accStatus:{1:'активен',2:'заморожен',3:'забанен',4:'удалён'},
+  bodyPart:{1:'торс'},
+};
+const dict = (m, v) => (m[v] ?? v ?? '—');
+const amount = (a) => `<td class="num ${a >= 0 ? 'credit' : 'debit'}">${a >= 0 ? '+' : ''}${a}</td>`;
+const opt = (map, sel, empty) => (empty ? `<option value="">${empty}</option>` : '') +
+  Object.entries(map).map(([v, t]) =>
+    `<option value="${v}" ${String(sel) === String(v) ? 'selected' : ''}>${t}</option>`).join('');
+
+function table(cols, rows, rowAttr){
+  if (!rows.length) return '<p class="muted">Записей нет — книга на этой странице пуста.</p>';
+  return `<table><thead><tr>${cols.map((c)=>`<th>${c.h}</th>`).join('')}</tr></thead>
+  <tbody>${rows.map((r)=>`<tr ${rowAttr ? rowAttr(r) : ''}>${
+    cols.map((c)=>c.html ? c.html(r) : `<td>${esc(c.v(r))}</td>`).join('')
+  }</tr>`).join('')}</tbody></table>`;
+}
+function barChart(rows, labelKey, valueKey){
+  if (!rows.length) return '<p class="muted">Данных пока нет.</p>';
+  const max = Math.max(...rows.map((r) => +r[valueKey]), 1);
+  return `<div class="bars">${rows.map((r)=>`
+    <div class="bar"><b>${r[valueKey]}</b>
+      <i style="height:${Math.round(100 * r[valueKey] / max)}%"></i>
+      <span>${esc(r[labelKey])}</span></div>`).join('')}</div>`;
+}
+
+const SECTIONS = [
+  ['stats','Общая статистика'],['chars','Персонажи'],['accounts','Аккаунты'],
+  ['battles','Бои'],['ledger','Гроссбух'],['items','Предметы'],['quests','Задания'],
+  ['market','Аукцион'],['mail','Почта'],['chat','Чат'],['config','Конфиг'],['audit','Аудит'],
+];
+let current = 'stats';
+const R = {};
+
+/* ================= Общая статистика ================= */
+R.stats = async () => {
+  const s = await api('/stats');
+  $('#hdr-online').textContent = `онлайн: ${s.onlineTotal}`;
+  const card = (v, t, go) =>
+    `<div class="card" onclick="${go}"><b>${v}</b><span>${t}</span></div>`;
+  return `<div class="cards">
+    ${card(s.onlineTotal, 'Сейчас онлайн', `show('chars')`)}
+    ${card(s.battlesActive, 'Боёв идёт', `show('battles',{status:2})`)}
+    ${card(s.characters, 'Персонажей', `show('chars')`)}
+    ${card(s.accounts, 'Аккаунтов', `show('accounts')`)}
+    ${card(s.battlesTotal, 'Боёв всего', `show('battles')`)}
+    ${card(s.itemsLive, 'Предметов в мире', `show('items')`)}
+    ${card(s.chatToday, 'Сообщений за сутки', `show('chat')`)}
+  </div>
+  <div class="grid2">
+    <div class="panel"><h3>Игроки по уровням</h3>
+      ${barChart(s.levels.map(l=>({...l, level:'ур.'+l.level})), 'level', 'count')}</div>
+    <div class="panel"><h3>Бои за 7 дней</h3>
+      ${barChart(s.battlesByDay, 'day', 'count')}</div>
+  </div>
+  <div class="panel"><h3>Кто где (Redis-присутствие)</h3>
+    ${table([{h:'Локация',v:r=>r.location},{h:'Игроков',v:r=>r.players}], s.online)}</div>`;
+};
+
+/* ================= Персонажи ================= */
+R.chars = async (q = '') => {
+  const rows = await api('/characters?q=' + encodeURIComponent(q));
+  return `<div class="toolbar">
+      <input id="q-char" placeholder="Имя или id" value="${esc(q)}"
+        onkeydown="if(event.key==='Enter')R._cs()">
+      <button class="brass" onclick="R._cs()">Найти</button></div>
+    ${table([
+      {h:'ID',v:r=>r.id},{h:'Имя',v:r=>r.name},{h:'Ур.',v:r=>r.level},
+      {h:'Опыт',v:r=>r.exp},{h:'HP',v:r=>r.hp_cur},{h:'Локация',v:r=>r.location},
+      {h:'Был онлайн',v:r=>dt(r.online_at)},
+    ], rows, (r)=>`class="click" onclick="openChar(${r.id})"`)}`;
+};
+R._cs = () => show('chars', $('#q-char').value.trim());
+
+window.openChar = async (id) => {
+  const d = await api('/characters/' + id);
+  const c = d.character, st = d.stats || {};
+  const invRows = (t) => d.inventory.filter((i) => i.owner_type === t);
+  const invTable = (rows) => table([
+    {h:'ID',v:r=>r.id},{h:'Предмет',v:r=>r.name + (r.enchant_level?` +${r.enchant_level}`:'')},
+    {h:'Кол-во',v:r=>r.quantity},
+    {h:'',html:r=>`<td><button class="sm" onclick="enchantItem(${r.id},${r.enchant_level})">Заточка</button>
+      <button class="sm danger" onclick="confiscate(${r.id},${id})">Изъять</button></td>`},
+  ], rows);
+  $('#main').innerHTML = `
+  <div class="toolbar"><button onclick="show('chars')">← К списку</button>
+    <h2 style="margin:0;font-family:Georgia,serif;font-variant:small-caps">
+      ${esc(c.name)} <span class="muted">#${c.id} · ур.${c.level} · ${esc(c.location)}</span></h2></div>
+  <div class="grid2">
+    <div class="panel"><h3>Кошелёк и действия</h3>
+      ${table([{h:'Валюта',v:r=>r[0]},{h:'Баланс',html:r=>`<td class="num">${r[1]}</td>`}],
+        Object.entries(d.wallet))}
+      <div class="toolbar" style="margin-top:10px">
+        <button class="brass" onclick="adjCurrency(${c.id},1)">Начислить</button>
+        <button onclick="adjCurrency(${c.id},-1)">Списать</button>
+        <button onclick="giveItem(${c.id})">Выдать предмет</button>
+        <button onclick="teleport(${c.id})">Телепорт</button>
+        <button class="danger" onclick="mute(${c.id})">Мут чата</button></div></div>
+    <div class="panel"><h3>Правка персонажа</h3>
+      <div class="form">
+        <div><label>Уровень</label><input id="e-level" type="number" value="${c.level}"></div>
+        <div><label>Опыт</label><input id="e-exp" type="number" value="${c.exp}"></div>
+        <div><label>HP</label><input id="e-hp" type="number" value="${c.hp_cur}"></div>
+        <div><label>Сила</label><input id="e-str" type="number" value="${st.str ?? 0}"></div>
+        <div><label>Ловкость</label><input id="e-agi" type="number" value="${st.agi ?? 0}"></div>
+        <div><label>Выносл.</label><input id="e-vit" type="number" value="${st.vit ?? 0}"></div>
+        <div><label>Интеллект</label><input id="e-int" type="number" value="${st.intel ?? 0}"></div>
+        <div><label>Мудрость</label><input id="e-wis" type="number" value="${st.wis ?? 0}"></div>
+        <div><label>Своб. очки</label><input id="e-fp" type="number" value="${st.free_points ?? 0}"></div>
+      </div>
+      <div class="toolbar" style="margin-top:10px">
+        <button class="brass" onclick="saveChar(${c.id})">Сохранить</button>
+        <span class="muted">Изменение попадёт в аудит</span></div></div>
+  </div>
+  <div class="panel"><h3>Рюкзак — инвентарь</h3>${invTable(invRows(1))}
+    <h3 style="margin-top:14px">Надето</h3>${invTable(invRows(2))}
+    ${invRows(3).length ? '<h3 style="margin-top:14px">Банк</h3>' + invTable(invRows(3)) : ''}</div>
+  <div class="grid2">
+    <div class="panel"><h3>Задания</h3>
+      ${table([{h:'Задание',v:r=>r.name},
+        {h:'Статус',v:r=>r.status===2?'выполнено':'в процессе'},
+        {h:'Прогресс',v:r=>JSON.stringify(r.progress)},
+        {h:'Когда',v:r=>dt(r.completed_at)}], d.quests)}</div>
+    <div class="panel"><h3>Травмы</h3>
+      ${table([{h:'Часть',v:r=>dict(D.bodyPart,r.body_part)},{h:'Тяжесть',v:r=>r.severity},
+        {h:'Статус',v:r=>r.status===1?'активна':'вылечена'},
+        {h:'Получена',v:r=>dt(r.inflicted_at)}], d.injuries)}</div>
+  </div>
+  <div class="panel"><h3>Последние проводки</h3>
+    ${table([{h:'Когда',v:r=>dt(r.created_at)},{h:'Валюта',v:r=>r.code},
+      {h:'Сумма',html:r=>amount(+r.amount)},
+      {h:'Остаток',html:r=>`<td class="num">${r.balance_after}</td>`},
+      {h:'Основание',v:r=>dict(D.curReason,r.reason)}], d.ledger)}</div>
+  <div class="panel"><h3>Бои</h3>
+    ${table([{h:'ID',v:r=>r.id},{h:'Статус',v:r=>dict(D.bStatus,r.status)},
+      {h:'Итог',v:r=>dict(D.result,r.result)},{h:'Урон',v:r=>r.damage_dealt},
+      {h:'Опыт',v:r=>r.exp_gained},{h:'Начат',v:r=>dt(r.started_at)}],
+      d.battles, (r)=>`class="click" onclick="openBattle(${r.id})"`)}</div>`;
+};
+window.saveChar = async (id) => {
+  try {
+    await api(`/characters/${id}/edit`, {
+      level: +$('#e-level').value, exp: +$('#e-exp').value, hp_cur: +$('#e-hp').value,
+      stats: { str:+$('#e-str').value, agi:+$('#e-agi').value, vit:+$('#e-vit').value,
+        intel:+$('#e-int').value, wis:+$('#e-wis').value, free_points:+$('#e-fp').value },
+    });
+    ok('персонаж #' + id); openChar(id);
+  } catch (e) { fail(e); }
+};
+window.adjCurrency = async (id, sign) => {
+  const code = prompt('Валюта (copper/silver/gold/diamond/valor):', 'copper'); if (!code) return;
+  const n = Number(prompt(sign > 0 ? 'Сколько начислить:' : 'Сколько списать:', '100')); if (!n) return;
+  const note = prompt('Основание (в аудит):', '') || null;
+  try { const r = await api(`/characters/${id}/currency`,
+      { code, amount: sign * Math.abs(n), note });
+    ok(`${code} ${sign>0?'+':'−'}${Math.abs(n)} · остаток ${r.balance}`); openChar(id);
+  } catch (e) { fail(e); }
+};
+window.giveItem = async (id) => {
+  const t = Number(prompt('ID шаблона (вкладка «Предметы»):', '101')); if (!t) return;
+  const qty = Number(prompt('Количество (для стакуемых):', '1')) || 1;
+  try { const r = await api(`/characters/${id}/give-item`, { template_id: t, quantity: qty });
+    ok('предмет #' + r.itemId); openChar(id); } catch (e) { fail(e); }
+};
+window.teleport = async (id) => {
+  const to = Number(prompt('ID локации (1 Деревня, 2 Каньон, 3 Лощина):', '1')); if (!to) return;
+  try { await api(`/characters/${id}/teleport`, { location_id: to });
+    ok('телепорт'); openChar(id); } catch (e) { fail(e); }
+};
+window.mute = async (id) => {
+  const hours = Number(prompt('Мут чата, часов:', '1')); if (!hours) return;
+  const reason = prompt('Причина:', '') || null;
+  try { await api(`/characters/${id}/mute`, { hours, reason }); ok(`мут ${hours} ч`); }
+  catch (e) { fail(e); }
+};
+window.confiscate = async (itemId, charId) => {
+  const note = prompt('Изъять предмет #' + itemId + '. Основание:', ''); if (note === null) return;
+  try { await api(`/item-instances/${itemId}/confiscate`, { note });
+    ok('изъят #' + itemId); if (charId) openChar(charId); } catch (e) { fail(e); }
+};
+window.enchantItem = async (itemId, cur) => {
+  const v = Number(prompt('Новая заточка:', String((cur || 0) + 1)));
+  if (Number.isNaN(v)) return;
+  try { await api(`/item-instances/${itemId}/edit`, { enchant_level: v });
+    ok(`заточка +${v}`); } catch (e) { fail(e); }
+};
+
+/* ================= Аккаунты ================= */
+R.accounts = async () => {
+  const rows = await api('/accounts');
+  return table([
+    {h:'ID',v:r=>r.id},{h:'Вход',v:r=>r.provider===1?'telegram':'dev'},
+    {h:'Внешний id',v:r=>r.external_id},{h:'Персонажи',v:r=>r.characters},
+    {h:'Статус',html:r=>`<td>${r.banned?'<span class="debit">бан</span>':dict(D.accStatus,r.status)}</td>`},
+    {h:'Создан',v:r=>dt(r.created_at)},
+    {h:'',html:r=>`<td>${r.banned
+      ? `<button class="sm" onclick="unban(${r.id})">Разбанить</button>`
+      : `<button class="sm danger" onclick="ban(${r.id})">Забанить</button>`}</td>`},
+  ], rows);
+};
+window.ban = async (id) => {
+  const hours = Number(prompt('Часов бана (0 = навсегда):', '24'));
+  if (Number.isNaN(hours)) return;
+  const reason = prompt('Причина:', '') || null;
+  try { await api(`/accounts/${id}/ban`, { hours, reason });
+    ok('бан #' + id); show('accounts'); } catch (e) { fail(e); }
+};
+window.unban = async (id) => {
+  try { await api(`/accounts/${id}/unban`, {}); ok('разбан #' + id); show('accounts'); }
+  catch (e) { fail(e); }
+};
+
+/* ================= Бои ================= */
+R.battles = async (f = {}) => {
+  const qs = new URLSearchParams();
+  if (f.q) qs.set('q', f.q);
+  if (f.status) qs.set('status', f.status);
+  if (f.type) qs.set('type', f.type);
+  const rows = await api('/battles?' + qs);
+  return `<div class="toolbar">
+    <div><label>Ник или ID боя</label>
+      <input id="b-q" value="${esc(f.q || '')}" onkeydown="if(event.key==='Enter')R._bs()"></div>
+    <div><label>Статус</label><select id="b-status">${opt(D.bStatus, f.status, 'любой')}</select></div>
+    <div><label>Тип</label><select id="b-type">${opt(D.bType, f.type, 'любой')}</select></div>
+    <button class="brass" onclick="R._bs()">Найти</button></div>
+  ${table([
+    {h:'ID',v:r=>r.id},{h:'Тип',v:r=>dict(D.bType,r.type)},
+    {h:'Статус',html:r=>`<td>${r.status===2?'<span class="badge live">идёт</span>':dict(D.bStatus,r.status)}</td>`},
+    {h:'Бойцы',v:r=>(r.fighters||'') + ((r.meta||{}).npcName ? ' vs ' + r.meta.npcName : '')},
+    {h:'Локация',v:r=>r.location},{h:'Начат',v:r=>dt(r.started_at)},{h:'Окончен',v:r=>dt(r.ended_at)},
+  ], rows, (r)=>`class="click" onclick="openBattle(${r.id})"`)}`;
+};
+R._bs = () => show('battles', { q: $('#b-q').value.trim(),
+  status: $('#b-status').value, type: $('#b-type').value });
+
+window.openBattle = async (id) => {
+  const d = await api('/battles/' + id);
+  const names = Object.fromEntries(d.participants.map((p) => [p.character_id, p.name]));
+  const npc = (d.battle.meta || {}).npcName || 'Противник';
+  const nm = (cid) => cid ? (names[cid] || '#' + cid) : npc;
+  const line = (r) => {
+    const a = nm(r.actor_id), t = nm(r.target_id);
+    const z = dict(D.zone, (r.effects || {}).zone);
+    switch (r.action_type) {
+      case 1: return `<b>${esc(a)}</b> бьёт <b>${esc(t)}</b> в ${z} — <b>${r.value}</b>`;
+      case 2: return `<b>${esc(t)}</b> блокирует удар <b>${esc(a)}</b> в ${z} — лишь <b>${r.value}</b>`;
+      case 3: return `<b>${esc(t)}</b> уворачивается от удара <b>${esc(a)}</b>`;
+      case 4: return `<b>${esc(a)}</b> бьёт <b>${esc(t)}</b> в ${z} — <span class="debit">КРИТ ${r.value}</span>`;
+      case 5: return `<span class="debit"><b>${esc(t)}</b> погибает</span>`;
+      case 6: return `<b>${esc(a)}</b> применяет способность на <b>${esc(t)}</b>`;
+      default: return `действие ${r.action_type}`;
+    }
+  };
+  let log = '', lastTurn = 0;
+  for (const r of d.rounds) {
+    if (r.round_no !== lastTurn) {
+      lastTurn = r.round_no;
+      log += `<div class="logline"><span class="turn">— Ход ${r.round_no} —</span></div>`;
+    }
+    log += `<div class="logline">${line(r)}</div>`;
+  }
+  $('#main').innerHTML = `
+  <div class="toolbar"><button onclick="show('battles')">← К списку</button>
+    <h2 style="margin:0;font-family:Georgia,serif;font-variant:small-caps">Бой #${id}
+      <span class="muted">· ${dict(D.bType,d.battle.type)} · ${dict(D.bStatus,d.battle.status)}</span></h2>
+    ${d.battle.status === 2 || d.battle.status === 1
+      ? `<button class="danger" onclick="abortBattle(${id})">Прервать бой</button>` : ''}</div>
+  <div class="panel"><h3>Участники</h3>
+    ${table([{h:'Сторона',v:r=>r.side},{h:'Имя',v:r=>r.name},
+      {h:'Итог',v:r=>dict(D.result,r.result)},{h:'Урон',v:r=>r.damage_dealt},
+      {h:'Опыт',v:r=>r.exp_gained}], d.participants)}</div>
+  <div class="panel"><h3>Журнал боя</h3>${log || '<p class="muted">Ходов ещё не было.</p>'}</div>`;
+};
+window.abortBattle = async (id) => {
+  if (!confirm('Прервать бой #' + id + '? Награды не начислятся.')) return;
+  // тело {} обязательно: api() без тела шлёт GET, а маршрут принимает POST
+  try { await api(`/battles/${id}/abort`, {}); ok('бой #' + id + ' прерван'); openBattle(id); }
+  catch (e) {
+    fail(e.message === 'battle_not_active'
+      ? new Error('бой #' + id + ' уже завершён или прерван') : e);
+    openBattle(id);   // показать актуальный статус
+  }
+};
+
+/* ================= Гроссбух ================= */
+R.ledger = async (mode = 'currency') => {
+  const rows = await api(mode === 'currency' ? '/ledger' : '/item-ledger');
+  const tabs = `<div class="toolbar">
+    <button class="${mode==='currency'?'brass':''}" onclick="show('ledger','currency')">Деньги</button>
+    <button class="${mode==='items'?'brass':''}" onclick="show('ledger','items')">Предметы</button></div>`;
+  if (mode === 'currency') return tabs + table([
+    {h:'№',v:r=>r.id},{h:'Когда',v:r=>dt(r.created_at)},
+    {h:'Кто',v:r=>r.name || '#' + r.subject_id},
+    {h:'Валюта',v:r=>r.code},{h:'Сумма',html:r=>amount(+r.amount)},
+    {h:'Остаток',html:r=>`<td class="num">${r.balance_after}</td>`},
+    {h:'Основание',v:r=>dict(D.curReason,r.reason)},
+  ], rows);
+  return tabs + table([
+    {h:'№',v:r=>r.id},{h:'Когда',v:r=>dt(r.created_at)},{h:'Предмет',v:r=>r.name},
+    {h:'Экз.',v:r=>r.item_instance_id},{h:'Кол-во',v:r=>r.quantity},
+    {h:'Откуда',v:r=>r.from_owner_type?`${dict(D.owner,r.from_owner_type)} #${r.from_owner_id}`:'—'},
+    {h:'Куда',v:r=>r.to_owner_type?`${dict(D.owner,r.to_owner_type)} #${r.to_owner_id}`:'—'},
+    {h:'Основание',v:r=>dict(D.itemReason,r.reason)},
+  ], rows);
+};
+
+/* ================= Предметы ================= */
+R.items = async (f = {}) => {
+  const qs = new URLSearchParams();
+  if (f.q) qs.set('q', f.q);
+  if (f.type) qs.set('type', f.type);
+  const rows = await api('/item-templates?' + qs);
+  return `<div class="toolbar">
+    <div><label>Название или ID</label>
+      <input id="i-q" value="${esc(f.q||'')}" onkeydown="if(event.key==='Enter')R._is()"></div>
+    <div><label>Тип</label><select id="i-type">${opt(D.itemType, f.type, 'любой')}</select></div>
+    <button class="brass" onclick="R._is()">Найти</button>
+    <button onclick="editTpl()">Новый предмет</button></div>
+  ${table([
+    {h:'ID',v:r=>r.id},{h:'Название',v:r=>r.name},{h:'Тип',v:r=>dict(D.itemType,r.type)},
+    {h:'Слот',v:r=>dict(D.slot,r.slot)},{h:'Кач.',v:r=>r.quality},{h:'Ур.',v:r=>r.level_req},
+    {h:'Параметры',v:r=>JSON.stringify(r.base_stats||{})},
+    {h:'В мире',v:r=>r.instances},{h:'v',v:r=>r.version},
+  ], rows, (r)=>`class="click" onclick="openTpl(${r.id})"`)}`;
+};
+R._is = () => show('items', { q: $('#i-q').value.trim(), type: $('#i-type').value });
+window.openTpl = async (id) => {
+  const rows = await api('/item-templates?q=' + id);
+  const r = rows.find((x) => x.id === id);
+  editTpl(r);
+};
+window.editTpl = (r) => {
+  const t = r || { id:'', name:'', type:2, slot:'', quality:1, level_req:1,
+    base_stats:{}, requirements:{}, stackable:false, max_stack:1, tradable:true, icon:'' };
+  const bs = t.base_stats || {}, rq = t.requirements || {};
+  const extra = { ...bs };
+  for (const k of ['defense','strength','hp','crit']) delete extra[k];
+  $('#main').innerHTML = `
+  <div class="toolbar"><button onclick="show('items')">← К списку</button>
+    <h2 style="margin:0;font-family:Georgia,serif;font-variant:small-caps">
+      ${r ? 'Предмет #' + t.id + ' — ' + esc(t.name) : 'Новый предмет'}</h2>
+    ${r ? `<button onclick="giveTpl(${t.id})">Выдать игроку</button>
+           <button onclick="tplInstances(${t.id})">Экземпляры (${t.instances ?? 0})</button>` : ''}</div>
+  <div class="panel"><h3>Шаблон</h3><div class="form">
+    <div><label>Уникальный ID</label><input id="t-id" type="number" value="${t.id}" ${r?'disabled':''}></div>
+    <div class="wide"><label>Название</label><input id="t-name" value="${esc(t.name)}" style="width:100%"></div>
+    <div><label>Тип</label><select id="t-type">${opt(D.itemType, t.type)}</select></div>
+    <div><label>Слот (для брони)</label><select id="t-slot">${opt(D.slot, t.slot, '— не надевается')}</select></div>
+    <div><label>Качество 1–5</label><input id="t-q" type="number" value="${t.quality}"></div>
+    <div><label>Icon (ключ модели)</label><input id="t-icon" value="${esc(t.icon||'')}"></div>
+    <div><label>Стакуется</label><select id="t-stack">
+      <option value="0" ${!t.stackable?'selected':''}>нет</option>
+      <option value="1" ${t.stackable?'selected':''}>да</option></select></div>
+    <div><label>Макс. стак</label><input id="t-maxstack" type="number" value="${t.max_stack||1}"></div>
+  </div>
+  <h3 style="margin-top:14px">Характеристики</h3><div class="form">
+    <div><label>Защита</label><input id="s-def" type="number" value="${bs.defense ?? 0}"></div>
+    <div><label>Сила</label><input id="s-str" type="number" value="${bs.strength ?? 0}"></div>
+    <div><label>Здоровье</label><input id="s-hp" type="number" value="${bs.hp ?? 0}"></div>
+    <div><label>Крит, %</label><input id="s-crit" type="number" step="0.1" value="${bs.crit ?? 0}"></div>
+    <div class="wide"><label>Прочее (JSON, сольётся с характеристиками)</label>
+      <textarea id="s-extra" rows="2">${esc(JSON.stringify(extra))}</textarea></div>
+  </div>
+  <h3 style="margin-top:14px">Требования, чтобы надеть</h3><div class="form">
+    <div><label>Мин. уровень</label><input id="r-lvl" type="number" value="${rq.level ?? t.level_req ?? 1}"></div>
+  </div>
+  <div class="toolbar" style="margin-top:12px">
+    <button class="brass" onclick="saveTpl()">Сохранить предмет</button>
+    <span class="muted">ID уникален и навсегда; требования проверяет сервер при надевании</span></div></div>`;
+};
+window.saveTpl = async () => {
+  let extra = {};
+  try { extra = JSON.parse($('#s-extra').value || '{}'); }
+  catch { return stamp('Отказано · «Прочее» — это не JSON', true); }
+  const body = {
+    id: +$('#t-id').value, name: $('#t-name').value.trim(),
+    type: +$('#t-type').value, slot: $('#t-slot').value ? +$('#t-slot').value : null,
+    quality: +$('#t-q').value, icon: $('#t-icon').value.trim() || null,
+    stackable: $('#t-stack').value === '1', max_stack: +$('#t-maxstack').value || 1,
+    level_req: +$('#r-lvl').value || 1,
+    requirements: { level: +$('#r-lvl').value || 1 },
+    base_stats: { ...extra,
+      defense:+$('#s-def').value||0, strength:+$('#s-str').value||0,
+      hp:+$('#s-hp').value||0, crit:+$('#s-crit').value||0 },
+  };
+  if (!body.id || !body.name) return stamp('Отказано · нужны ID и название', true);
+  try { await api('/item-templates', body); ok('предмет #' + body.id); show('items'); }
+  catch (e) { fail(e); }
+};
+window.giveTpl = async (tplId) => {
+  const charId = Number(prompt('ID персонажа:')); if (!charId) return;
+  const qty = Number(prompt('Количество:', '1')) || 1;
+  try { const r = await api(`/characters/${charId}/give-item`,
+      { template_id: tplId, quantity: qty });
+    ok('выдан #' + r.itemId); } catch (e) { fail(e); }
+};
+window.tplInstances = async (tplId) => {
+  const rows = await api('/item-instances?template_id=' + tplId);
+  $('#main').innerHTML = `
+  <div class="toolbar"><button onclick="openTpl(${tplId})">← К предмету</button>
+    <h2 style="margin:0;font-family:Georgia,serif;font-variant:small-caps">
+      Экземпляры шаблона #${tplId}</h2></div>
+  <div class="panel">${table([
+    {h:'ID',v:r=>r.id},{h:'Владелец',v:r=>(r.owner_name||dict(D.owner,r.owner_type))+' #'+r.owner_id},
+    {h:'Где',v:r=>dict(D.owner,r.owner_type)},{h:'Кол-во',v:r=>r.quantity},
+    {h:'Заточка',v:r=>'+'+r.enchant_level},{h:'Создан',v:r=>dt(r.created_at)},
+    {h:'',html:r=>`<td><button class="sm" onclick="enchantItem(${r.id},${r.enchant_level})">Заточка</button>
+      <button class="sm danger" onclick="confiscate(${r.id},0)">Изъять</button></td>`},
+  ], rows)}</div>`;
+};
+
+/* ================= Задания ================= */
+R.quests = async () => {
+  const rows = await api('/quests');
+  return `<div class="toolbar"><button class="brass" onclick="editQuest()">Новое задание</button>
+    <span class="muted">Задания отслеживаются у игроков автоматически; награда приходит сразу.</span></div>
+  ${table([
+    {h:'ID',v:r=>r.id},{h:'Название',v:r=>r.name},
+    {h:'Вкл',html:r=>`<td>${r.active?'<span class="credit">да</span>':'<span class="muted">нет</span>'}</td>`},
+    {h:'Уровень',v:r=>r.level_req},{h:'Повтор',v:r=>dict(D.rep,r.repeatable)},
+    {h:'Цель',v:r=>`побед в охоте: ${(r.objectives||{}).count ?? 1}`},
+    {h:'Награда',v:r=>{const w=r.rewards||{};return [w.copper&&w.copper+' меди',
+      w.exp&&w.exp+' опыта',(w.items||[]).length&&'предметы'].filter(Boolean).join(', ')||'—';}},
+    {h:'Выполнили',v:r=>r.completed_by},
+  ], rows, (r)=>`class="click" onclick="openQuest(${r.id})"`)}`;
+};
+window.openQuest = async (id) => {
+  const rows = await api('/quests');
+  editQuest(rows.find((x) => x.id === id));
+};
+window.editQuest = (r) => {
+  const q = r || { id:'', name:'', description:'', image:'', level_req:1,
+    repeatable:2, active:true, objectives:{kind:'hunt_wins',count:3},
+    rewards:{copper:100,exp:200,items:[]} };
+  const w = q.rewards || {};
+  $('#main').innerHTML = `
+  <div class="toolbar"><button onclick="show('quests')">← К списку</button>
+    <h2 style="margin:0;font-family:Georgia,serif;font-variant:small-caps">
+      ${r ? 'Задание #' + q.id : 'Новое задание'}</h2></div>
+  <div class="panel"><div class="form">
+    <div><label>Уникальный ID</label><input id="q-id" type="number" value="${q.id}" ${r?'disabled':''}></div>
+    <div class="wide"><label>Название</label><input id="q-name" value="${esc(q.name)}" style="width:100%"></div>
+    <div class="wide"><label>Описание (видно игроку)</label>
+      <textarea id="q-desc" rows="3">${esc(q.description||'')}</textarea></div>
+    <div><label>Мин. уровень</label><input id="q-lvl" type="number" value="${q.level_req}"></div>
+    <div><label>Повторяемость</label><select id="q-rep">${opt(D.rep, q.repeatable)}</select></div>
+    <div><label>Включено</label><select id="q-active">
+      <option value="1" ${q.active?'selected':''}>да</option>
+      <option value="0" ${!q.active?'selected':''}>нет</option></select></div>
+    <div><label>Цель: побед в охоте</label>
+      <input id="q-count" type="number" value="${(q.objectives||{}).count ?? 1}"></div>
+    <div><label>Награда: медь</label><input id="q-copper" type="number" value="${w.copper ?? 0}"></div>
+    <div><label>Награда: опыт</label><input id="q-exp" type="number" value="${w.exp ?? 0}"></div>
+    <div class="wide"><label>Награда: ID предметов через запятую</label>
+      <input id="q-items" value="${esc((w.items||[]).join(', '))}" style="width:100%"></div>
+    <div class="wide"><label>Картинка</label>
+      <input id="q-file" type="file" accept="image/*">
+      <input id="q-image" value="${esc(q.image||'')}" placeholder="/uploads/..." style="width:60%">
+      ${q.image ? `<div style="margin-top:8px"><img src="${esc(q.image)}"
+        style="max-height:110px;border:1px solid var(--line);border-radius:3px"></div>` : ''}</div>
+  </div>
+  <div class="toolbar" style="margin-top:12px">
+    <button class="brass" onclick="saveQuest()">Сохранить задание</button></div></div>`;
+  $('#q-file').addEventListener('change', async (e) => {
+    const f = e.target.files[0]; if (!f) return;
+    try { $('#q-image').value = await upload(f); ok('картинка загружена'); }
+    catch (err) { fail(err); }
+  });
+};
+window.saveQuest = async () => {
+  const body = {
+    id: +$('#q-id').value, name: $('#q-name').value.trim(),
+    description: $('#q-desc').value.trim(), image: $('#q-image').value.trim() || null,
+    level_req: +$('#q-lvl').value || 1, repeatable: +$('#q-rep').value,
+    active: $('#q-active').value === '1',
+    objectives: { kind: 'hunt_wins', count: +$('#q-count').value || 1 },
+    rewards: { copper: +$('#q-copper').value || 0, exp: +$('#q-exp').value || 0,
+      items: $('#q-items').value.split(',').map((s)=>+s.trim()).filter(Boolean) },
+  };
+  if (!body.id || !body.name) return stamp('Отказано · нужны ID и название', true);
+  try { await api('/quests', body); ok('задание #' + body.id); show('quests'); }
+  catch (e) { fail(e); }
+};
+
+/* ================= Аукцион, почта, чат ================= */
+R.market = async () => table([
+  {h:'Лот',v:r=>r.id},{h:'Предмет',v:r=>r.item},{h:'Кол-во',v:r=>r.quantity},
+  {h:'Продавец',v:r=>r.seller},{h:'Старт',v:r=>r.start_price},{h:'Выкуп',v:r=>r.buyout_price ?? '—'},
+  {h:'Ставка',v:r=>r.current_bid ?? '—'},{h:'Покупатель',v:r=>r.bidder ?? '—'},
+  {h:'До',v:r=>dt(r.ends_at)},
+], await api('/auction'));
+
+R.mail = async () => table([
+  {h:'№',v:r=>r.id},{h:'Кому',v:r=>r.recipient},{h:'От',v:r=>r.sender || 'Система'},
+  {h:'Тема',v:r=>r.subject},{h:'Деньги',v:r=>r.money_attached},
+  {h:'Вложения',v:r=>r.has_attachments ? (r.attachments_taken?'забраны':'ждут') : '—'},
+  {h:'Прочитано',v:r=>r.is_read?'да':'нет'},{h:'Когда',v:r=>dt(r.created_at)},
+], await api('/mail'));
+
+R.chat = async () => table([
+  {h:'Когда',v:r=>dt(r.created_at)},
+  {h:'Канал',v:r=>r.type===2?'локация #'+r.ref_id:'канал '+r.type},
+  {h:'Игрок',v:r=>r.sender_name},{h:'Сообщение',v:r=>r.body},
+  {h:'',html:r=>r.sender_id
+    ? `<td><button class="sm danger" onclick="mute(${r.sender_id})">Мут</button></td>`:'<td></td>'},
+], await api('/chat'));
+
+/* ================= Конфиг: живой баланс без деплоя ================= */
+const CFG_FORMS = {
+  'battle.turn_time': { title: 'Время хода в бою, секунд',
+    render: (v) => `<input data-k="0" type="number" value="${v}">`,
+    collect: (g) => +g(0) },
+  'battle.reward.hunt': { title: 'Награда за победу в охоте',
+    render: (v) => `<div><label>Меди</label><input data-k="0" type="number" value="${v.amount}"></div>
+      <div><label>Опыта</label><input data-k="1" type="number" value="${v.exp}"></div>`,
+    collect: (g) => ({ currency: 'copper', amount: +g(0), exp: +g(1) }) },
+  'battle.escape_elixir': { title: 'ID шаблона Эликсира побега',
+    render: (v) => `<input data-k="0" type="number" value="${v}">`,
+    collect: (g) => +g(0) },
+  'character.start': { title: 'Стартовый персонаж',
+    render: (v) => `<div><label>Уровень</label><input data-k="0" type="number" value="${v.level}"></div>
+      <div><label>HP</label><input data-k="1" type="number" value="${v.hp}"></div>
+      <div><label>Урон от</label><input data-k="2" type="number" value="${v.damage[0]}"></div>
+      <div><label>Урон до</label><input data-k="3" type="number" value="${v.damage[1]}"></div>
+      <div><label>Крит (0–1)</label><input data-k="4" type="number" step="0.01" value="${v.crit}"></div>
+      <div><label>Уворот (0–1)</label><input data-k="5" type="number" step="0.01" value="${v.dodge}"></div>`,
+    collect: (g, old) => ({ ...old, level:+g(0), hp:+g(1),
+      damage:[+g(2), +g(3)], crit:+g(4), dodge:+g(5) }) },
+  'chat.history_limit': { title: 'Сколько сообщений чата отдавать при входе',
+    render: (v) => `<input data-k="0" type="number" value="${v}">`,
+    collect: (g) => +g(0) },
+};
+let CFG_RAW = {};
+R.config = async () => {
+  const rows = await api('/config');
+  CFG_RAW = Object.fromEntries(rows.map((r) => [r.key, r.value]));
+  return `<div class="panel"><h3>Что это</h3>
+    <p class="muted" style="margin:0">Конфиг — живой баланс игры: цифры, которые сервер
+    читает из базы, а не из кода. Поменял значение → «Сохранить» → сервер подхватил
+    сразу, без пересборки и перезапуска. Каждое изменение попадает в аудит.</p></div>
+  ${rows.map((r) => {
+    const f = CFG_FORMS[r.key];
+    const body = f
+      ? `<div class="form" data-key="${esc(r.key)}">${f.render(r.value)}</div>`
+      : `<textarea rows="2" data-key="${esc(r.key)}" data-json>${esc(JSON.stringify(r.value))}</textarea>`;
+    return `<div class="panel"><h3>${f ? f.title : r.key}
+        <span class="muted" style="font-size:11px">· ${esc(r.key)} · v${r.version}</span></h3>
+      ${body}
+      <div class="toolbar" style="margin-top:10px">
+        <button class="brass" onclick="saveCfg('${esc(r.key)}')">Сохранить</button>
+        <span class="muted">изменён: ${dt(r.updated_at)}</span></div></div>`;
+  }).join('')}`;
+};
+window.saveCfg = async (key) => {
+  const f = CFG_FORMS[key];
+  let value;
+  if (f) {
+    const box = document.querySelector(`[data-key="${key}"]`);
+    const g = (i) => box.querySelector(`[data-k="${i}"]`).value;
+    value = f.collect(g, CFG_RAW[key]);
+  } else {
+    try { value = JSON.parse(document.querySelector(`[data-key="${key}"][data-json]`).value); }
+    catch { return stamp('Отказано · это не JSON', true); }
+  }
+  try { await api('/config', { key, value }); ok('config ' + key); }
+  catch (e) { fail(e); }
+};
+
+R.audit = async () => table([
+  {h:'№',v:r=>r.id},{h:'Когда',v:r=>dt(r.ts)},{h:'Действие',v:r=>r.action},
+  {h:'Цель',v:r=>r.target_id ? '#' + r.target_id : '—'},
+  {h:'Детали',v:r=>r.details ? JSON.stringify(r.details) : '—'},
+], await api('/audit'));
+
+/* ================= навигация и вход ================= */
+window.show = async (name, arg) => {
+  current = name;
+  document.querySelectorAll('#nav button').forEach((b) =>
+    b.classList.toggle('active', b.dataset.s === name));
+  $('#hdr-title').textContent = SECTIONS.find(([k]) => k === name)[1];
+  $('#main').innerHTML = '<p class="muted">Листаем книгу…</p>';
+  try { $('#main').innerHTML = await R[name](arg); }
+  catch (e) { $('#main').innerHTML =
+    `<p class="debit">Не удалось загрузить: ${esc(e.message)}</p>`; }
+};
+$('#nav').innerHTML = SECTIONS.map(([k, t]) =>
+  `<button data-s="${k}" onclick="show('${k}')">${t}</button>`).join('');
+
+function logout(){
+  KEY = ''; sessionStorage.removeItem('adminKey');
+  $('#app').style.display = 'none'; $('#login').style.display = 'flex';
+}
+async function enter(){
+  $('#login').style.display = 'none'; $('#app').style.display = 'grid';
+  show('stats');
+  setInterval(() => { if (current === 'stats') show('stats'); }, 15000);
+}
+$('#login-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  KEY = $('#login-pass').value;
+  try { await api('/login', { password: KEY });
+    sessionStorage.setItem('adminKey', KEY); enter(); }
+  catch (err) { $('#login-err').textContent =
+    err.message === 'admin_disabled'
+      ? 'Админка выключена: задай ADMIN_PASSWORD в .env'
+      : 'Пароль не подходит'; }
+});
+if (KEY) api('/login', { password: KEY }).then(enter).catch(logout);
+</script>
+</body>
+</html>

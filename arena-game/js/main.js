@@ -12,7 +12,7 @@
  * FIGHTERS, LOCATIONS и ITEMS — см. README.md.
  */
 import { Arena } from './arena/Arena.js';
-import { BattleSystem } from './arena/BattleSystem.js';
+import { api, ServerBattle } from './net/net.js';
 import { BattleUI } from './arena/BattleUI.js';
 import { DressingRoom } from './arena/DressingRoom.js';
 
@@ -28,6 +28,43 @@ const PLAYER = {
   xp: 1240,    xpMax: 2000,    // опыт до следующего уровня
   pvpXp: 360,  pvpXpMax: 1000, // опыт PvP
 };
+
+// ---------------------------------------------------------------------------
+// Связь с сервером (см. js/net/net.js). Если сервер недоступен, игра остаётся
+// в оффлайн-режиме: локации листаются, но бой/чат/игроки требуют подключения.
+// ---------------------------------------------------------------------------
+
+let online = false;
+const SLOT_IDS = { torso: 1 };   // имя слота экипировки -> body_part в БД
+const SLOT_NAMES = Object.fromEntries(
+  Object.entries(SLOT_IDS).map(([k, v]) => [v, k]));
+const LOC_BY_ID = { 1: 'village', 2: 'canyon', 3: 'night' };
+
+/** Перенести персонажа с сервера в PLAYER и шапку. */
+function applyCharacter(ch) {
+  PLAYER.name = ch.name;
+  PLAYER.level = ch.level;
+  PLAYER.wallet = { copper: 0, silver: 0, gold: 0, diamond: 0, ...ch.wallet };
+  delete PLAYER.wallet.valor;    // доблесть показывается шкалой PvP, не монетой
+  PLAYER.xp = ch.xp; PLAYER.xpMax = ch.xpMax;
+  PLAYER.pvpXp = ch.pvpXp; PLAYER.pvpXpMax = ch.pvpXpMax;
+  $('pp-name').textContent = PLAYER.name;
+  $('pp-level').textContent = PLAYER.level;
+  renderMoney();
+  renderXP();
+}
+
+/** Переход между локациями: сначала подтверждение сервера, потом UI. */
+async function gotoLocation(key) {
+  if (!online) { setLocation(key); return; }
+  try {
+    await api.move(LOCATIONS[key].id);
+    setLocation(key);
+    refreshPlayers();
+  } catch (e) {
+    showToast('Туда не пройти: ' + e.message);
+  }
+}
 
 const FIGHTERS = {
   brawler: {
@@ -68,6 +105,7 @@ const FIGHTERS = {
 // и действий может быть сколько угодно, секции просто растут.
 const LOCATIONS = {
   village: {
+    id: 1,
     name: 'Деревня',
     image: 'assets/backgrounds/village.webp',
     actions: [
@@ -82,6 +120,7 @@ const LOCATIONS = {
     ],
   },
   canyon: {
+    id: 2,
     name: 'Каньон',
     image: 'assets/backgrounds/canyon.svg',
     actions: [
@@ -95,6 +134,7 @@ const LOCATIONS = {
     ],
   },
   night: {
+    id: 3,
     name: 'Ночная лощина',
     css: 'linear-gradient(180deg,#0b1026 0%,#1b2a52 55%,#2c3e6b 78%,#15315c 100%)',
     actions: [
@@ -239,7 +279,7 @@ function setLocation(key) {
 
   renderActionGroup('Переходы', transitions.map((a) =>
     makeButton('loc-chip', `<span class="lc-ico">${ICON_GO}</span><span>${a.label}</span>`, () => {
-      if (a.goto) setLocation(a.goto);
+      if (a.goto) gotoLocation(a.goto);
       else showToast(`«${a.label}» — заглушка: модуль локаций подключается отдельно`);
     })));
 
@@ -260,14 +300,26 @@ function setLocation(key) {
 // Бой
 // ---------------------------------------------------------------------------
 
+/** Возврат в идущий бой после F5 или обрыва связи. */
+async function resumeBattle(serverBattle) {
+  console.log('Возврат в бой', serverBattle.battleId,
+    'mode=', mode, 'loading=', battleLoading);
+  if (mode === 'battle' || battleLoading) return;
+  setMode('battle');
+  arena.setBackground(LOCATIONS[currentLoc]);
+  showToast('Бой продолжается — возвращаемся');
+  await initBattle(serverBattle);
+}
+
 async function startBattle() {
   if (mode === 'battle' || battleLoading) return;
+  if (!online) { showToast('Бой требует подключения к серверу'); return; }
   setMode('battle');
   arena.setBackground(LOCATIONS[currentLoc]);
   await initBattle();
 }
 
-async function initBattle() {
+async function initBattle(resumedBattle = null) {
   if (battleLoading) return;
   battleLoading = true;
   loadingEl.classList.remove('hidden');
@@ -289,18 +341,25 @@ async function initBattle() {
     loadingEl.classList.add('hidden');
   }
 
-  battle = new BattleSystem({
-    left:  { name: leftDef.name,  isAI: false, ...leftDef.stats },
-    right: { name: rightDef.name, isAI: true,  ...rightDef.stats },
-  }, { turnTime: 20 });
+  // бой создаёт и ведёт сервер: формулы те же (порт BattleSystem),
+  // но урон, криты и награды решает только он
+  try {
+    battle = resumedBattle || await ServerBattle.hunt();
+  } catch (e) {
+    showToast('Не удалось начать бой: ' + e.message);
+    setMode('location');
+    return;
+  }
 
   ui = new BattleUI({
     head: $('battle-head'),
     stage: arenaStage,
     log: $('battle-log'),
     teams: { left: $('team-left'), right: $('team-right') },
-    left:  { name: leftDef.name,  level: leftDef.level },
-    right: { name: rightDef.name, level: rightDef.level },
+    left:  { name: battle.sides.left.name,
+             level: battle.sides.left.level ?? PLAYER.level },
+    right: { name: battle.sides.right.name,
+             level: battle.sides.right.level ?? '?' },
     onStrike: (move) => {
       ui.hideControls();
       battle.submitMove('left', move);
@@ -332,22 +391,40 @@ async function initBattle() {
 
   battle.addEventListener('battleEnd', (e) => {
     ui.hideControls(false);
+    if (e.detail.aborted) {
+      showToast(e.detail.reason === 'admin'
+        ? 'Бой прерван администратором' : 'Вы покинули бой');
+      setTimeout(() => leaveBattle(true), 900);
+      return;
+    }
     const victory = e.detail.winner === 'left';
     if (victory) {
-      addMoney('copper', 50);
-      PLAYER.xp = Math.min(PLAYER.xpMax, PLAYER.xp + 120);
-      renderXP();
+      // деньги, опыт и задания начислил сервер — просто обновляем шапку
+      api.me().then(applyCharacter).catch(console.error);
     }
     ui.showEnd(victory, {
       onRestart: () => initBattle(),
-      onLeave: () => leaveBattle(),
+      onLeave: () => leaveBattle(true),
     });
   });
 
-  battle.start();
+  battle.addEventListener('serverError', (e) => {
+    const code = e.detail.error;
+    showToast(code === 'no_escape_elixir'
+      ? 'Покинуть бой можно только Эликсиром побега'
+      : code === 'cannot_leave' ? 'Из боя нельзя просто уйти'
+      : 'Сервер: ' + code);
+  });
+
+  battle.activate?.();   // воспроизвести события, накопленные пока грузились модели
 }
 
-function leaveBattle() {
+function leaveBattle(force = false) {
+  // идущий бой покидается только Эликсиром побега — решает сервер
+  if (!force && battle && battle.phase !== 'ended' && online) {
+    battle.requestEscape();
+    return;
+  }
   if (ui) { ui.destroy(); ui = null; }
   if (battle) { battle.destroy(); battle = null; }
   setMode('location');
@@ -403,6 +480,7 @@ function activateTab(name) {
     t.classList.toggle('active', t.dataset.pane === name));
   document.querySelectorAll('.dock-pane').forEach((p) =>
     p.classList.toggle('active', p.id === 'pane-' + name));
+  if (name === 'players') refreshPlayers();
 }
 
 document.querySelectorAll('.dock-tab').forEach((t) => {
@@ -505,16 +583,34 @@ document.querySelectorAll('.chat-tab').forEach((t) => {
   });
 });
 
-// чат — заглушка с локальным эхом: настоящий чат подключается отдельным модулем
+// чат локации: отправка на сервер, своё сообщение возвращается из pub/sub
 const chatLog = $('chat-log');
 
 function chatMessage(author, text, system = false) {
   const line = document.createElement('div');
-  line.className = 'chat-line' + (system ? ' system' : '');
+  line.className = 'chat-line' + (system || author === 'Система' ? ' system' : '');
   const b = document.createElement('b');
-  b.textContent = system ? `[${author}]` : author;
+  b.textContent = system || author === 'Система' ? `[${author}]` : author;
   line.appendChild(b);
-  line.appendChild(document.createTextNode(': ' + text));
+  line.appendChild(document.createTextNode(': '));
+  // «Бой #N» в тексте — кликабельная ссылка на окно боя
+  const str = String(text);
+  const m = str.match(/Бой #(\d+)/);
+  if (m) {
+    line.appendChild(document.createTextNode(str.slice(0, m.index)));
+    const a = document.createElement('a');
+    a.className = 'battle-link';
+    a.href = '#';
+    a.textContent = m[0];
+    a.addEventListener('click', (e) => {
+      e.preventDefault();
+      openBattleInfo(Number(m[1]));
+    });
+    line.appendChild(a);
+    line.appendChild(document.createTextNode(str.slice(m.index + m[0].length)));
+  } else {
+    line.appendChild(document.createTextNode(str));
+  }
   chatLog.appendChild(line);
   chatLog.scrollTop = chatLog.scrollHeight;
 }
@@ -524,17 +620,129 @@ $('chat-form').addEventListener('submit', (e) => {
   const input = $('chat-input');
   const text = input.value.trim();
   if (!text) return;
-  chatMessage(PLAYER.name, text);
+  if (online) api.sendChat(text);        // вернётся всем в локации, включая нас
+  else chatMessage(PLAYER.name, text);   // оффлайн: локальное эхо
   input.value = '';
 });
 
-// список игроков в локации — заглушка
+// список игроков в локации — живой, из Redis-присутствия сервера
 const playersList = $('players-list');
-for (const p of [{ name: 'ИгрокА', level: 15 }, { name: 'ИгрокБ', level: 15 }]) {
-  const row = document.createElement('div');
-  row.className = 'player-row';
-  row.innerHTML = `${p.name} <span class="m-lvl">[${p.level}]</span>`;
-  playersList.appendChild(row);
+async function refreshPlayers() {
+  if (!online) return;
+  try {
+    const players = await api.players();
+    playersList.innerHTML = '';
+    for (const p of players) {
+      const row = document.createElement('div');
+      row.className = 'player-row';
+      row.innerHTML = `${p.name} <span class="m-lvl">[${p.level}]</span>`;
+      playersList.appendChild(row);
+    }
+  } catch (e) {
+    console.error('Список игроков:', e);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Окно информации о бое (открывается ссылкой «Бой #N» из чата)
+// ---------------------------------------------------------------------------
+
+const esc = (v) => String(v ?? '').replace(/[&<>"]/g,
+  (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+const binfoEl = $('binfo');
+const binfoTitle = $('binfo-title');
+const binfoBody = $('binfo-body');
+let binfoTimer = null;   // автообновление, пока бой идёт и окно открыто
+
+function closeBattleInfo() {
+  binfoEl.classList.add('hidden');
+  clearInterval(binfoTimer);
+  binfoTimer = null;
+}
+$('binfo-close').addEventListener('click', closeBattleInfo);
+binfoEl.addEventListener('click', (e) => {
+  if (e.target === binfoEl) closeBattleInfo();
+});
+
+const RESULT_LABELS = { 1: 'победа', 2: 'поражение', 3: 'ничья', 4: 'побег', 5: 'таймаут' };
+
+async function openBattleInfo(id) {
+  binfoTitle.textContent = `Бой #${id}`;
+  binfoBody.innerHTML = '<div class="bi-empty">Загрузка…</div>';
+  binfoEl.classList.remove('hidden');
+  clearInterval(binfoTimer);
+  binfoTimer = null;
+  await renderBattleInfo(id);
+}
+
+async function renderBattleInfo(id) {
+  if (!online) { binfoBody.innerHTML = '<div class="bi-empty">Нет связи с сервером</div>'; return; }
+  let d;
+  try {
+    d = await api.battleInfo(id);
+  } catch (e) {
+    clearInterval(binfoTimer); binfoTimer = null;
+    binfoBody.innerHTML = `<div class="bi-empty">Не удалось загрузить: ${esc(e.message)}</div>`;
+    return;
+  }
+
+  if (d.status === 'active') {
+    binfoTitle.textContent = `Бой #${id} — идёт, ход ${d.turn}`;
+    const bar = (cur, max, cls) => `
+      <div class="bi-bar ${cls}">
+        <div class="bi-fill" style="width:${max ? Math.max(0, Math.min(100, (cur / max) * 100)) : 0}%"></div>
+        <span>${cur} / ${max}</span>
+      </div>`;
+    const member = (p) => `
+      <div class="bi-member">
+        <div class="bi-name">${esc(p.name)} <span class="m-lvl">[${p.level ?? '?'}]</span></div>
+        ${bar(p.hp, p.maxHp, 'bi-hp')}
+        ${bar(p.mp, p.maxMp, 'bi-mp')}
+      </div>`;
+    binfoBody.innerHTML = `
+      <div class="bi-teams">
+        <div class="bi-team"><div class="bi-team-title">1я команда</div>
+          ${d.teams.left.map(member).join('')}</div>
+        <div class="bi-team"><div class="bi-team-title">2я команда</div>
+          ${d.teams.right.map(member).join('')}</div>
+      </div>`;
+    // живой бой — обновляем картину раз в 2 секунды
+    if (!binfoTimer) {
+      binfoTimer = setInterval(() => {
+        if (binfoEl.classList.contains('hidden')) closeBattleInfo();
+        else renderBattleInfo(id);
+      }, 2000);
+    }
+    return;
+  }
+
+  // бой завершён или прерван — таблица итогов
+  clearInterval(binfoTimer);
+  binfoTimer = null;
+  binfoTitle.textContent = `Бой #${id} — ${d.status === 'aborted' ? 'прерван' : 'завершён'}`;
+  const showValor = d.results.some((r) => Number(r.valor) > 0);
+  const num = (v) => (v == null ? '—' : v);
+  const rows = d.results.map((r) => `
+    <tr>
+      <td>${r.side}я</td>
+      <td>${esc(r.name)} <span class="m-lvl">[${r.level ?? '?'}]</span></td>
+      <td>${RESULT_LABELS[r.result] || '—'}</td>
+      <td>${num(r.damage)}</td>
+      <td>${num(r.kills)}</td>
+      <td>${num(r.deaths)}</td>
+      <td>${num(r.exp)}</td>
+      ${showValor ? `<td>${num(r.valor)}</td>` : ''}
+    </tr>`).join('');
+  binfoBody.innerHTML = `
+    <table class="bi-table">
+      <thead><tr>
+        <th>Команда</th><th>Имя</th><th>Итог</th><th>Урон</th>
+        <th>Убийств</th><th>Смертей</th><th>Опыт</th>
+        ${showValor ? '<th>Доблесть</th>' : ''}
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
 }
 
 // ---------------------------------------------------------------------------
@@ -559,6 +767,7 @@ function syncEquipment(side) {
       if (!fighter) return;
       for (const [slot, key] of Object.entries(equipState[side])) {
         try {
+          if (key && ITEMS[key]?.noModel) continue;   // без 3D — только состояние
           if (key && !fighter.hasEquipped(slot)) await fighter.equip(ITEMS[key]);
           else if (!key && fighter.hasEquipped(slot)) fighter.unequip(slot);
         } catch (e) {
@@ -578,8 +787,43 @@ function syncEquipment(side) {
 
 function toggleEquip(side, itemKey) {
   const item = ITEMS[itemKey];
-  equipState[side][item.slot] = equipState[side][item.slot] === itemKey ? null : itemKey;
+  const prev = equipState[side][item.slot] || null;
+  const next = prev === itemKey ? null : itemKey;
+  equipState[side][item.slot] = next;
+  if (side === 'left') syncServerEquip(item.slot, next, prev); // правый — локальная кукла
   return syncEquipment(side);
+}
+
+const EQUIP_ERRORS = {
+  injured: 'мешает травма',
+  level_too_low: 'не хватает уровня',
+  not_equippable: 'этот предмет нельзя надеть',
+  not_found: 'предмета нет в инвентаре',
+  conflict: 'предмет занят, попробуйте ещё раз',
+};
+
+/** Сервер хранит экипировку игрока (item_instances + item_ledger). */
+async function syncServerEquip(slotName, itemKey, prevKey = null) {
+  if (!online) return;
+  try {
+    if (itemKey) {
+      const inv = await api.inventory();
+      const it = inv.find((i) => i.icon === itemKey || 'srv' + i.templateId === itemKey);
+      if (!it) throw new Error('not_found');
+      if (!it.equipped) await api.equip(it.id);
+    } else {
+      await api.unequip(SLOT_IDS[slotName]);
+    }
+  } catch (e) {
+    console.error('Экипировка на сервере:', e);
+    showToast('Сервер отклонил экипировку: ' + (EQUIP_ERRORS[e.message] || e.message));
+    // сервер — источник правды: откатываем локальное состояние и 3D
+    equipState.left[slotName] = prevKey;
+    syncEquipment('left');
+    if (!dressingEl.classList.contains('hidden') && dressingSide === 'left') {
+      syncDressing(false).catch(console.error);
+    }
+  }
 }
 
 // --- примерочная: персонаж лицом к камере, вещи меряются на нём ---
@@ -613,6 +857,7 @@ async function syncDressing(withTaunt = true) {
   if (!f) return;
   for (const [slot, key] of Object.entries(equipState[dressingSide])) {
     try {
+      if (key && ITEMS[key]?.noModel) continue;       // без 3D — только состояние
       if (key && !f.hasEquipped(slot)) {
         if (withTaunt) await dressing.equip(ITEMS[key]);
         else await f.equip(ITEMS[key]);
@@ -703,9 +948,44 @@ document.querySelectorAll('[data-stub]').forEach((btn) => {
 
 renderMoney();
 renderXP();
-setLocation('village');
-setMode('location');
 
-// пара реплик, чтобы чат не выглядел пустым (заглушка до настоящего модуля)
-chatMessage('ИгрокБ', 'Всем привет! Как охота?');
-chatMessage('Друид', 'Продам травы маны, недорого.');
+(async () => {
+  // если на сервере остался идущий бой (после F5/обрыва) — вернёмся в него
+  api.onBattleResume((b) => resumeBattle(b).catch((e) => {
+    console.error('Возврат в бой не удался:', e);
+    showToast('Не удалось вернуться в бой: ' + e.message);
+  }));
+  try {
+    const ch = await api.login(PLAYER.name);
+    online = true;
+    applyCharacter(ch);
+
+    // вещи с сервера: знакомым ключам — 3D-модели из ITEMS, остальные
+    // добавляются без модели (noModel), чтобы видно было ВСЁ имущество
+    const inv = await api.inventory();
+    for (const it of inv) {
+      const slotName = SLOT_NAMES[it.slot];
+      const key = it.icon || 'srv' + it.templateId;
+      if (slotName && !ITEMS[key]) {
+        ITEMS[key] = { name: it.name, slot: slotName, icon: '📦', noModel: true };
+      }
+      if (it.equipped && slotName && ITEMS[key]) {
+        equipState.left[slotName] = key;
+      }
+    }
+
+    // чат: история, затем живые сообщения
+    api.onChat((m) => chatMessage(m.from, m.text));
+    for (const h of await api.chatHistory()) chatMessage(h.sender_name, h.body);
+
+    setLocation(LOC_BY_ID[ch.location_id] || 'village');
+    refreshPlayers();
+  } catch (e) {
+    console.error('Сервер недоступен, оффлайн-режим:', e);
+    showToast('Сервер недоступен — игра в оффлайн-режиме');
+    setLocation('village');
+  }
+  // если за время загрузки сервер вернул идущий бой (battleResume),
+  // режим уже «бой» — не выкидываем игрока обратно в локацию
+  if (mode !== 'battle' && !battleLoading) setMode('location');
+})();
