@@ -72,7 +72,13 @@ export async function equipItem(fighter, itemDef) {
 
   let hasSkin = false;
   scene.traverse((o) => { hasSkin = hasSkin || !!o.isSkinnedMesh; });
-  const mode = hasSkin ? 'skin' : (cfg.mode || 'bone');
+  // cfg.mode (дефолт слота или attach.mode) важнее авто-детекта: Meshy-одежда
+  // без скелета — autoskin; FBX с чужим ригом не должен перебивать это в 'skin'.
+  let mode = cfg.mode || (hasSkin ? 'skin' : 'bone');
+  if (mode === 'skin' && !isRigCompatible(scene, fighter)) {
+    console.warn(`Экипировка «${itemDef.name}»: скелет несовместим с «${fighter.def.name}» — autoskin`);
+    mode = 'autoskin';
+  }
 
   const override = itemDef.material ? buildItemMaterial(itemDef.material) : null;
 
@@ -81,28 +87,82 @@ export async function equipItem(fighter, itemDef) {
   return equipRigid(fighter, itemDef, cfg, scene, override);
 }
 
+/** Прогреть кэш: загрузка FBX + веса автоскиннинга (без надевания на сцену). */
+export async function prefetchEquip(fighter, itemDef) {
+  try {
+    const slot = itemDef.slot || 'misc';
+    const cfg = { ...(SLOT_FIT[slot] || SLOT_FIT.misc), ...(itemDef.attach || {}) };
+    const { scene } = await loadGLTF(itemDef.model);
+    let hasSkin = false;
+    scene.traverse((o) => { hasSkin = hasSkin || !!o.isSkinnedMesh; });
+    let mode = cfg.mode || (hasSkin ? 'skin' : 'bone');
+    if (mode === 'skin' && !isRigCompatible(scene, fighter)) mode = 'autoskin';
+    if (mode !== 'autoskin') return true;
+    const main = mainSkinnedMesh(fighter);
+    const key = cacheKey(fighter, itemDef, cfg, 'autoskin');
+    if (!partsCache.has(key) && !pendingAuto.has(key)) {
+      pendingAuto.set(key,
+        computeAutoSkinTemplates(fighter, itemDef, cfg, scene, main, key)
+          .then((t) => { partsCache.set(key, t); return t; })
+          .finally(() => pendingAuto.delete(key)));
+    }
+    await pendingAuto.get(key);
+    return true;
+  } catch (e) {
+    console.warn(`Прогрев «${itemDef.name}»:`, e);
+    return false;
+  }
+}
+
 /**
- * Выполнить fn в bind-позе (симметричная Т-поза). Меряем и привязываем только
- * в ней: боевая стойка скручивает корпус, и перекос «замораживался» бы в
- * привязке. Текущая поза анимации сохраняется и восстанавливается.
+ * Выполнить fn в bind-позе скелета. Пока меряем посадку:
+ *  — анимация (боксёрская idle) на паузе, иначе mixer перезапишет кости;
+ *  — root.rotation.y = 0 (посадка в пространстве модели, не разворота арены);
+ *  — skeleton.pose() на всех мешах.
  */
 export function withBindPose(fighter, fn) {
-  const saved = [];
+  const savedBones = [];
   fighter.model.traverse((o) => {
-    if (o.isBone) saved.push([o, o.position.clone(), o.quaternion.clone(), o.scale.clone()]);
+    if (o.isBone) savedBones.push([o, o.position.clone(), o.quaternion.clone(), o.scale.clone()]);
   });
+
+  const savedRootY = fighter.root.rotation.y;
+  fighter.root.rotation.y = 0;
+
+  const animSnap = pauseAnimation(fighter);
+
   fighter.model.traverse((o) => { if (o.isSkinnedMesh) o.skeleton.pose(); });
   fighter.model.updateMatrixWorld(true);
+
   try {
     return fn();
   } finally {
-    for (const [b, p, q, s] of saved) {
+    for (const [b, p, q, s] of savedBones) {
       b.position.copy(p);
       b.quaternion.copy(q);
       b.scale.copy(s);
     }
+    fighter.root.rotation.y = savedRootY;
     fighter.model.updateMatrixWorld(true);
+    resumeAnimation(fighter, animSnap);
   }
+}
+
+function pauseAnimation(fighter) {
+  if (!fighter.current) return null;
+  const action = fighter.current;
+  const wasPaused = action.paused;
+  action.paused = true;
+  return { action, time: action.time, wasPaused };
+}
+
+function resumeAnimation(fighter, snap) {
+  if (!snap) return;
+  const { action, time, wasPaused } = snap;
+  action.time = time;
+  action.paused = wasPaused;
+  if (!action.isRunning()) action.play();
+  fighter.current = action;
 }
 
 // ---------------------------------------------------------------------------
@@ -130,52 +190,109 @@ function mainSkinnedMesh(fighter) {
   return main;
 }
 
+function boneWorldPos(fighter, matcher) {
+  const b = fighter.findBone(matcher);
+  if (!b) throw new Error(`Кость ${matcher} не найдена у «${fighter.def.name}»`);
+  return b.getWorldPosition(new THREE.Vector3());
+}
+
+function boneRefDistance(fighter, cfg) {
+  const refPair = cfg.ref || [/Neck$/i, /Hips$/i];
+  return boneWorldPos(fighter, refPair[0]).distanceTo(boneWorldPos(fighter, refPair[1])) || 0.5;
+}
+
+function measureDim(size, cfg) {
+  return cfg.axis === 'max' ? Math.max(size.x, size.y, size.z)
+    : cfg.axis === 'x' ? (size.x || size.y || size.z || 1)
+    : (size.y || size.x || size.z || 1);
+}
+
+/** offset [вперёд, вверх, влево] в осях модели (+Z / +Y / -X) → позиция holder в local кости. */
+function offsetInBoneLocal(bone, off) {
+  const p = bone.getWorldPosition(new THREE.Vector3());
+  p.addScaledVector(new THREE.Vector3(0, 0, 1), off[0] ?? 0);
+  p.addScaledVector(new THREE.Vector3(0, 1, 0), off[1] ?? 0);
+  p.addScaledVector(new THREE.Vector3(-1, 0, 0), off[2] ?? 0);
+  return bone.worldToLocal(p);
+}
+
 /**
- * Подогнать предмет к персонажу (вызывается в bind-позе): масштаб от эталонной
- * длины между костями, позиция на якорной точке. Возвращает holder —
- * НЕприкреплённую группу, чей matrixWorld = мировой трансформ предмета.
+ * Жёсткое крепление: holder — ребёнок кости. offset — в осях модели (не кости!):
+ * в боксёрской стойке локальная Z кости смотрит вбок, и смещение уводило латы в сторону.
+ */
+function fitToBone(fighter, itemRoot, bone, cfg) {
+  const holder = new THREE.Group();
+  bone.add(holder);
+
+  const rot = (cfg.rotation || [0, 0, 0]).map(THREE.MathUtils.degToRad);
+  holder.rotation.set(rot[0], rot[1], rot[2]);
+  holder.add(itemRoot);
+  holder.updateMatrixWorld(true);
+
+  const ref = boneRefDistance(fighter, cfg);
+  let box = new THREE.Box3().setFromObject(itemRoot);
+  let size = box.getSize(new THREE.Vector3());
+  holder.scale.setScalar((ref * (cfg.cover ?? 1.35)) / (measureDim(size, cfg) || 1) * (cfg.scale ?? 1));
+  holder.updateMatrixWorld(true);
+
+  box = new THREE.Box3().setFromObject(itemRoot);
+  if (cfg.align === 'bottom' || cfg.align === 'top') {
+    const pivot = (cfg.align === 'top' ? box.max : box.min).clone();
+    holder.worldToLocal(pivot);
+    itemRoot.position.copy(pivot).negate();
+  } else {
+    const center = box.getCenter(new THREE.Vector3());
+    holder.worldToLocal(center);
+    itemRoot.position.copy(center).negate();
+  }
+
+  holder.position.copy(offsetInBoneLocal(bone, cfg.offset || [0, 0, 0]));
+  holder.updateMatrixWorld(true);
+  return holder;
+}
+
+/**
+ * Подогнать предмет к персонажу (автоскиннинг): масштаб от эталонной длины,
+ * позиция на якорной точке в мире. Возвращает holder вне иерархии бойца.
+ *
+ * Габариты меряются ПОСЛЕ поворота: у Meshy/Tripo «рост» часто вдоль X.
  */
 function fitTransform(fighter, itemRoot, cfg) {
-  const wp = (matcher) => {
-    const b = fighter.findBone(matcher);
-    if (!b) throw new Error(`Кость ${matcher} не найдена у «${fighter.def.name}»`);
-    return b.getWorldPosition(new THREE.Vector3());
-  };
-
-  const refPair = cfg.ref || [/Neck$/i, /Hips$/i];
-  const ref = wp(refPair[0]).distanceTo(wp(refPair[1])) || 0.5;
+  const ref = boneRefDistance(fighter, cfg);
 
   const at = cfg.at || [cfg.bone, cfg.bone, 0];
-  const anchor = wp(at[0]).lerp(wp(at[1]), at[2] ?? 0);
-
-  itemRoot.updateMatrixWorld(true);
-  const box = new THREE.Box3().setFromObject(itemRoot);
-  const size = box.getSize(new THREE.Vector3());
-  const dim = cfg.axis === 'max' ? Math.max(size.x, size.y, size.z)
-    : cfg.axis === 'x' ? (size.x || size.y || 1)
-    : (size.y || 1);
-  const scale = (ref * (cfg.cover ?? 1.35)) / (dim || 1) * (cfg.scale ?? 1);
-
-  if (cfg.align === 'top') anchor.y -= (size.y * scale) / 2;
-  else if (cfg.align === 'bottom') anchor.y += (size.y * scale) / 2;
-
-  // куда смотрит боец (мир); в bind-позе корпус не скручен,
-  // поэтому «ровно по направлению взгляда» = ровно по груди
-  const yaw = fighter.root.rotation.y;
-  const fwd = new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw));
-  const up = new THREE.Vector3(0, 1, 0);
-  const left = new THREE.Vector3().crossVectors(up, fwd);
-  const off = cfg.offset || [0, 0, 0];
-  anchor.addScaledVector(fwd, off[0]).addScaledVector(up, off[1]).addScaledVector(left, off[2]);
+  const anchor = boneWorldPos(fighter, at[0]).lerp(boneWorldPos(fighter, at[1]), at[2] ?? 0);
 
   const rot = (cfg.rotation || [0, 0, 0]).map(THREE.MathUtils.degToRad);
   const holder = new THREE.Group();
-  holder.position.copy(anchor);
-  holder.rotation.set(rot[0], yaw + rot[1], rot[2]);
-  holder.scale.setScalar(scale);
-  // пивот предмета может быть где угодно — центруем по габаритам
-  itemRoot.position.copy(box.getCenter(new THREE.Vector3())).negate();
+  // только доворот из attach — не смешиваем с root.rotation (арена/примерочная)
+  holder.rotation.set(rot[0], rot[1], rot[2]);
   holder.add(itemRoot);
+  holder.updateMatrixWorld(true);
+
+  let box = new THREE.Box3().setFromObject(itemRoot);
+  let size = box.getSize(new THREE.Vector3());
+  const scale = (ref * (cfg.cover ?? 1.35)) / (measureDim(size, cfg) || 1) * (cfg.scale ?? 1);
+  holder.scale.setScalar(scale);
+  holder.updateMatrixWorld(true);
+
+  box = new THREE.Box3().setFromObject(itemRoot);
+  size = box.getSize(new THREE.Vector3());
+  if (cfg.align === 'top') anchor.y -= size.y / 2;
+  else if (cfg.align === 'bottom') anchor.y += size.y / 2;
+
+  // Mixamo: персонаж в модели смотрит в +Z (независимо от разворота на арене)
+  const fwd = new THREE.Vector3(0, 0, 1);
+  const up = new THREE.Vector3(0, 1, 0);
+  const left = new THREE.Vector3(-1, 0, 0);
+  const off = cfg.offset || [0, 0, 0];
+  anchor.addScaledVector(fwd, off[0]).addScaledVector(up, off[1]).addScaledVector(left, off[2]);
+
+  // центрируем в holder пока он в начале координат — иначе worldToLocal даст сдвиг
+  const center = box.getCenter(new THREE.Vector3());
+  holder.worldToLocal(center);
+  itemRoot.position.copy(center).negate();
+  holder.position.copy(anchor);
   holder.updateMatrixWorld(true);
   return holder;
 }
@@ -201,7 +318,7 @@ function cacheKey(fighter, itemDef, cfg, mode) {
     .map(([k, v]) => k + '=' + String(v))
     .sort()
     .join(';');
-  return [mode, itemDef.model, fighter.def.model, cfgStr].join('|');
+  return [mode, 'v5', itemDef.model, fighter.def.model, cfgStr].join('|');
 }
 
 // ---------------------------------------------------------------------------
@@ -213,25 +330,25 @@ function equipRigid(fighter, itemDef, cfg, scene, override) {
   item.traverse((o) => {
     if (o.isMesh) {
       o.castShadow = true;
-      // материалы свои у каждого бойца: вспышка урона не задевает соседа
       o.material = override || cloneMats(o.material);
     }
   });
 
-  return withBindPose(fighter, () => {
-    const holder = fitTransform(fighter, item, cfg);
-    const bone = fighter.findBone(cfg.bone || /Spine1$/i);
+  // Жёсткие латы меряем в ТЕКУЩЕЙ позе (idle/стойка), не в bind-pose:
+  // иначе якорь на груди в Т-позе, а на экране боксёрская стойка — доспех уезжает назад.
+  const savedRootY = fighter.root.rotation.y;
+  fighter.root.rotation.y = 0;
+  fighter.model.updateMatrixWorld(true);
+
+  try {
+    const bone = fighter.findBone(cfg.bone || /Spine2$/i);
     if (!bone) throw new Error(`Кость для предмета не найдена у «${fighter.def.name}»`);
-    bone.attach(holder); // three сам пересчитает трансформ в систему кости
-    return {
-      itemDef,
-      nodes: [holder],
-      dispose() {
-        holder.removeFromParent();
-        disposeNodeMats(holder);
-      },
-    };
-  });
+    const holder = fitToBone(fighter, item, bone, cfg);
+    return equipResult(itemDef, [holder]);
+  } finally {
+    fighter.root.rotation.y = savedRootY;
+    fighter.model.updateMatrixWorld(true);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -240,6 +357,22 @@ function equipRigid(fighter, itemDef, cfg, scene, override) {
 
 const normBoneName = (s) =>
   String(s).toLowerCase().replace(/^mixamorig[:_]?/, '').replace(/[^a-z0-9]/g, '');
+
+/** Достаточно ли костей предмета совпадает с ригом персонажа для режима skin. */
+function isRigCompatible(scene, fighter) {
+  const main = mainSkinnedMesh(fighter);
+  const charIdx = new Map(main.skeleton.bones.map((b, i) => [normBoneName(b.name), i]));
+  let bones = 0;
+  let matched = 0;
+  scene.traverse((o) => {
+    if (!o.isSkinnedMesh) return;
+    for (const b of o.skeleton.bones) {
+      bones++;
+      if (charIdx.has(normBoneName(b.name))) matched++;
+    }
+  });
+  return bones > 0 && matched / bones >= 0.75;
+}
 
 function equipSkinned(fighter, itemDef, scene, override) {
   const main = mainSkinnedMesh(fighter);
@@ -304,25 +437,28 @@ function remapSkinIndices(geo, lut, fallback) {
   geo.setAttribute('skinWeight', new THREE.BufferAttribute(outW, 4));
 }
 
-/** Собрать SkinnedMesh-узлы из готовых частей и привязать к скелету бойца. */
+/** Собрать SkinnedMesh-узлы из готовых частей (режим skin: геометрия уже в bind-пространстве). */
 function attachSkinnedParts(fighter, itemDef, parts, override, skeleton) {
   const nodes = parts.map(({ geometry, srcMaterial, name }) => {
     const mesh = new THREE.SkinnedMesh(geometry, override || cloneMats(srcMaterial));
     mesh.name = `equip:${itemDef.slot || 'misc'}:${name}`;
     mesh.castShadow = true;
-    mesh.frustumCulled = false; // скелетные меши неверно отсекаются камерой
+    mesh.frustumCulled = false;
     fighter.model.add(mesh);
-    // геометрия уже в системе скелета — bindMatrix единичная
     mesh.bind(skeleton, new THREE.Matrix4());
     return mesh;
   });
+  return equipResult(itemDef, nodes);
+}
+
+function equipResult(itemDef, nodes) {
   return {
     itemDef,
     nodes,
     dispose() {
       for (const n of nodes) {
         n.removeFromParent();
-        matsOf(n).forEach((m) => m.dispose()); // геометрия остаётся в кэше
+        matsOf(n).forEach((m) => m.dispose());
       }
     },
   };
@@ -337,26 +473,57 @@ function attachSkinnedParts(fighter, itemDef, parts, override, skeleton) {
 // ---------------------------------------------------------------------------
 
 const pendingAuto = new Map();   // key -> Promise (дедупликация параллельных)
+const MAX_AUTOSKIN_VERTS = 18000; // Meshy-модели 300k+ — упрощаем до разумного для GPU
 
 async function equipAutoSkin(fighter, itemDef, cfg, scene, override) {
   const main = mainSkinnedMesh(fighter);
   const key = cacheKey(fighter, itemDef, cfg, 'autoskin');
 
-  let parts = partsCache.get(key);
-  if (!parts) {
+  let templates = partsCache.get(key);
+  if (!templates) {
     if (!pendingAuto.has(key)) {
       pendingAuto.set(key,
-        buildAutoSkinParts(fighter, itemDef, cfg, scene, main, key)
+        computeAutoSkinTemplates(fighter, itemDef, cfg, scene, main, key)
+          .then((t) => { partsCache.set(key, t); return t; })
           .finally(() => pendingAuto.delete(key)));
     }
-    parts = await pendingAuto.get(key);
-    partsCache.set(key, parts);
+    templates = await pendingAuto.get(key);
   }
 
-  return attachSkinnedParts(fighter, itemDef, parts, override, main.skeleton);
+  const tplByName = new Map(templates.map((t) => [t.name, t]));
+
+  return withBindPose(fighter, () => {
+    const holder = fitTransform(fighter, scene.clone(true), cfg);
+    const nodes = [];
+
+    holder.traverse((o) => {
+      if (!o.isMesh || o.isSkinnedMesh) return;
+      const tpl = tplByName.get(o.name) || templates[0];
+      if (!tpl) return;
+
+      const sm = new THREE.SkinnedMesh(tpl.geometry.clone(), override || cloneMats(o.material));
+      sm.name = `equip:${itemDef.slot || 'misc'}:${o.name}`;
+      sm.castShadow = true;
+      sm.frustumCulled = false;
+      sm.position.copy(o.position);
+      sm.rotation.copy(o.rotation);
+      sm.scale.copy(o.scale);
+      o.parent.add(sm);
+      o.parent.remove(o);
+      sm.updateMatrixWorld(true);
+      sm.bindMode = THREE.DetachedBindMode;
+      sm.bind(main.skeleton, sm.matrixWorld.clone());
+      nodes.push(sm);
+    });
+
+    if (!nodes.length) throw new Error(`В «${itemDef.name}» не удалось привязать меши`);
+    holder.name = `equip-holder:${itemDef.slot || 'misc'}`;
+    fighter.model.add(holder);
+    return equipResult(itemDef, [holder, ...nodes]);
+  });
 }
 
-async function buildAutoSkinParts(fighter, itemDef, cfg, scene, main, key) {
+async function computeAutoSkinTemplates(fighter, itemDef, cfg, scene, main, key) {
   const t0 = performance.now();
 
   // Снимок данных в bind-позе (синхронно): посадка предмета, образцы тела,
@@ -365,23 +532,26 @@ async function buildAutoSkinParts(fighter, itemDef, cfg, scene, main, key) {
   let bodyData = null;
   withBindPose(fighter, () => {
     const holder = fitTransform(fighter, scene.clone(true), cfg);
+    fighter.model.add(holder);
+    fighter.model.updateMatrixWorld(true);
     bodyData = collectBodySamples(fighter, main);
-    const skelInv = skeletonSpaceInverse(main.skeleton);
     holder.traverse((o) => {
       if (!o.isMesh || o.isSkinnedMesh) return;
+      const raw = o.geometry.clone();
+      const geometry = simplifyForAutoskin(raw, MAX_AUTOSKIN_VERTS);
       jobs.push({
-        geometry: o.geometry.clone(),
+        geometry,
         srcMaterial: o.material,
         name: o.name,
         worldMatrix: o.matrixWorld.clone(),
-        bakeMatrix: new THREE.Matrix4().multiplyMatrices(skelInv, o.matrixWorld),
       });
     });
+    fighter.model.remove(holder);
   });
   if (!jobs.length) throw new Error(`В «${itemDef.name}» нет мешей`);
 
   const totalVerts = jobs.reduce((s, j) => s + j.geometry.attributes.position.count, 0);
-  const idbKey = key + '|' + totalVerts;   // замена модели = другой счётчик вершин
+  const idbKey = key + '|v5|' + totalVerts;
 
   // готовые веса из IndexedDB?
   let stored = await idbGet(idbKey).catch(() => null);
@@ -391,40 +561,166 @@ async function buildAutoSkinParts(fighter, itemDef, cfg, scene, main, key) {
       s.skinIndex?.length === jobs[i].geometry.attributes.position.count * 4);
   if (!storedValid) {
     from = 'расчёт в воркере';
-    stored = [];
-    for (const job of jobs) {
+    const workerPayload = {
+      bodyPos: bodyData.pos,
+      bodyIdx: bodyData.sIdx,
+      bodyWt: bodyData.sWt,
+      k: cfg.knn ?? 6,
+      smoothIters: cfg.smooth ?? 2,
+    };
+    stored = await Promise.all(jobs.map((job) => {
       const geo = job.geometry;
-      const res = await runAutoSkinWorker({
+      return runAutoSkinWorker({
+        ...workerPayload,
         pos: new Float32Array(geo.attributes.position.array),
         index: geo.index ? toUint32(geo.index.array) : null,
         matrix: new Float64Array(job.worldMatrix.elements),
-        bodyPos: bodyData.pos,
-        bodyIdx: bodyData.sIdx,
-        bodyWt: bodyData.sWt,
-        k: cfg.knn ?? 6,
-        smoothIters: cfg.smooth ?? 2,
       });
-      stored.push({ skinIndex: res.skinIndex, skinWeight: res.skinWeight });
-    }
-    idbPut(idbKey, stored).catch((e) => console.warn('Кэш экипировки не сохранился:', e));
+    }));
+    idbPut(idbKey, stored.map((res) => ({
+      skinIndex: res.skinIndex,
+      skinWeight: res.skinWeight,
+    }))).catch((e) => console.warn('Кэш экипировки не сохранился:', e));
   }
 
-  const parts = jobs.map((job, i) => {
+  const templates = jobs.map((job, i) => {
     const geo = job.geometry;
     geo.setAttribute('skinIndex', new THREE.BufferAttribute(stored[i].skinIndex, 4));
     geo.setAttribute('skinWeight', new THREE.BufferAttribute(stored[i].skinWeight, 4));
-    // вершины -> система скелета персонажа (см. skeletonSpaceInverse)
-    geo.applyMatrix4(job.bakeMatrix);
     return { geometry: geo, srcMaterial: job.srcMaterial, name: job.name };
   });
 
   console.info(`Автоскиннинг «${itemDef.name}» на «${fighter.def.name}»: ` +
     `${totalVerts} вершин за ${Math.round(performance.now() - t0)} мс (${from})`);
-  return parts;
+  return templates;
 }
 
 const toUint32 = (arr) =>
   arr instanceof Uint32Array ? new Uint32Array(arr) : Uint32Array.from(arr);
+
+/**
+ * Упростить статичный меш перед автоскиннингом: квантование близких вершин.
+ * Meshy/Tripo отдают сотни тысяч вершин — расчёт минутами; 15–20k хватает.
+ */
+function simplifyForAutoskin(geometry, maxVerts) {
+  const n = geometry.attributes.position.count;
+  if (n <= maxVerts) return geometry;
+
+  geometry.computeBoundingBox();
+  const size = geometry.boundingBox.getSize(new THREE.Vector3());
+  const diag = size.length() || 1;
+  let quant = diag / Math.cbrt(maxVerts * 2);
+
+  for (let attempt = 0; attempt < 14; attempt++) {
+    const welded = weldGeometry(geometry, quant);
+    if (welded.attributes.position.count <= maxVerts) return welded;
+    quant *= 1.4;
+  }
+  return weldGeometry(geometry, quant);
+}
+
+/** Сварить вершины в пределах quant (метры), пересобрать индексы. */
+function weldGeometry(geometry, quant) {
+  const srcPos = geometry.attributes.position;
+  const srcN = srcPos.count;
+  const invQ = 1 / quant;
+  const lut = new Int32Array(srcN);
+  const buckets = new Map();
+  const outPos = [];
+  const repQ = [];
+  let m = 0;
+
+  for (let i = 0; i < srcN; i++) {
+    const x = srcPos.getX(i);
+    const y = srcPos.getY(i);
+    const z = srcPos.getZ(i);
+    const qx = Math.round(x * invQ);
+    const qy = Math.round(y * invQ);
+    const qz = Math.round(z * invQ);
+    const h = ((qx * 73856093) ^ (qy * 19349663) ^ (qz * 83492791)) | 0;
+    let arr = buckets.get(h);
+    let rep = -1;
+    if (arr) {
+      for (let j = 0; j < arr.length; j++) {
+        const r = arr[j];
+        const ri = r * 3;
+        if (repQ[ri] === qx && repQ[ri + 1] === qy && repQ[ri + 2] === qz) {
+          rep = r;
+          break;
+        }
+      }
+    } else {
+      buckets.set(h, (arr = []));
+    }
+    if (rep < 0) {
+      rep = m++;
+      arr.push(rep);
+      outPos.push(x, y, z);
+      repQ.push(qx, qy, qz);
+    }
+    lut[i] = rep;
+  }
+
+  const out = new THREE.BufferGeometry();
+  out.setAttribute('position', new THREE.Float32BufferAttribute(outPos, 3));
+
+  if (geometry.index) {
+    const srcIdx = geometry.index.array;
+    const dstIdx = new Uint32Array(srcIdx.length);
+    for (let i = 0; i < srcIdx.length; i++) dstIdx[i] = lut[srcIdx[i]];
+    out.setIndex(new THREE.BufferAttribute(dstIdx, 1));
+  } else {
+    const dstIdx = new Uint32Array(srcN);
+    for (let i = 0; i < srcN; i++) dstIdx[i] = lut[i];
+    out.setIndex(new THREE.BufferAttribute(dstIdx, 1));
+  }
+
+  if (geometry.attributes.normal) {
+    const srcNorm = geometry.attributes.normal;
+    const norms = new Float32Array(m * 3);
+    const counts = new Uint16Array(m);
+    for (let i = 0; i < srcN; i++) {
+      const r = lut[i];
+      norms[r * 3] += srcNorm.getX(i);
+      norms[r * 3 + 1] += srcNorm.getY(i);
+      norms[r * 3 + 2] += srcNorm.getZ(i);
+      counts[r]++;
+    }
+    for (let r = 0; r < m; r++) {
+      const c = counts[r] || 1;
+      const nx = norms[r * 3] / c;
+      const ny = norms[r * 3 + 1] / c;
+      const nz = norms[r * 3 + 2] / c;
+      const len = Math.hypot(nx, ny, nz) || 1;
+      norms[r * 3] = nx / len;
+      norms[r * 3 + 1] = ny / len;
+      norms[r * 3 + 2] = nz / len;
+    }
+    out.setAttribute('normal', new THREE.BufferAttribute(norms, 3));
+  } else {
+    out.computeVertexNormals();
+  }
+
+  if (geometry.attributes.uv) {
+    const srcUv = geometry.attributes.uv;
+    const uvs = new Float32Array(m * 2);
+    const counts = new Uint16Array(m);
+    for (let i = 0; i < srcN; i++) {
+      const r = lut[i];
+      uvs[r * 2] += srcUv.getX(i);
+      uvs[r * 2 + 1] += srcUv.getY(i);
+      counts[r]++;
+    }
+    for (let r = 0; r < m; r++) {
+      const c = counts[r] || 1;
+      uvs[r * 2] /= c;
+      uvs[r * 2 + 1] /= c;
+    }
+    out.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+  }
+
+  return out;
+}
 
 /**
  * Образцы скиннинга тела: позиции вершин (мир, bind-поза) + индексы/веса
@@ -466,7 +762,9 @@ function collectBodySamples(fighter, main) {
       }
       if (sum <= 1e-6) continue;
       for (let j = 0; j < 4; j++) sWt[n * 4 + j] /= sum;
-      v.fromBufferAttribute(p, i).applyMatrix4(mesh.matrixWorld);
+      // реальная позиция на поверхности (скиннинг), а не сырые bind-вершины
+      mesh.getVertexPosition(i, v);
+      v.applyMatrix4(mesh.matrixWorld);
       pos[n * 3] = v.x;
       pos[n * 3 + 1] = v.y;
       pos[n * 3 + 2] = v.z;

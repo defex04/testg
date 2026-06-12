@@ -9,6 +9,7 @@
 import * as THREE from 'three';
 import { Fighter } from './Fighter.js';
 import { applyEnvironment } from './Arena.js';
+import { prefetchEquip } from './EquipEngine.js';
 
 export class DressingRoom {
   constructor(viewport) {
@@ -130,6 +131,13 @@ export class DressingRoom {
     // прогреваем taunt в фоне, чтобы первый клик не ждал загрузку
     fighter._ensureAction('taunt');
     return fighter;
+  }
+
+  /** Фоновый прогрев автоскиннинга для списка предметов (кэш + GPU). */
+  prefetchItems(itemDefs) {
+    if (!this.fighter || !itemDefs?.length) return;
+    const f = this.fighter;
+    for (const def of itemDefs) prefetchEquip(f, def);
   }
 
   /** Отрисовать один кадр без запуска цикла: при фоновом прогреве геометрия

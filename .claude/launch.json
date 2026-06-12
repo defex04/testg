@@ -4,8 +4,8 @@
     {
       "name": "arena",
       "runtimeExecutable": "python",
-      "runtimeArgs": ["C:\\Users\\andre\\Downloads\\new\\arena-game\\serve.py", "8765"],
-      "port": 8765
+      "runtimeArgs": ["C:/Users/andre/Downloads/new/arena-game/serve.py"],
+      "autoPort": true
     }
   ]
 }

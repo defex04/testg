@@ -177,10 +177,13 @@ const ITEMS = {
     icon: '🛡️',
     slot: 'torso',
     model: 'assets/models/bronze_armor.fbx',
-    // у модели Meshy "перёд" вдоль локальной -X, поэтому доворот на 90°;
-    // cover/offset подобраны в примерочной. Материал — родной из FBX:
-    // с PBR-картами из архива металл пересвечивается (см. README).
-    attach: { bone: /Spine1$/i, cover: 1.5, scale: 1, offset: [0.02, -0.02, 0], rotation: [0, 90, 0] },
+    // Meshy: «перёд» -X → rotation Y -90°. offset: [вперёд, вверх, влево] в осях модели.
+    attach: {
+      mode: 'bone', bone: /Spine1$/i,
+      cover: 1.28, align: 'bottom',
+      offset: [0.08, -0.1, 0],
+      rotation: [0, -90, 0],
+    },
   },
 };
 
@@ -1027,6 +1030,8 @@ async function openDressing() {
       catch (e) { console.error('Обновление рюкзака:', e); }
     }
     await dressing.show(FIGHTERS.brawler);
+    // автоскиннинг тяжёлых FBX — в фоне, пока смотрим рюкзак
+    dressing.prefetchItems(Object.values(ITEMS).filter((i) => i.model));
     await syncDressing(false);
   } finally {
     dressingBusy = false;
