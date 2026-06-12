@@ -271,14 +271,14 @@ function makeButton(className, html, onClick) {
   return b;
 }
 
-function setLocation(key) {
+function setLocation(key, { quiet = false } = {}) {
   currentLoc = key;
   const loc = LOCATIONS[key];
   locPicture.style.background = loc.image
     ? `#111 url("${loc.image}") center / cover no-repeat`
     : loc.css;
   $('loc-name').textContent = loc.name;
-  chatMessage('Система', `Вы вошли в локацию «${loc.name}».`, true);
+  if (!quiet) chatMessage('Система', `Вы вошли в локацию «${loc.name}».`, true);
   locActions.innerHTML = '';
 
   const transitions = loc.actions.filter((a) => a.goto || a.go);
@@ -618,6 +618,23 @@ document.querySelectorAll('.chat-tab').forEach((t) => {
 
 // чат локации: отправка на сервер, своё сообщение возвращается из pub/sub
 const chatLog = $('chat-log');
+
+/** Системный шум из истории — не показываем при входе (объявления боёв и т.п.). */
+function isChatJunk(sender, body) {
+  const s = String(body || '').trim();
+  if (!s) return true;
+  if (sender !== 'Система') return false;
+  return /^⚔\s*Бой #\d+/.test(s) || /^Вы вошли в локацию/.test(s);
+}
+
+/** История чата локации: только сообщения игроков и полезные системные. */
+function loadChatHistory(rows) {
+  chatLog.innerHTML = '';
+  for (const h of rows) {
+    if (isChatJunk(h.sender_name, h.body)) continue;
+    chatMessage(h.sender_name, h.body, h.sender_name === 'Система');
+  }
+}
 
 function chatMessage(author, text, system = false) {
   const line = document.createElement('div');
@@ -1049,6 +1066,9 @@ renderXP();
 // Если игру открыли в обычном браузере — показываем ссылку на бота.
 const TG_BOT = 'mymmorpg_defex_bot';
 
+const setBoot = (text) => window.setBootStatus?.(text);
+const finishBoot = () => window.finishBoot?.();
+
 function showTelegramGate() {
   const el = document.createElement('div');
   el.className = 'file-helper';
@@ -1072,32 +1092,36 @@ function showTelegramGate() {
     showToast('Не удалось вернуться в бой: ' + e.message);
   }));
   try {
+    setBoot('Вход в игру…');
     const ch = await api.login(PLAYER.name);
     online = true;
     applyCharacter(ch);
 
+    setBoot('Загрузка рюкзака…');
     // вещи с сервера: знакомым ключам — 3D-модели из ITEMS, остальные
     // добавляются без модели (noModel), чтобы видно было ВСЁ имущество
     registerServerItems(await api.inventory());
 
-    // чат: история, затем живые сообщения
+    setBoot('Загрузка чата…');
+    // чат: история без системного шума, затем живые сообщения
     api.onChat((m) => chatMessage(m.from, m.text));
-    for (const h of await api.chatHistory()) chatMessage(h.sender_name, h.body);
+    loadChatHistory(await api.chatHistory());
 
-    setLocation(LOC_BY_ID[ch.location_id] || 'village');
+    setLocation(LOC_BY_ID[ch.location_id] || 'village', { quiet: true });
     refreshPlayers();
   } catch (e) {
     if (e.message === 'dev_auth_disabled') {
+      document.querySelector('.game')?.classList.add('hidden');
       showTelegramGate();
-      setLocation('village');
-      setMode('location');
       return;
     }
     console.error('Сервер недоступен, оффлайн-режим:', e);
     showToast('Сервер недоступен — игра в оффлайн-режиме');
-    setLocation('village');
+    setLocation('village', { quiet: true });
+  } finally {
+    // если за время загрузки сервер вернул идущий бой (battleResume),
+    // режим уже «бой» — не выкидываем игрока обратно в локацию
+    if (mode !== 'battle' && !battleLoading) setMode('location');
+    finishBoot();
   }
-  // если за время загрузки сервер вернул идущий бой (battleResume),
-  // режим уже «бой» — не выкидываем игрока обратно в локацию
-  if (mode !== 'battle' && !battleLoading) setMode('location');
 })();

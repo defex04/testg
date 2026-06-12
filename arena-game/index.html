@@ -18,7 +18,16 @@
     }
   </script>
 </head>
-<body>
+<body class="booting">
+  <!-- экран загрузки: виден до завершения входа и подключения к серверу -->
+  <div class="boot-screen" id="boot-screen">
+    <div class="boot-card">
+      <div class="boot-title">⚜ DRAGON ARENA</div>
+      <div class="boot-spinner" aria-hidden="true"></div>
+      <div class="boot-status" id="boot-status">Загрузка…</div>
+    </div>
+  </div>
+
   <script>
     // Открыто двойным кликом (file://)? Браузер в этом режиме блокирует
     // ES-модули и загрузку моделей — игра не может стартовать. Показываем
@@ -292,8 +301,16 @@
       });
     }
 
+    const bootStatus = document.getElementById('boot-status');
+    window.setBootStatus = (text) => { if (bootStatus) bootStatus.textContent = text; };
+    window.finishBoot = () => {
+      document.body.classList.remove('booting');
+      document.getElementById('boot-screen')?.remove();
+    };
+
     const url = await chooseServer();
     if (url) window.API_URL = url;
+    window.setBootStatus('Подключение к серверу…');
     await import('./js/main.js');
   </script>
 </body>

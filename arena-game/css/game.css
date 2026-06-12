@@ -54,6 +54,56 @@
 
 .hidden { display: none !important; }
 
+/* экран загрузки при старте: скрывает игру до входа на сервер */
+body.booting .game { display: none; }
+
+.boot-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 150;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background:
+    radial-gradient(90% 70% at 50% 30%, rgba(216, 169, 63, .08), transparent 60%),
+    var(--bg);
+}
+.boot-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+  padding: 32px 36px;
+  min-width: min(100%, 320px);
+  background: linear-gradient(180deg, var(--panel-hi), var(--panel-lo));
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  box-shadow: 0 0 44px rgba(0, 0, 0, .7), inset 0 1px 0 rgba(244, 205, 111, .09);
+  text-align: center;
+}
+.boot-title {
+  font-family: var(--font-display);
+  font-size: 22px;
+  letter-spacing: 2px;
+  color: var(--gold-bright);
+  text-shadow: 0 0 14px rgba(216, 169, 63, .4);
+}
+.boot-spinner {
+  width: 42px;
+  height: 42px;
+  border: 3px solid rgba(216, 169, 63, .25);
+  border-top-color: var(--gold);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+.boot-status {
+  font-family: var(--font-display);
+  font-size: 14px;
+  color: var(--gold);
+  animation: pulse 1.2s infinite alternate;
+}
+
 html, body {
   height: 100%;
   overflow: hidden;
