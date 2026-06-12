@@ -28,15 +28,15 @@ export function createHub(server) {
     if (!session) return ws.close(4401, 'unauthorized');
     const ch = await getCharacter(session.character_id);
 
-    const prev = byChar.get(ch.id);
+    const prev = byChar.get(String(ch.id));
     if (prev && prev.ws.readyState === 1) prev.ws.close(4000, 'replaced'); // вторая вкладка
 
-    const conn = { ws, locId: ch.location_id };
-    byChar.set(ch.id, conn);
-    await enterLocation(ch);
     const send = (o) => { try {
       if (ws.readyState === 1) ws.send(JSON.stringify(o));
     } catch { /* сокет умер — бой продолжается без зрителя */ } };
+    const conn = { ws, locId: ch.location_id, send };
+    byChar.set(String(ch.id), conn);
+    await enterLocation(ch);
 
     send({ type: 'hello', character: ch });
     const resume = battle.attach(ch.id, send);   // идущий бой возвращается после F5
@@ -49,6 +49,19 @@ export function createHub(server) {
           case 'hunt': {
             const me = await getCharacter(ch.id);
             await battle.startHunt(me, send);
+            break;
+          }
+          case 'attack': {        // дуэль PvP: нападение на игрока локации
+            const targetId = String(m.targetId || '');
+            if (!targetId || targetId === String(ch.id)) {
+              throw new Error('cannot_attack_self');
+            }
+            const target = byChar.get(targetId);
+            if (!target) throw new Error('target_offline');
+            const me = await getCharacter(ch.id);
+            const targetCh = await getCharacter(targetId);
+            if (!targetCh) throw new Error('target_offline');
+            await battle.startDuel(me, targetCh, send, target.send);
             break;
           }
           case 'move':     battle.submitMove(ch.id, m); break;
@@ -67,8 +80,8 @@ export function createHub(server) {
     });
 
     ws.on('close', async () => {
-      if (byChar.get(ch.id) === conn) {
-        byChar.delete(ch.id);
+      if (byChar.get(String(ch.id)) === conn) {
+        byChar.delete(String(ch.id));
         battle.detach(ch.id);                    // НЕ прерываем бой
         const me = await getCharacter(ch.id);
         await leavePresence(me).catch(() => {});
@@ -78,7 +91,7 @@ export function createHub(server) {
 
   return {
     onMoved(charId, from, to) {
-      const conn = byChar.get(charId);
+      const conn = byChar.get(String(charId));
       if (conn) conn.locId = to;
     },
   };

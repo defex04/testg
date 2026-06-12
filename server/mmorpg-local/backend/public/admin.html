@@ -244,6 +244,8 @@ R.chars = async (q = '') => {
     ${table([
       {h:'ID',v:r=>r.id},{h:'Имя',v:r=>r.name},{h:'Ур.',v:r=>r.level},
       {h:'Опыт',v:r=>r.exp},{h:'HP',v:r=>r.hp_cur},{h:'Локация',v:r=>r.location},
+      {h:'Аккаунт',html:r=>`<td>#${r.account_id} · ${r.provider===1
+        ? (r.tg_username ? '@' + esc(r.tg_username) : 'telegram') : 'dev'}</td>`},
       {h:'Был онлайн',v:r=>dt(r.online_at)},
     ], rows, (r)=>`class="click" onclick="openChar(${r.id})"`)}`;
 };
@@ -251,18 +253,35 @@ R._cs = () => show('chars', $('#q-char').value.trim());
 
 window.openChar = async (id) => {
   const d = await api('/characters/' + id);
-  const c = d.character, st = d.stats || {};
+  const c = d.character, st = d.stats || {}, a = d.account;
   const invRows = (t) => d.inventory.filter((i) => i.owner_type === t);
   const invTable = (rows) => table([
     {h:'ID',v:r=>r.id},{h:'Предмет',v:r=>r.name + (r.enchant_level?` +${r.enchant_level}`:'')},
     {h:'Кол-во',v:r=>r.quantity},
     {h:'',html:r=>`<td><button class="sm" onclick="enchantItem(${r.id},${r.enchant_level})">Заточка</button>
-      <button class="sm danger" onclick="confiscate(${r.id},${id})">Изъять</button></td>`},
+      <button class="sm danger" onclick="confiscate(${r.id},${id})">Изъять</button>
+      <button class="sm danger" onclick="deleteItem(${r.id},${id})">Удалить</button></td>`},
   ], rows);
+  const accountInfo = !a ? '<p class="muted">Аккаунт не найден.</p>' : table([
+    {h:'Аккаунт',v:()=>'#' + a.id},
+    {h:'Вход',v:()=>a.provider===1?'telegram':'dev'},
+    {h:'Telegram',html:()=>`<td>${a.tg_username
+      ? `<a href="https://t.me/${esc(a.tg_username)}" target="_blank"
+           style="color:var(--brass2)">@${esc(a.tg_username)}</a>`
+      : esc(a.tg_first_name || '—')}</td>`},
+    {h:'Статус',v:()=>dict(D.accStatus,a.status)},
+    {h:'Создан',v:()=>dt(a.created_at)},
+  ], [a]);
   $('#main').innerHTML = `
   <div class="toolbar"><button onclick="show('chars')">← К списку</button>
     <h2 style="margin:0;font-family:Georgia,serif;font-variant:small-caps">
-      ${esc(c.name)} <span class="muted">#${c.id} · ур.${c.level} · ${esc(c.location)}</span></h2></div>
+      ${esc(c.name)} <span class="muted">#${c.id} · ур.${c.level} · ${esc(c.location)}</span></h2>
+    <button onclick="renameChar(${c.id},'${esc(c.name)}')">Переименовать</button></div>
+  <div class="panel"><h3>Аккаунт</h3>${accountInfo}
+    <div class="toolbar" style="margin-top:10px">
+      <button onclick="show('accounts')">Все аккаунты</button>
+      ${a ? `<button class="danger" onclick="deleteAccount(${a.id})">Удалить аккаунт</button>` : ''}
+    </div></div>
   <div class="grid2">
     <div class="panel"><h3>Кошелёк и действия</h3>
       ${table([{h:'Валюта',v:r=>r[0]},{h:'Баланс',html:r=>`<td class="num">${r[1]}</td>`}],
@@ -355,6 +374,31 @@ window.confiscate = async (itemId, charId) => {
   try { await api(`/item-instances/${itemId}/confiscate`, { note });
     ok('изъят #' + itemId); if (charId) openChar(charId); } catch (e) { fail(e); }
 };
+window.deleteItem = async (itemId, charId) => {
+  if (!confirm('Уничтожить предмет #' + itemId + '? Вернуть будет нельзя ' +
+    '(след останется в гроссбухе).')) return;
+  const note = prompt('Основание (в аудит):', '') || null;
+  try { await api(`/item-instances/${itemId}/delete`, { note });
+    ok('уничтожен #' + itemId); if (charId) openChar(charId); else show(current); }
+  catch (e) { fail(e); }
+};
+window.renameChar = async (id, oldName) => {
+  const name = prompt('Новое имя персонажа:', oldName); if (!name) return;
+  try { await api(`/characters/${id}/rename`, { name });
+    ok('переименован: ' + name); openChar(id); }
+  catch (e) {
+    fail(e.message === 'name_taken' ? new Error('имя уже занято')
+      : e.message === 'name_blacklisted' ? new Error('имя в чёрном списке')
+      : e.message === 'name_too_short' ? new Error('имя слишком короткое') : e);
+  }
+};
+window.deleteAccount = async (id) => {
+  if (!confirm('Удалить аккаунт #' + id + '? Сессии будут отозваны, ' +
+    'персонажи помечены удалёнными. Действие необратимо из админки.')) return;
+  try { const r = await api(`/accounts/${id}/delete`, {});
+    ok(`аккаунт #${id} удалён (персонажей: ${r.characters})`); show('accounts'); }
+  catch (e) { fail(e.message === 'already_deleted' ? new Error('уже удалён') : e); }
+};
 window.enchantItem = async (itemId, cur) => {
   const v = Number(prompt('Новая заточка:', String((cur || 0) + 1)));
   if (Number.isNaN(v)) return;
@@ -367,12 +411,20 @@ R.accounts = async () => {
   const rows = await api('/accounts');
   return table([
     {h:'ID',v:r=>r.id},{h:'Вход',v:r=>r.provider===1?'telegram':'dev'},
-    {h:'Внешний id',v:r=>r.external_id},{h:'Персонажи',v:r=>r.characters},
+    {h:'Telegram',html:r=>`<td>${r.username
+      ? `<a href="https://t.me/${esc(r.username)}" target="_blank"
+           style="color:var(--brass2)">@${esc(r.username)}</a>` : '—'}</td>`},
+    {h:'Внешний id',v:r=>r.external_id},
+    {h:'Персонажи',html:r=>`<td>${(r.characters||[]).map((c) =>
+      `<a href="#" onclick="openChar(${c.id});return false"
+         style="color:var(--brass2)">${esc(c.name)}</a>`).join(', ') || '—'}</td>`},
     {h:'Статус',html:r=>`<td>${r.banned?'<span class="debit">бан</span>':dict(D.accStatus,r.status)}</td>`},
     {h:'Создан',v:r=>dt(r.created_at)},
-    {h:'',html:r=>`<td>${r.banned
+    {h:'',html:r=>`<td>${r.status === 4 ? '' : (r.banned
       ? `<button class="sm" onclick="unban(${r.id})">Разбанить</button>`
-      : `<button class="sm danger" onclick="ban(${r.id})">Забанить</button>`}</td>`},
+      : `<button class="sm danger" onclick="ban(${r.id})">Забанить</button>`)
+      + (r.status === 4 ? ''
+      : ` <button class="sm danger" onclick="deleteAccount(${r.id})">Удалить</button>`)}</td>`},
   ], rows);
 };
 window.ban = async (id) => {
@@ -582,7 +634,8 @@ window.tplInstances = async (tplId) => {
     {h:'Где',v:r=>dict(D.owner,r.owner_type)},{h:'Кол-во',v:r=>r.quantity},
     {h:'Заточка',v:r=>'+'+r.enchant_level},{h:'Создан',v:r=>dt(r.created_at)},
     {h:'',html:r=>`<td><button class="sm" onclick="enchantItem(${r.id},${r.enchant_level})">Заточка</button>
-      <button class="sm danger" onclick="confiscate(${r.id},0)">Изъять</button></td>`},
+      <button class="sm danger" onclick="confiscate(${r.id},0)">Изъять</button>
+      <button class="sm danger" onclick="deleteItem(${r.id},0)">Удалить</button></td>`},
   ], rows)}</div>`;
 };
 

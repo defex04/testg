@@ -1,0 +1,7 @@
+# приватная шпаргалка с ключами и паролями — не публиковать
+README.private.md
+
+# локальные секреты сервера
+server/mmorpg-local/.env
+
+node_modules/

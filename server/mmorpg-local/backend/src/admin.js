@@ -67,6 +67,18 @@ export function adminRoutes(app) {
     });
   });
 
+  // привязка персонажей к аккаунтам: способ входа и ник Telegram
+  // (auth-БД отдельная, поэтому не JOIN, а второй запрос по account_id)
+  async function accountIdentities(accountIds) {
+    if (!accountIds.length) return {};
+    const { rows } = await auth.query(
+      `SELECT i.account_id, i.provider, tp.username
+         FROM account_identities i
+         LEFT JOIN telegram_profiles tp ON tp.account_id = i.account_id
+        WHERE i.account_id = ANY($1)`, [accountIds]);
+    return Object.fromEntries(rows.map((r) => [r.account_id, r]));
+  }
+
   // ================= персонажи =================
   app.get('/admin/api/characters', guard, async (req, res) => {
     const q = String(req.query.q || '').trim();
@@ -77,7 +89,10 @@ export function adminRoutes(app) {
         WHERE ch.status = 1
           AND ($1 = '' OR ch.name ILIKE '%' || $1 || '%' OR ch.id::text = $1)
         ORDER BY ch.id DESC LIMIT 100`, [q]);
-    res.json(rows);
+    const byAcc = await accountIdentities([...new Set(rows.map((r) => r.account_id))]);
+    res.json(rows.map((r) => ({ ...r,
+      provider: (byAcc[r.account_id] || {}).provider ?? null,
+      tg_username: (byAcc[r.account_id] || {}).username ?? null })));
   });
 
   app.get('/admin/api/characters/:id', guard, async (req, res) => {
@@ -113,10 +128,50 @@ export function adminRoutes(app) {
            FROM character_quests cq JOIN quest_templates q ON q.id = cq.quest_id
           WHERE cq.character_id = $1 ORDER BY cq.accepted_at DESC LIMIT 10`, [id]),
     ]);
-    res.json({ character: ch, stats: stats.rows[0] || null,
+    const account = (await auth.query(
+      `SELECT a.id, a.status, a.created_at, i.provider, i.external_id,
+              tp.username AS tg_username, tp.first_name AS tg_first_name
+         FROM accounts a
+         LEFT JOIN account_identities i ON i.account_id = a.id
+         LEFT JOIN telegram_profiles tp ON tp.account_id = a.id
+        WHERE a.id = $1`, [ch.account_id])).rows[0] || null;
+    res.json({ character: ch, account, stats: stats.rows[0] || null,
       wallet: await wallet(game, id), inventory: inv.rows,
       injuries: injuries.rows, battles: battles.rows,
       ledger: ledger.rows, quests: quests.rows });
+  });
+
+  // смена имени: уникальность, чёрный список, след в rename_history,
+  // обновление присутствия в Redis (там имя закешировано)
+  app.post('/admin/api/characters/:id/rename', guard, async (req, res) => {
+    const id = Number(req.params.id);
+    const name = String((req.body || {}).name || '').trim().slice(0, 24);
+    if (name.length < 2) throw bad(400, 'name_too_short');
+    const ch = (await game.query(
+      `SELECT id, name, location_id, level FROM characters WHERE id = $1 AND status = 1`,
+      [id])).rows[0];
+    if (!ch) throw bad(404, 'not_found');
+    if ((await game.query(
+      `SELECT 1 FROM name_blacklist WHERE name = $1`, [name])).rows[0])
+      throw bad(400, 'name_blacklisted');
+    try {
+      await tx(async (c) => {
+        await c.query(`UPDATE characters SET name = $2 WHERE id = $1`, [id, name]);
+        await c.query(
+          `INSERT INTO rename_history (character_id, old_name, new_name, initiated_by)
+           VALUES ($1, $2, $3, 0)`, [id, ch.name, name]);
+      });
+    } catch (e) {
+      if (e.code === '23505') throw bad(409, 'name_taken');
+      throw e;
+    }
+    // если игрок онлайн — поправить имя в списке игроков локации
+    if (await redis.hExists(`loc:${ch.location_id}:players`, String(id))) {
+      await redis.hSet(`loc:${ch.location_id}:players`, String(id),
+        JSON.stringify({ id, name, level: ch.level }));
+    }
+    await audit('character.rename', 1, id, { from: ch.name, to: name });
+    res.json({ ok: true });
   });
 
   app.post('/admin/api/characters/:id/currency', guard, async (req, res) => {
@@ -223,10 +278,37 @@ export function adminRoutes(app) {
         ORDER BY a.id DESC LIMIT 100`);
     const ids = rows.map((r) => r.id);
     const chars = ids.length ? (await game.query(
-      `SELECT account_id, string_agg(name, ', ') AS names FROM characters
-        WHERE account_id = ANY($1) GROUP BY account_id`, [ids])).rows : [];
-    const byAcc = Object.fromEntries(chars.map((c) => [c.account_id, c.names]));
-    res.json(rows.map((r) => ({ ...r, characters: byAcc[r.id] || '' })));
+      `SELECT account_id,
+              json_agg(json_build_object('id', id, 'name', name) ORDER BY id) AS chars
+         FROM characters
+        WHERE account_id = ANY($1) AND status = 1 GROUP BY account_id`, [ids])).rows : [];
+    const byAcc = Object.fromEntries(chars.map((c) => [c.account_id, c.chars]));
+    res.json(rows.map((r) => ({ ...r, characters: byAcc[r.id] || [] })));
+  });
+
+  // удаление аккаунта: мягкое (status 4), сессии отзываются, персонажи
+  // помечаются удалёнными и снимаются с присутствия. Предметы и история
+  // остаются в БД — гроссбухи не чистим.
+  app.post('/admin/api/accounts/:id/delete', guard, async (req, res) => {
+    const id = Number(req.params.id);
+    const acc = (await auth.query(
+      `SELECT id, status FROM accounts WHERE id = $1`, [id])).rows[0];
+    if (!acc) throw bad(404, 'not_found');
+    if (acc.status === 4) throw bad(400, 'already_deleted');
+    const chars = (await game.query(
+      `SELECT id, location_id FROM characters
+        WHERE account_id = $1 AND status = 1`, [id])).rows;
+    await auth.query(`UPDATE accounts SET status = 4 WHERE id = $1`, [id]);
+    await auth.query(
+      `UPDATE sessions SET revoked_at = now()
+        WHERE account_id = $1 AND revoked_at IS NULL`, [id]);
+    for (const ch of chars) {
+      await game.query(
+        `UPDATE characters SET status = 3 WHERE id = $1`, [ch.id]);
+      await redis.hDel(`loc:${ch.location_id}:players`, String(ch.id));
+    }
+    await audit('account.delete', 2, id, { characters: chars.map((c) => c.id) });
+    res.json({ ok: true, characters: chars.length });
   });
 
   app.post('/admin/api/accounts/:id/ban', guard, async (req, res) => {
@@ -400,6 +482,28 @@ export function adminRoutes(app) {
         [randomUUID(), it.id, it.template_id, it.quantity, it.owner_type, it.owner_id]);
     });
     await audit('item.confiscate', 5, id, { note });
+    res.json({ ok: true });
+  });
+
+  // уничтожить предмет: status = 2 (строки не удаляем), след в item_ledger
+  app.post('/admin/api/item-instances/:id/delete', guard, async (req, res) => {
+    const id = Number(req.params.id);
+    const note = (req.body || {}).note || null;
+    await tx(async (c) => {
+      const it = (await c.query(
+        `SELECT * FROM item_instances WHERE id = $1 AND status = 1 FOR UPDATE`,
+        [id])).rows[0];
+      if (!it) throw bad(404, 'not_found');
+      await c.query(
+        `UPDATE item_instances SET status = 2, slot = NULL,
+            version = version + 1, updated_at = now() WHERE id = $1`, [id]);
+      await c.query(
+        `INSERT INTO item_ledger (idempotency_key, item_instance_id, template_id,
+            quantity, from_owner_type, from_owner_id, reason)
+         VALUES ($1, $2, $3, $4, $5, $6, 7)`,   // 7 = destroy
+        [randomUUID(), it.id, it.template_id, it.quantity, it.owner_type, it.owner_id]);
+    });
+    await audit('item.delete', 5, id, { note });
     res.json({ ok: true });
   });
 

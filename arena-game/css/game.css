@@ -1204,6 +1204,34 @@ body.in-battle .hud-nav { display: none; }
   box-shadow: 0 0 6px rgba(127, 176, 105, .7);
 }
 .players-list .player-row .m-lvl { color: #b89a55; font-size: 12px; }
+.players-list .player-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* меч «напасть» возле ника игрока */
+.pvp-btn {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(180deg, #2a1612, #1a0d0a);
+  color: #d98a6e;
+  border: 1px solid rgba(217, 106, 80, .45);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: color .12s, border-color .15s, transform .08s;
+}
+.pvp-btn svg { width: 16px; height: 16px; }
+.pvp-btn:hover {
+  color: #ff9b78;
+  border-color: #e06a4a;
+}
+.pvp-btn:active { transform: scale(.93); }
 
 /* ---------- гардероб (примерочная) ---------- */
 
@@ -1244,27 +1272,6 @@ body.in-battle .hud-nav { display: none; }
   color: var(--gold-bright);
   text-shadow: 0 1px 2px #000;
   white-space: nowrap;
-}
-
-.dressing-tabs { display: flex; gap: 6px; flex: 1; }
-.dressing-tab {
-  padding: 6px 16px;
-  font-family: var(--font-display);
-  font-size: 13px;
-  background: linear-gradient(180deg, #1d2511, #12170a);
-  color: #cdbd8d;
-  border: 1px solid var(--line-dim);
-  border-radius: 16px;
-  cursor: pointer;
-  transition: color .12s, border-color .15s;
-}
-.dressing-tab:hover { color: var(--gold-bright); }
-.dressing-tab.active {
-  background: linear-gradient(180deg, #f1c469, #cf9a35 55%, #9c6f1f);
-  border-color: #6e5426;
-  color: #2c1f08;
-  font-weight: 700;
-  text-shadow: 0 1px 0 rgba(255, 240, 190, .5);
 }
 
 .dressing-close {
@@ -1679,9 +1686,6 @@ body.in-battle .hud-nav { display: none; }
     border-left: none;
     border-top: 1px solid rgba(138, 111, 60, .4);
   }
-  .dressing-tabs { justify-content: center; }
-  .dressing-tab { padding: 6px 12px; font-size: 12px; }
-  .dressing-title { display: none; }
 }
 
 /* ============================================================

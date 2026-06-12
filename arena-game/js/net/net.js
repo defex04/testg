@@ -85,8 +85,14 @@ function connectSocket() {
 function wireBattleHandlers() {
   socketHandlers.set('battleStart', (m) => {
     currentBattle = new ServerBattle(
-      { battleId: m.battleId, phase: 'choose', left: m.left, right: m.right });
+      { battleId: m.battleId, phase: 'choose', kind: m.kind,
+        left: m.left, right: m.right });
     if (pendingHunt) { pendingHunt.resolve(currentBattle); pendingHunt = null; }
+    else if (resumeCb) {
+      // бой начат не нами (на нас напали) — входим как при battleResume
+      currentBattle.fresh = true;
+      resumeCb(currentBattle);
+    }
   });
   socketHandlers.set('battleResume', (m) => {
     // бой уже подхвачен (push и REST-страховка могут прийти оба) — не дублируем
@@ -94,7 +100,8 @@ function wireBattleHandlers() {
         && currentBattle.phase !== 'ended') return;
     console.log('battleResume:', m.battleId, 'фаза', m.phase);
     const b = new ServerBattle(
-      { battleId: m.battleId, phase: m.phase, left: m.sides.left, right: m.sides.right });
+      { battleId: m.battleId, phase: m.phase, kind: m.kind,
+        left: m.sides.left, right: m.sides.right });
     currentBattle = b;
     if (m.phase === 'choose') {
       b._on('turnStart', { turn: m.turn, timeLeft: m.timeLeft });
@@ -124,6 +131,7 @@ export class ServerBattle extends EventTarget {
     super();
     this.battleId = init.battleId;
     this.phase = init.phase || 'choose';
+    this.kind = init.kind || 'hunt';   // 'hunt' | 'pvp'
     this.sides = { left: { ...init.left }, right: { ...init.right } };
     this.active = false;
     this.queue = [];
@@ -133,6 +141,14 @@ export class ServerBattle extends EventTarget {
     return new Promise((resolve, reject) => {
       pendingHunt = { resolve, reject };
       socket.send(JSON.stringify({ type: 'hunt' }));
+    });
+  }
+
+  /** Дуэль PvP: напасть на игрока из списка игроков локации. */
+  static attack(targetId) {
+    return new Promise((resolve, reject) => {
+      pendingHunt = { resolve, reject };
+      socket.send(JSON.stringify({ type: 'attack', targetId }));
     });
   }
 

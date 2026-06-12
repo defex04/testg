@@ -296,6 +296,8 @@ export class BattleUI {
     this.log(victory ? '🏆 <b>Победа!</b>' : '☠ <b>Поражение…</b>');
     this.refs.endTitle.textContent = victory ? '⚔ Победа! ⚔' : 'Поражение…';
     this.refs.endTitle.classList.toggle('defeat', !victory);
+    // без обработчика рестарта (PvP) кнопка «В бой снова» не показывается
+    this.refs.restart.classList.toggle('hidden', !handlers.onRestart);
     this.refs.end.classList.remove('hidden');
     this.refs.restart.onclick = () => {
       this.refs.end.classList.add('hidden');

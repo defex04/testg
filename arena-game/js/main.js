@@ -38,10 +38,17 @@ let online = false;
 const SLOT_IDS = { torso: 1 };   // имя слота экипировки -> body_part в БД
 const SLOT_NAMES = Object.fromEntries(
   Object.entries(SLOT_IDS).map(([k, v]) => [v, k]));
+// неизвестные слоты получают синтетическое имя 'slotN' — вещь всё равно
+// видна в рюкзаке и надевается (без 3D-модели)
+const slotNameFor = (slotId) =>
+  slotId == null ? null : (SLOT_NAMES[slotId] || 'slot' + slotId);
+const slotIdFor = (slotName) =>
+  SLOT_IDS[slotName] ?? Number(String(slotName).replace('slot', ''));
 const LOC_BY_ID = { 1: 'village', 2: 'canyon', 3: 'night' };
 
 /** Перенести персонажа с сервера в PLAYER и шапку. */
 function applyCharacter(ch) {
+  PLAYER.id = ch.id;
   PLAYER.name = ch.name;
   PLAYER.level = ch.level;
   PLAYER.wallet = { copper: 0, silver: 0, gold: 0, diamond: 0, ...ch.wallet };
@@ -300,14 +307,21 @@ function setLocation(key) {
 // Бой
 // ---------------------------------------------------------------------------
 
-/** Возврат в идущий бой после F5 или обрыва связи. */
+/** Возврат в идущий бой после F5/обрыва связи, либо на нас напали. */
 async function resumeBattle(serverBattle) {
   console.log('Возврат в бой', serverBattle.battleId,
     'mode=', mode, 'loading=', battleLoading);
   if (mode === 'battle' || battleLoading) return;
+  // нападение могло застать игрока в гардеробе — закрываем его
+  if (!dressingEl.classList.contains('hidden')) {
+    dressingEl.classList.add('hidden');
+    dressing.stop();
+  }
   setMode('battle');
   arena.setBackground(LOCATIONS[currentLoc]);
-  showToast('Бой продолжается — возвращаемся');
+  showToast(serverBattle.fresh
+    ? '⚔ На вас напали! Бой начинается'
+    : 'Бой продолжается — возвращаемся');
   await initBattle(serverBattle);
 }
 
@@ -319,7 +333,25 @@ async function startBattle() {
   await initBattle();
 }
 
-async function initBattle(resumedBattle = null) {
+const BATTLE_ERRORS = {
+  target_offline: 'игрок не в сети',
+  target_busy: 'игрок уже в бою',
+  already_in_battle: 'вы уже в бою',
+  cannot_attack_self: 'нельзя напасть на себя',
+  not_same_location: 'игрок в другой локации',
+  no_hunt_here: 'здесь не на кого охотиться',
+};
+
+/** Дуэль PvP: нападение на игрока из «Списка игроков в локации». */
+async function startPvp(target) {
+  if (mode === 'battle' || battleLoading) { showToast('Вы уже в бою!'); return; }
+  if (!online) { showToast('Бой требует подключения к серверу'); return; }
+  setMode('battle');
+  arena.setBackground(LOCATIONS[currentLoc]);
+  await initBattle(null, () => ServerBattle.attack(target.id));
+}
+
+async function initBattle(resumedBattle = null, starter = null) {
   if (battleLoading) return;
   battleLoading = true;
   loadingEl.classList.remove('hidden');
@@ -344,9 +376,9 @@ async function initBattle(resumedBattle = null) {
   // бой создаёт и ведёт сервер: формулы те же (порт BattleSystem),
   // но урон, криты и награды решает только он
   try {
-    battle = resumedBattle || await ServerBattle.hunt();
+    battle = resumedBattle || await (starter || ServerBattle.hunt)();
   } catch (e) {
-    showToast('Не удалось начать бой: ' + e.message);
+    showToast('Не удалось начать бой: ' + (BATTLE_ERRORS[e.message] || e.message));
     setMode('location');
     return;
   }
@@ -403,7 +435,8 @@ async function initBattle(resumedBattle = null) {
       api.me().then(applyCharacter).catch(console.error);
     }
     ui.showEnd(victory, {
-      onRestart: () => initBattle(),
+      // повторить можно только охоту; на дуэль соперника вызывают заново
+      onRestart: battle.kind === 'pvp' ? null : () => initBattle(),
       onLeave: () => leaveBattle(true),
     });
   });
@@ -627,6 +660,10 @@ $('chat-form').addEventListener('submit', (e) => {
 
 // список игроков в локации — живой, из Redis-присутствия сервера
 const playersList = $('players-list');
+
+// меч возле ника: нападение на игрока (дуэль PvP)
+const ICON_SWORD = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.5 17.5 3 6V3h3l11.5 11.5"/><path d="m13 19 6-6"/><path d="m16 16 4 4"/><path d="m19 21 2-2"/></svg>`;
+
 async function refreshPlayers() {
   if (!online) return;
   try {
@@ -635,7 +672,22 @@ async function refreshPlayers() {
     for (const p of players) {
       const row = document.createElement('div');
       row.className = 'player-row';
-      row.innerHTML = `${p.name} <span class="m-lvl">[${p.level}]</span>`;
+      const name = document.createElement('span');
+      name.className = 'player-name';
+      name.textContent = p.name + ' ';
+      const lvl = document.createElement('span');
+      lvl.className = 'm-lvl';
+      lvl.textContent = `[${p.level}]`;
+      name.appendChild(lvl);
+      row.appendChild(name);
+      if (String(p.id) !== String(PLAYER.id)) {
+        const atk = document.createElement('button');
+        atk.className = 'pvp-btn';
+        atk.title = `Напасть на ${p.name}`;
+        atk.innerHTML = ICON_SWORD;
+        atk.addEventListener('click', () => startPvp(p));
+        row.appendChild(atk);
+      }
       playersList.appendChild(row);
     }
   } catch (e) {
@@ -746,8 +798,35 @@ async function renderBattleInfo(id) {
 }
 
 // ---------------------------------------------------------------------------
-// Инвентарь: надеть/снять предметы на любого из бойцов
+// Инвентарь: рюкзак игрока, надеть/снять можно только своего персонажа
 // ---------------------------------------------------------------------------
+
+// последний снимок инвентаря с сервера: каждая вещь — отдельная строка
+let serverInv = [];
+
+/** Ключ шаблона предмета в ITEMS: знакомые получают 3D, остальные — без. */
+const itemKeyFor = (it) => it.icon || 'srv' + it.templateId;
+
+/**
+ * Зарегистрировать вещи с сервера в ITEMS (для 3D и слотов) и привести
+ * equipState игрока к серверному состоянию — сервер источник правды.
+ */
+function registerServerItems(inv) {
+  serverInv = inv;
+  const equippedBySlot = {};
+  for (const it of inv) {
+    const slotName = slotNameFor(it.slot);
+    const key = itemKeyFor(it);
+    if (!ITEMS[key]) {
+      ITEMS[key] = { name: it.name, slot: slotName, icon: '📦', noModel: true };
+    }
+    if (it.equipped && slotName) equippedBySlot[slotName] = key;
+  }
+  for (const slot of new Set(
+    [...Object.keys(equipState.left), ...Object.keys(equippedBySlot)])) {
+    equipState.left[slot] = equippedBySlot[slot] || null;
+  }
+}
 
 // Желаемое состояние экипировки. Единственный источник правды:
 // UI меняет его, а syncEquipment приводит бойцов в соответствие.
@@ -808,42 +887,47 @@ async function syncServerEquip(slotName, itemKey, prevKey = null) {
   try {
     if (itemKey) {
       const inv = await api.inventory();
-      const it = inv.find((i) => i.icon === itemKey || 'srv' + i.templateId === itemKey);
+      const it = inv.find((i) => itemKeyFor(i) === itemKey && !i.equipped)
+        || inv.find((i) => itemKeyFor(i) === itemKey);
       if (!it) throw new Error('not_found');
-      if (!it.equipped) await api.equip(it.id);
+      // equip/unequip возвращают свежий инвентарь — обновляем снимок
+      serverInv = it.equipped ? inv : await api.equip(it.id);
     } else {
-      await api.unequip(SLOT_IDS[slotName]);
+      serverInv = await api.unequip(slotIdFor(slotName));
     }
+    renderInventory();
   } catch (e) {
     console.error('Экипировка на сервере:', e);
     showToast('Сервер отклонил экипировку: ' + (EQUIP_ERRORS[e.message] || e.message));
     // сервер — источник правды: откатываем локальное состояние и 3D
     equipState.left[slotName] = prevKey;
     syncEquipment('left');
-    if (!dressingEl.classList.contains('hidden') && dressingSide === 'left') {
+    if (!dressingEl.classList.contains('hidden')) {
       syncDressing(false).catch(console.error);
     }
   }
 }
 
-// --- примерочная: персонаж лицом к камере, вещи меряются на нём ---
+// --- примерочная: только СВОЙ персонаж, вещи меряются на нём ---
 
 const dressingEl = $('dressing');
 const dressingItemsEl = $('dressing-items');
 const dressing = new DressingRoom($('dressing-view'));
-let dressingSide = 'left';
+const dressingSide = 'left';   // одевать можно только себя
 let dressingBusy = false;
 
-async function openDressing(side) {
-  dressingSide = side;
-  document.querySelectorAll('.dressing-tab').forEach((t) =>
-    t.classList.toggle('active', t.dataset.side === side));
+async function openDressing() {
   dressingEl.classList.remove('hidden');
   dressing.start();
   dressingBusy = true;
   renderInventory();
   try {
-    await dressing.show(side === 'left' ? FIGHTERS.brawler : FIGHTERS.brawlerElite);
+    // свежий рюкзак с сервера: выданные/полученные вещи появляются сразу
+    if (online) {
+      try { registerServerItems(await api.inventory()); }
+      catch (e) { console.error('Обновление рюкзака:', e); }
+    }
+    await dressing.show(FIGHTERS.brawler);
     await syncDressing(false);
   } finally {
     dressingBusy = false;
@@ -886,31 +970,43 @@ async function toggleDressingEquip(itemKey) {
 
 function renderInventory() {
   dressingItemsEl.innerHTML = '';
-  for (const [key, item] of Object.entries(ITEMS)) {
-    const equipped = equipState[dressingSide][item.slot] === key;
+  // онлайн: каждая вещь рюкзака — отдельная строка (включая дубликаты и
+  // предметы без 3D-модели); оффлайн — демо-набор из ITEMS
+  const rows = online && serverInv.length
+    ? serverInv.map((it) => ({ key: itemKeyFor(it), inst: it }))
+    : Object.keys(ITEMS).map((key) => ({ key, inst: null }));
+  for (const { key, inst } of rows) {
+    const item = ITEMS[key]
+      || { name: inst.name, icon: '📦', slot: slotNameFor(inst.slot) };
+    const slotName = inst ? slotNameFor(inst.slot) : item.slot;
+    const equipped = !!slotName && equipState[dressingSide][slotName] === key;
     const row = document.createElement('div');
     row.className = 'inv-item';
-    row.innerHTML = `
-      <div class="inv-item-head">
-        <span class="inv-icon">${item.icon || '📦'}</span>
-        <span class="inv-name">${item.name}</span>
-      </div>
-      <div class="inv-actions"></div>`;
-    const b = document.createElement('button');
-    b.className = 'inv-btn' + (equipped ? ' equipped' : '');
-    b.disabled = dressingBusy;
-    b.textContent = dressingBusy ? 'Загрузка…' : (equipped ? 'Снять' : 'Надеть');
-    b.addEventListener('click', () => toggleDressingEquip(key));
-    row.querySelector('.inv-actions').appendChild(b);
+    const head = document.createElement('div');
+    head.className = 'inv-item-head';
+    const icon = document.createElement('span');
+    icon.className = 'inv-icon';
+    icon.textContent = item.icon || '📦';
+    const name = document.createElement('span');
+    name.className = 'inv-name';
+    name.textContent = item.name
+      + (inst && inst.quantity > 1 ? ` ×${inst.quantity}` : '');
+    head.append(icon, name);
+    const actions = document.createElement('div');
+    actions.className = 'inv-actions';
+    if (slotName) {       // вещь надевается — кнопка «Надеть/Снять»
+      const b = document.createElement('button');
+      b.className = 'inv-btn' + (equipped ? ' equipped' : '');
+      b.disabled = dressingBusy;
+      b.textContent = dressingBusy ? 'Загрузка…' : (equipped ? 'Снять' : 'Надеть');
+      b.addEventListener('click', () => toggleDressingEquip(key));
+      actions.appendChild(b);
+    }
+    row.append(head, actions);
     dressingItemsEl.appendChild(row);
   }
 }
 
-document.querySelectorAll('.dressing-tab').forEach((tab) => {
-  tab.addEventListener('click', () => {
-    if (!dressingBusy && tab.dataset.side !== dressingSide) openDressing(tab.dataset.side);
-  });
-});
 $('dressing-close').addEventListener('click', () => {
   dressingEl.classList.add('hidden');
   dressing.stop(); // рендер-цикл примерочной не жрёт GPU, пока она закрыта
@@ -929,7 +1025,7 @@ function showToast(text) {
   toastTimer = setTimeout(() => toast.classList.remove('show'), 2600);
 }
 
-$('nav-bag').addEventListener('click', () => openDressing(dressingSide));
+$('nav-bag').addEventListener('click', () => openDressing());
 
 $('nav-hunt').addEventListener('click', () => {
   if (mode === 'battle') showToast('Вы уже в бою!');
@@ -982,17 +1078,7 @@ function showTelegramGate() {
 
     // вещи с сервера: знакомым ключам — 3D-модели из ITEMS, остальные
     // добавляются без модели (noModel), чтобы видно было ВСЁ имущество
-    const inv = await api.inventory();
-    for (const it of inv) {
-      const slotName = SLOT_NAMES[it.slot];
-      const key = it.icon || 'srv' + it.templateId;
-      if (slotName && !ITEMS[key]) {
-        ITEMS[key] = { name: it.name, slot: slotName, icon: '📦', noModel: true };
-      }
-      if (it.equipped && slotName && ITEMS[key]) {
-        equipState.left[slotName] = key;
-      }
-    }
+    registerServerItems(await api.inventory());
 
     // чат: история, затем живые сообщения
     api.onChat((m) => chatMessage(m.from, m.text));
