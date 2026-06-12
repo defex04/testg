@@ -7,12 +7,9 @@
  * не теряется. После F5/обрыва связи сервер сам возвращает идущий бой
  * сообщением battleResume — подпишись через api.onBattleResume(cb) ДО login.
  */
-// Выбор сервера: локальный запуск (localhost / file://) — локальный API,
-// иначе (GitHub Pages и любой внешний хостинг) — сервер на Azure.
-// window.API_URL, заданный до загрузки модуля, перекрывает автовыбор.
-const AZURE_API = 'https://4.231.90.10.sslip.io';
-const isLocal = ['localhost', '127.0.0.1', '[::1]', ''].includes(location.hostname);
-const API = window.API_URL || (isLocal ? 'http://localhost:8080' : AZURE_API);
+// Адрес сервера выбирает игрок на стартовом экране (index.html) —
+// выбор кладётся в window.API_URL до загрузки этого модуля.
+const API = window.API_URL || 'http://localhost:8080';
 console.log('Сервер игры:', API);
 
 let token = sessionStorage.getItem('token');

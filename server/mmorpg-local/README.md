@@ -34,9 +34,10 @@ API доступен по **https://4.231.90.10.sslip.io** — Caddy (`docker-co
 `Caddyfile`) терминирует TLS с автосертификатом Let's Encrypt и проксирует на api:8080.
 HTTPS обязателен: GitHub Pages блокирует http/ws с https-страницы (mixed content).
 
-Клиент (`js/net/net.js`) выбирает сервер сам: localhost / file:// — локальный
-`http://localhost:8080`, любой внешний хостинг (GitHub Pages) — Azure.
-Переопределение: задать `window.API_URL` до загрузки модуля.
+Сервер выбирает игрок на стартовом экране (`index.html`): «Локальный сервер»
+или «Сервер Azure»; рекомендуемый вариант подсвечивается по месту запуска
+(localhost — локальный, внешний хостинг — Azure). Выбор кладётся в
+`window.API_URL`, и только потом загружается `js/main.js`.
 
 Обновление сервера на VM:
 

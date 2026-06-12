@@ -249,6 +249,49 @@
 
   <div class="toast" id="toast"></div>
 
-  <script type="module" src="js/main.js"></script>
+  <script type="module">
+    // Ручной выбор сервера перед стартом игры: локальный (start.bat + Docker)
+    // или Azure. Игра (js/main.js) загружается только после выбора —
+    // js/net/net.js прочитает window.API_URL. Под file:// экран не нужен:
+    // там игра не стартует, работает помощник выше.
+    const SERVERS = {
+      local: { url: 'http://localhost:8080',          name: 'Локальный сервер', desc: 'Docker на этом компьютере (localhost:8080)' },
+      azure: { url: 'https://4.231.90.10.sslip.io',   name: 'Сервер Azure',     desc: 'Облако — общий мир для всех игроков' },
+    };
+
+    function chooseServer() {
+      if (location.protocol === 'file:') return Promise.resolve(null);
+      // подсказка по умолчанию: с внешнего хостинга (GitHub Pages) — Azure
+      const hinted = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname)
+        ? 'local' : 'azure';
+      return new Promise((resolve) => {
+        const el = document.createElement('div');
+        el.className = 'file-helper';
+        el.innerHTML =
+          '<div class="fh-card">' +
+            '<div class="fh-title">⚜ DRAGON ARENA</div>' +
+            '<p class="fh-sub">Выберите сервер для игры</p>' +
+            '<div class="srv-list">' +
+              Object.entries(SERVERS).map(([id, s]) =>
+                '<button class="srv-btn' + (id === hinted ? ' srv-hint' : '') + '" data-srv="' + id + '">' +
+                  '<span class="srv-name">' + s.name + (id === hinted ? ' · рекомендуется' : '') + '</span>' +
+                  '<span class="srv-desc">' + s.desc + '</span>' +
+                '</button>').join('') +
+            '</div>' +
+          '</div>';
+        el.addEventListener('click', (e) => {
+          const btn = e.target.closest('[data-srv]');
+          if (!btn) return;
+          el.remove();
+          resolve(SERVERS[btn.dataset.srv].url);
+        });
+        document.body.appendChild(el);
+      });
+    }
+
+    const url = await chooseServer();
+    if (url) window.API_URL = url;
+    await import('./js/main.js');
+  </script>
 </body>
 </html>
