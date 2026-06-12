@@ -8,7 +8,8 @@
  */
 import * as THREE from 'three';
 import { clone as cloneSkeleton } from '../../vendor/three/examples/jsm/utils/SkeletonUtils.js';
-import { loadGLTF, loadClip, buildItemMaterial } from './loaders.js';
+import { loadGLTF, loadClip } from './loaders.js';
+import { equipItem } from './EquipEngine.js';
 
 const FLASH_COLOR = new THREE.Color(0xff2211);
 
@@ -205,97 +206,19 @@ export class Fighter {
   }
 
   /**
-   * Надеть предмет. Статичная модель (без скелета) жёстко крепится к кости
-   * и движется вместе с ней в анимациях — для лат, шлемов, оружия.
+   * Надеть предмет (см. EquipEngine.js). Способ посадки выбирается сам:
+   * отскиненный на совместимый скелет предмет перепривязывается к скелету
+   * персонажа, статичная броня/одежда автоскинится (переносом весов с тела)
+   * и деформируется в анимациях, оружие/шлемы жёстко крепятся к кости.
    *
-   * itemDef.attach: {
-   *   bone: RegExp|string — якорная кость (по умолч. грудь Spine1),
-   *   cover: 1.35  — высота предмета в долях высоты торса (шея..бёдра),
-   *   scale: 1     — ручная поправка масштаба,
-   *   offset: [вперёд, вверх, влево] в метрах,
-   *   rotation: [x, y, z] в градусах — если модель «смотрит» не туда,
-   * }
-   * Размер подгоняется автоматически под торс конкретного персонажа.
+   * itemDef.attach переопределяет посадку слота: { mode, bone, at, ref,
+   * cover, axis, align, scale, offset, rotation, knn, smooth } —
+   * подробности в EquipEngine.js.
    */
   async equip(itemDef) {
     const slot = itemDef.slot || 'misc';
     this.unequip(slot);
-
-    const { scene } = await loadGLTF(itemDef.model);
-    const item = scene.clone(true);
-    // свой PBR-материал предмета (metallic/roughness), если задан в конфиге
-    const override = itemDef.material ? buildItemMaterial(itemDef.material) : null;
-    item.traverse((o) => {
-      if (o.isMesh) {
-        o.castShadow = true;
-        // материалы свои у каждого бойца: вспышка урона не задевает соседа
-        o.material = override || (Array.isArray(o.material)
-          ? o.material.map((m) => m.clone())
-          : o.material.clone());
-      }
-    });
-
-    const cfg = itemDef.attach || {};
-    const bone = this.findBone(cfg.bone || /Spine1$/i);
-    if (!bone) throw new Error(`Кость для предмета не найдена у ${this.def.name}`);
-
-    // Меряем и крепим в bind-позе (симметричная Т-поза), а не в случайном
-    // кадре играющей анимации: боевая стойка скручивает корпус, и перекос
-    // "замораживался" бы в привязке — броня сидела бы криво и каждый раз
-    // по-разному. Текущую позу сохраняем и восстанавливаем после привязки.
-    const savedPose = new Map();
-    this.model.traverse((o) => {
-      if (o.isBone) {
-        savedPose.set(o, {
-          p: o.position.clone(), q: o.quaternion.clone(), s: o.scale.clone(),
-        });
-      }
-    });
-    this.model.traverse((o) => { if (o.isSkinnedMesh) o.skeleton.pose(); });
-    this.model.updateMatrixWorld(true);
-
-    const neck = this.findBone(/Neck$/i).getWorldPosition(new THREE.Vector3());
-    const hips = this.findBone(/Hips$/i).getWorldPosition(new THREE.Vector3());
-    const torsoH = neck.distanceTo(hips);
-
-    const box = new THREE.Box3().setFromObject(item);
-    const size = box.getSize(new THREE.Vector3());
-    const scale = (torsoH * (cfg.cover ?? 1.35)) / size.y * (cfg.scale ?? 1);
-
-    // куда смотрит боец (мир); в bind-позе корпус не скручен,
-    // поэтому "ровно по направлению взгляда" = ровно по груди
-    const yaw = this.root.rotation.y;
-    const fwd = new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw));
-    const up = new THREE.Vector3(0, 1, 0);
-    const left = new THREE.Vector3().crossVectors(up, fwd);
-
-    const offset = cfg.offset || [0, 0, 0];
-    const target = neck.clone().lerp(hips, 0.45)
-      .addScaledVector(fwd, offset[0])
-      .addScaledVector(up, offset[1])
-      .addScaledVector(left, offset[2]);
-
-    const rot = (cfg.rotation || [0, 0, 0]).map(THREE.MathUtils.degToRad);
-    const holder = new THREE.Group();
-    holder.position.copy(target);
-    holder.rotation.set(rot[0], yaw + rot[1], rot[2]);
-    holder.scale.setScalar(scale);
-    // пивот предмета может быть где угодно — центруем по габаритам
-    item.position.copy(box.getCenter(new THREE.Vector3())).negate();
-    holder.add(item);
-    holder.updateMatrixWorld(true);
-
-    bone.attach(holder); // three сам пересчитает трансформ в систему кости
-
-    // вернуть текущую позу анимации
-    for (const [b, t] of savedPose) {
-      b.position.copy(t.p);
-      b.quaternion.copy(t.q);
-      b.scale.copy(t.s);
-    }
-    this.model.updateMatrixWorld(true);
-
-    this.equipment[slot] = { holder, itemDef };
+    this.equipment[slot] = await equipItem(this, itemDef);
     return this;
   }
 
@@ -303,13 +226,7 @@ export class Fighter {
   unequip(slot) {
     const eq = this.equipment[slot];
     if (!eq) return false;
-    eq.holder.removeFromParent();
-    eq.holder.traverse((o) => {
-      if (o.isMesh) {
-        const mats = Array.isArray(o.material) ? o.material : [o.material];
-        mats.forEach((m) => m.dispose()); // геометрия общая (кэш) — не трогаем
-      }
-    });
+    eq.dispose();
     delete this.equipment[slot];
     return true;
   }

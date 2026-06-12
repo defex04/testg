@@ -35,7 +35,25 @@ const PLAYER = {
 // ---------------------------------------------------------------------------
 
 let online = false;
-const SLOT_IDS = { torso: 1 };   // имя слота экипировки -> body_part в БД
+
+// Кукла экипировки: какие слоты есть, как зовутся и с какой стороны от
+// персонажа рисуются. id = body_part в БД сервера (slot в item_templates);
+// сервер пока знает только торс (1), остальные зарезервированы — вещь с
+// незнакомым клиенту слотом всё равно видна в рюкзаке (slotN).
+const SLOT_META = {
+  head:      { id: 2,  name: 'Шлем',       side: 'left'  },
+  shoulders: { id: 6,  name: 'Наплечники', side: 'left'  },
+  mainhand:  { id: 7,  name: 'Оружие',     side: 'left'  },
+  torso:     { id: 1,  name: 'Доспех',     side: 'left'  },
+  belt:      { id: 9,  name: 'Пояс',       side: 'left'  },
+  amulet:    { id: 10, name: 'Амулет',     side: 'right' },
+  hands:     { id: 5,  name: 'Перчатки',   side: 'right' },
+  offhand:   { id: 8,  name: 'Щит',        side: 'right' },
+  legs:      { id: 3,  name: 'Штаны',      side: 'right' },
+  feet:      { id: 4,  name: 'Сапоги',     side: 'right' },
+};
+const SLOT_IDS = Object.fromEntries(   // имя слота экипировки -> body_part в БД
+  Object.entries(SLOT_META).map(([k, m]) => [k, m.id]));
 const SLOT_NAMES = Object.fromEntries(
   Object.entries(SLOT_IDS).map(([k, v]) => [v, k]));
 // неизвестные слоты получают синтетическое имя 'slotN' — вещь всё равно
@@ -405,13 +423,15 @@ async function initBattle(resumedBattle = null, starter = null) {
   battle.addEventListener('turnStart', (e) => {
     ui.setTurn(e.detail.turn);
     ui.setTimer(e.detail.timeLeft);
-    ui.showControls();
+    if (battle.kind === 'pvp' && e.detail.canAct === false) ui.showWaitTimer();
+    else ui.showControls();
   });
 
   battle.addEventListener('timer', (e) => ui.setTimer(e.detail.timeLeft));
 
   battle.addEventListener('resolve', async (e) => {
-    ui.hideControls(false);
+    if (battle.kind === 'pvp') ui.showWaitTimer();
+    else ui.hideControls(false);
     for (const side of e.detail.passed || []) {
       ui.log(`<b>${e.detail.sides[side].name}</b> пропускает ход`);
     }
@@ -627,23 +647,31 @@ function isChatJunk(sender, body) {
   return /^⚔\s*Бой #\d+/.test(s) || /^Вы вошли в локацию/.test(s);
 }
 
+/** Прокрутить чат к последним сообщениям (после загрузки истории / boot). */
+function scrollChatToBottom() {
+  requestAnimationFrame(() => {
+    chatLog.scrollTop = chatLog.scrollHeight;
+    requestAnimationFrame(() => { chatLog.scrollTop = chatLog.scrollHeight; });
+  });
+}
+
 /** История чата локации: только сообщения игроков и полезные системные. */
 function loadChatHistory(rows) {
   chatLog.innerHTML = '';
   for (const h of rows) {
     if (isChatJunk(h.sender_name, h.body)) continue;
-    chatMessage(h.sender_name, h.body, h.sender_name === 'Система');
+    appendChatLine(h.sender_name, h.body, h.sender_name === 'Система');
   }
+  scrollChatToBottom();
 }
 
-function chatMessage(author, text, system = false) {
+function appendChatLine(author, text, system = false) {
   const line = document.createElement('div');
   line.className = 'chat-line' + (system || author === 'Система' ? ' system' : '');
   const b = document.createElement('b');
   b.textContent = system || author === 'Система' ? `[${author}]` : author;
   line.appendChild(b);
   line.appendChild(document.createTextNode(': '));
-  // «Бой #N» в тексте — кликабельная ссылка на окно боя
   const str = String(text);
   const m = str.match(/Бой #(\d+)/);
   if (m) {
@@ -662,7 +690,11 @@ function chatMessage(author, text, system = false) {
     line.appendChild(document.createTextNode(str));
   }
   chatLog.appendChild(line);
-  chatLog.scrollTop = chatLog.scrollHeight;
+}
+
+function chatMessage(author, text, system = false) {
+  appendChatLine(author, text, system);
+  scrollChatToBottom();
 }
 
 $('chat-form').addEventListener('submit', (e) => {
@@ -932,11 +964,61 @@ const dressingItemsEl = $('dressing-items');
 const dressing = new DressingRoom($('dressing-view'));
 const dressingSide = 'left';   // одевать можно только себя
 let dressingBusy = false;
+let selectedSlot = null;       // клик по пустому слоту куклы подсвечивает вещи
+
+// иконки-призраки пустых слотов куклы (inline-SVG в стиле остального UI)
+const SLOT_ICONS = {
+  head: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 14a7 7 0 0 1 14 0v4h-3l-1-3h-6l-1 3H5v-4Z"/><path d="M12 4v3"/></svg>`,
+  shoulders: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12a5 5 0 0 1 5-5l1 3-2 6a6 6 0 0 1-4-4Z"/><path d="M20 12a5 5 0 0 0-5-5l-1 3 2 6a6 6 0 0 0 4-4Z"/></svg>`,
+  mainhand: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M18.5 4.5 8 15M18.5 4.5l1 .0-0.5 3L9.5 16.5"/><path d="m7 14 3 3-2.5 2.5L5 17l2-3Z"/></svg>`,
+  torso: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4 5.5 6.5 7 11l2-1v9h6v-9l2 1 1.5-4.5L15 4l-3 2-3-2Z"/></svg>`,
+  belt: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10h18v4H3z"/><rect x="9.5" y="8.5" width="5" height="7" rx="1"/></svg>`,
+  amulet: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4c2 3 4.5 4.5 7 4.5S17 7 19 4"/><path d="M12 8.5v3"/><path d="M12 11.5 9.8 14l2.2 4 2.2-4-2.2-2.5Z"/></svg>`,
+  hands: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M8 20V9.5M8 9.5V5a1.2 1.2 0 0 1 2.4 0v4M10.4 9V4a1.2 1.2 0 0 1 2.4 0v5M12.8 9V5a1.2 1.2 0 0 1 2.4 0v6.5l2-2a1.4 1.4 0 0 1 2 2L15.5 16v4"/></svg>`,
+  offhand: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5c2.5 1.5 5 2.2 7 2.2 0 7-2.5 11.5-7 14.8-4.5-3.3-7-7.8-7-14.8 2 0 4.5-.7 7-2.2Z"/></svg>`,
+  legs: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M8 4h8l1 16h-4.5L12 12l-.5 8H7L8 4Z"/></svg>`,
+  feet: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4v8l-4 3v3h9l5-2c0-2-1.5-3.5-4-4l-2-1V4H9Z"/></svg>`,
+};
+
+/** Кукла: ячейки слотов в колонках слева/справа от 3D-окна. */
+function renderDoll() {
+  for (const side of ['left', 'right']) {
+    const col = $('doll-' + side);
+    col.innerHTML = '';
+    for (const [slot, meta] of Object.entries(SLOT_META)) {
+      if (meta.side !== side) continue;
+      const key = equipState[dressingSide][slot] || null;
+      const item = key ? ITEMS[key] : null;
+      const cell = document.createElement('button');
+      cell.className = 'doll-cell' + (item ? ' filled' : '')
+        + (selectedSlot === slot ? ' selected' : '');
+      cell.title = item ? `${meta.name}: ${item.name} (клик — снять)` : meta.name;
+      cell.innerHTML = item
+        ? `<span class="dc-item">${item.icon || '📦'}</span>`
+        : `<span class="dc-ghost">${SLOT_ICONS[slot] || ''}</span>`;
+      cell.addEventListener('click', () => {
+        if (item) {                       // надето — клик снимает
+          selectedSlot = null;
+          toggleDressingEquip(key);
+        } else {                          // пусто — подсветить подходящие вещи
+          selectedSlot = selectedSlot === slot ? null : slot;
+          renderInventory();
+          if (selectedSlot && !dressingItemsEl.querySelector('.inv-item.match')) {
+            showToast(`Нет вещей в слот «${meta.name}»`);
+          }
+        }
+      });
+      col.appendChild(cell);
+    }
+  }
+}
 
 async function openDressing() {
   dressingEl.classList.remove('hidden');
+  $('doll-level').textContent = PLAYER.level;
   dressing.start();
   dressingBusy = true;
+  selectedSlot = null;
   renderInventory();
   try {
     // свежий рюкзак с сервера: выданные/полученные вещи появляются сразу
@@ -951,6 +1033,9 @@ async function openDressing() {
     renderInventory();
   }
 }
+
+$('doll-zoom-in').addEventListener('click', () => dressing.zoom(1.2));
+$('doll-zoom-out').addEventListener('click', () => dressing.zoom(1 / 1.2));
 
 /** Привести персонажа в примерочной к equipState (желаемому состоянию). */
 async function syncDressing(withTaunt = true) {
@@ -1123,5 +1208,6 @@ function showTelegramGate() {
     // режим уже «бой» — не выкидываем игрока обратно в локацию
     if (mode !== 'battle' && !battleLoading) setMode('location');
     finishBoot();
+    scrollChatToBottom();
   }
 })();

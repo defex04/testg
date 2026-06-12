@@ -233,8 +233,20 @@
         <button class="dressing-close" id="dressing-close">✕</button>
       </div>
       <div class="dressing-body">
-        <div class="dressing-view" id="dressing-view">
-          <div class="dressing-hint">⟲ потяните, чтобы повернуть</div>
+        <!-- «кукла»: слоты экипировки колонками вокруг 3D-окна -->
+        <div class="doll">
+          <div class="doll-side" id="doll-left"></div>
+          <div class="doll-center">
+            <div class="dressing-view" id="dressing-view">
+              <div class="dressing-hint">⟲ потяните, чтобы повернуть</div>
+              <div class="doll-level" id="doll-level" title="Уровень персонажа">1</div>
+              <div class="doll-zoom">
+                <button class="doll-zoom-btn" id="doll-zoom-out" title="Отдалить">−</button>
+                <button class="doll-zoom-btn" id="doll-zoom-in" title="Приблизить">+</button>
+              </div>
+            </div>
+          </div>
+          <div class="doll-side" id="doll-right"></div>
         </div>
         <div class="dressing-items" id="dressing-items"></div>
       </div>

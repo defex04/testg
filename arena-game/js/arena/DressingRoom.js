@@ -16,6 +16,13 @@ export class DressingRoom {
     this.fighter = null;
     this.renderer = null;     // создаётся лениво при первом open
     this._running = false;
+    this._zoom = 1;           // 1 = персонаж целиком; больше — крупнее
+  }
+
+  /** Приблизить/отдалить камеру (кнопки «лупа» в кукле). */
+  zoom(factor) {
+    this._zoom = THREE.MathUtils.clamp(this._zoom * factor, 0.7, 2.4);
+    if (this.renderer) this._resize();
   }
 
   _ensureScene() {
@@ -100,9 +107,15 @@ export class DressingRoom {
     el.addEventListener('pointercancel', stop);
   }
 
-  /** Показать персонажа по конфигу бойца (лицом к камере). */
+  /** Показать персонажа по конфигу бойца (лицом к камере). Если этот боец
+   *  уже стоит в примерочной (в т.ч. после фонового прогрева) — переиспользуем
+   *  его: клонирование модели и привязка вещей не повторяются. */
   async show(def) {
     this._ensureScene();
+    if (this.fighter && this._def === def) {
+      this.fighter.play('idle', { fade: 0, randomStart: true });
+      return this.fighter;
+    }
     if (this.fighter) {
       this.scene.remove(this.fighter.root);
       this.fighter.dispose();
@@ -112,10 +125,19 @@ export class DressingRoom {
     fighter.root.rotation.y = 0; // модели Mixamo смотрят в +Z — прямо в камеру
     this.scene.add(fighter.root);
     this.fighter = fighter;
+    this._def = def;
     fighter.play('idle', { fade: 0, randomStart: true });
     // прогреваем taunt в фоне, чтобы первый клик не ждал загрузку
     fighter._ensureAction('taunt');
     return fighter;
+  }
+
+  /** Отрисовать один кадр без запуска цикла: при фоновом прогреве геометрия
+   *  и текстуры уезжают в GPU заранее, и первое открытие не дёргается. */
+  renderFrame() {
+    if (!this.renderer || this._running) return;
+    if (this.fighter) this.fighter.update(0);
+    this.renderer.render(this.scene, this.camera);
   }
 
   /** Надеть с показом «боевого клича». */
@@ -162,9 +184,11 @@ export class DressingRoom {
     const halfH = 1.12;
     const dH = halfH / Math.tan(halfFov);
     const dW = 0.85 / (Math.tan(halfFov) * this.camera.aspect);
-    const d = Math.max(dH, dW);
-    this.camera.position.set(0, 1.12, d + 0.25);
-    this.camera.lookAt(0, 0.98, 0);
+    // зум: камера подъезжает и смотрит чуть выше — крупный план груди/головы
+    const d = Math.max(dH, dW) / this._zoom;
+    const focusY = 0.98 + (this._zoom - 1) * 0.22;
+    this.camera.position.set(0, focusY + 0.14, d + 0.25);
+    this.camera.lookAt(0, focusY, 0);
     this.camera.updateProjectionMatrix();
   }
 

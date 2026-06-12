@@ -104,12 +104,15 @@ function wireBattleHandlers() {
         left: m.sides.left, right: m.sides.right });
     currentBattle = b;
     if (m.phase === 'choose') {
-      b._on('turnStart', { turn: m.turn, timeLeft: m.timeLeft });
+      b._on('turnStart', { turn: m.turn, timeLeft: m.timeLeft,
+        canAct: m.canAct !== false, active: m.active });
     }
     if (resumeCb) resumeCb(b);
   });
   socketHandlers.set('turnStart', (m) =>
-    currentBattle && currentBattle._on('turnStart', { turn: m.turn, timeLeft: m.timeLeft }));
+    currentBattle && currentBattle._on('turnStart', {
+      turn: m.turn, timeLeft: m.timeLeft,
+      canAct: m.canAct !== false, active: m.active }));
   socketHandlers.set('timer', (m) =>
     currentBattle && currentBattle._on('timer', { timeLeft: m.timeLeft }));
   socketHandlers.set('resolve', (m) =>

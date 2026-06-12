@@ -253,12 +253,21 @@ export class BattleUI {
     this.waitEl.classList.toggle('hidden', !showWait);
   }
 
+  /** Свой ход: штурвал активен; выбранный блок сохраняется между ходами. */
   showControls() {
-    this.block = null;
-    for (const b of this._blkButtons) b.classList.remove('active');
+    for (const b of this._blkButtons) {
+      b.classList.toggle('active', b.dataset.block === this.block);
+    }
     for (const b of this._atkButtons) b.classList.remove('chosen');
     this._setLocked(false, null);
     this.wheel.classList.remove('off');
+    this.waitEl.classList.add('hidden');
+  }
+
+  /** Чужой ход (PvP): только таймер в шапке, панель ударов скрыта. */
+  showWaitTimer() {
+    this._setLocked(true, null);
+    this.wheel.classList.add('off');
     this.waitEl.classList.add('hidden');
   }
 
@@ -310,6 +319,7 @@ export class BattleUI {
   }
 
   destroy() {
+    this.block = null;
     this.headEl.innerHTML = '';
     this.wheel.remove();
     this.waitEl.remove();

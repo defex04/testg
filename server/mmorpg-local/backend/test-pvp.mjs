@@ -95,27 +95,33 @@ a.send({ type: 'attack', targetId: idB });
 err = await a.wait(['error']);
 ok(err.error === 'already_in_battle', 'нельзя начать второй бой', err.error);
 
-// --- бой до конца: оба бьют каждый ход ---
-await a.wait(['turnStart']);
-await b.wait(['turnStart']);
-let endA = null, endB = null, turns = 0;
-while (!endA && turns < 60) {
-  turns++;
-  a.send({ type: 'move', attack: 'high', block: 'mid' });
-  b.send({ type: 'move', attack: 'mid', block: 'low' });
+// --- поочерёдный PvP: удар сразу, потом ход соперника ---
+let endA = null, endB = null, steps = 0;
+while (!endA && steps < 80) {
+  steps++;
+  const tsA = await a.wait(['turnStart', 'battleEnd'], 25000);
+  const tsB = await b.wait(['turnStart', 'battleEnd'], 25000);
+  if (tsA.type === 'battleEnd') { endA = tsA; endB = tsB; break; }
+
+  if (steps === 1) {
+    ok(tsA.canAct !== tsB.canAct, 'ход поочерёдный',
+      JSON.stringify({ a: tsA.canAct, b: tsB.canAct }));
+  }
+  const actor = tsA.canAct ? a : b;
+  actor.send({ type: 'move', attack: 'high', block: 'mid' });
+
   const rvA = await a.wait(['resolve'], 25000);
   const rvB = await b.wait(['resolve'], 25000);
-  if (turns === 1) {
-    const namesOk = rvA.sides.left.name === nameA && rvB.sides.left.name === nameB;
-    ok(namesOk, 'resolve зеркален для каждого игрока');
+  if (steps === 1) {
+    ok(rvA.sides.left.name === nameA && rvB.sides.left.name === nameB,
+      'resolve зеркален для каждого игрока');
+    ok(rvA.strikes.length === 1 && rvB.strikes.length === 1,
+      'один удар за ход', 'strikes=' + rvA.strikes.length);
   }
   a.send({ type: 'turnDone' });
   b.send({ type: 'turnDone' });
-  const nextA = await a.wait(['turnStart', 'battleEnd'], 25000);
-  const nextB = await b.wait(['turnStart', 'battleEnd'], 25000);
-  if (nextA.type === 'battleEnd') { endA = nextA; endB = nextB; }
 }
-ok(!!endA && !!endB, 'бой завершился', 'ходов: ' + turns);
+ok(!!endA && !!endB, 'бой завершился', 'шагов: ' + steps);
 ok(endA.victory !== endB.victory, 'победа ровно у одного',
   JSON.stringify({ a: endA?.victory, b: endB?.victory }));
 ok((endA.victory && endA.winner === 'left') || (endB.victory && endB.winner === 'left'),

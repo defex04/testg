@@ -1377,6 +1377,149 @@ body.in-battle .hud-nav { display: none; }
   border-left: 1px solid rgba(138, 111, 60, .4);
 }
 
+/* ---------- «кукла»: слоты экипировки вокруг 3D-окна ---------- */
+
+.doll {
+  flex: 1;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  gap: 10px;
+  padding: 12px;
+}
+
+.doll-side {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 8px;
+  width: 64px;
+  flex: 0 0 auto;
+}
+
+.doll-center {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+}
+.doll-center .dressing-view {
+  flex: 1;
+  border: 1px solid var(--line-soft);
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow: var(--slot-shadow);
+}
+
+.doll-cell {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1;
+  border: 1px solid var(--line-dim);
+  border-radius: 12px;
+  background:
+    radial-gradient(ellipse at 50% 30%, rgba(244, 205, 111, .07), transparent 70%),
+    linear-gradient(180deg, #131a0c, #0c1107);
+  box-shadow: var(--slot-shadow);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  transition: border-color .12s, box-shadow .12s;
+}
+.doll-cell:hover { border-color: var(--gold); }
+.doll-cell .dc-ghost {
+  width: 60%;
+  height: 60%;
+  color: var(--gold);
+  opacity: .32;
+}
+.doll-cell .dc-ghost svg { width: 100%; height: 100%; }
+.doll-cell .dc-item {
+  font-size: 26px;
+  line-height: 1;
+  filter: drop-shadow(0 2px 3px rgba(0, 0, 0, .8));
+}
+.doll-cell.filled {
+  border-color: var(--gold);
+  box-shadow: 0 0 12px rgba(216, 169, 63, .28), var(--slot-shadow);
+}
+.doll-cell.selected {
+  border-color: var(--gold-bright);
+  box-shadow: 0 0 14px rgba(244, 205, 111, .4), var(--slot-shadow);
+}
+/* крестик «снять» на надетом слоте */
+.doll-cell.filled::after {
+  content: '✕';
+  position: absolute;
+  top: 2px;
+  right: 5px;
+  font-size: 10px;
+  color: rgba(239, 227, 194, .55);
+}
+.doll-cell.filled:hover::after { color: var(--gold-bright); }
+
+.doll-level {
+  position: absolute;
+  left: 50%;
+  bottom: 12px;
+  transform: translateX(-50%);
+  z-index: 2;
+  min-width: 38px;
+  height: 38px;
+  padding: 0 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-display);
+  font-size: 17px;
+  font-weight: 700;
+  color: #ffe9c9;
+  text-shadow: 0 1px 2px #000;
+  background: radial-gradient(circle at 50% 30%, #e0533a, #8e2417 72%);
+  border: 2px solid var(--gold);
+  border-radius: 50%;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, .6), inset 0 1px 0 rgba(255, 255, 255, .25);
+  pointer-events: none;
+}
+
+.doll-zoom {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  z-index: 2;
+  display: flex;
+  gap: 6px;
+}
+.doll-zoom-btn {
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 17px;
+  line-height: 1;
+  color: var(--gold-bright);
+  background: radial-gradient(circle at 50% 32%, #2a3517, #141b0a 75%);
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  cursor: pointer;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, .55);
+  transition: transform .1s, border-color .12s;
+}
+.doll-zoom-btn:hover { border-color: var(--gold-bright); }
+.doll-zoom-btn:active { transform: scale(.92); }
+
+/* бейдж слота в строке инвентаря */
+.inv-slot {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.inv-item.dim { opacity: .38; }
+.inv-item.match { border-color: var(--gold); }
+
 .inv-item {
   padding: 10px;
   background: rgba(244, 205, 111, .04);
@@ -1730,9 +1873,13 @@ body.in-battle .hud-nav { display: none; }
     border: none;
   }
   .dressing-body { flex-direction: column; }
-  .dressing-view { flex: 1 1 55%; }
+  .doll { flex: 1 1 58%; padding: 8px; gap: 7px; }
+  .doll-side { width: 46px; gap: 6px; }
+  .doll-cell { border-radius: 9px; }
+  .doll-cell .dc-item { font-size: 19px; }
+  .doll-level { min-width: 32px; height: 32px; font-size: 14px; bottom: 8px; }
   .dressing-items {
-    flex: 1 1 45%;
+    flex: 1 1 42%;
     border-left: none;
     border-top: 1px solid rgba(138, 111, 60, .4);
   }
