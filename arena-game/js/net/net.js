@@ -71,9 +71,12 @@ export const api = {
 
 function connectSocket() {
   wireBattleHandlers();
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     socket = new WebSocket(API.replace('http', 'ws') + '/ws?token=' + token);
     socket.addEventListener('open', resolve);
+    // без этого login зависал бы навсегда, если REST доступен, а WS — нет
+    socket.addEventListener('error',
+      () => reject(new Error('ws_unavailable')), { once: true });
     socket.addEventListener('message', (e) => {
       let msg; try { msg = JSON.parse(e.data); } catch { return; }
       const h = socketHandlers.get(msg.type);

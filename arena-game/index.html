@@ -74,6 +74,7 @@
   </script>
 
   <div class="game">
+    <div class="castle-bg" id="castle-bg" aria-hidden="true"></div>
 
     <!-- ── панель персонажа: уровень, имя, опыт / PvP-опыт, медь ────── -->
     <header class="hud-top">
@@ -125,6 +126,30 @@
       </button>
     </nav>
 
+    <!-- верхнее меню локаций layout «замок»: иконки с подписями -->
+    <nav class="castle-perimeter" id="castle-perimeter" aria-label="Меню локации">
+      <div class="castle-perimeter-side castle-perimeter-left">
+        <button type="button" class="menu-icon" data-castle="bag" title="Рюкзак и гардероб">
+          <img src="assets/menu/bag.png" alt="" draggable="false">
+          <span class="mi-label">Рюкзак</span>
+        </button>
+        <button type="button" class="menu-icon" data-castle="mail" title="Почта">
+          <img src="assets/menu/mail.png" alt="" draggable="false">
+          <span class="mi-label">Почта</span>
+        </button>
+      </div>
+      <div class="castle-perimeter-side castle-perimeter-right">
+        <button type="button" class="menu-icon" data-castle="auction" title="Аукцион">
+          <img src="assets/menu/trade.png" alt="" draggable="false">
+          <span class="mi-label">Аукцион</span>
+        </button>
+        <button type="button" class="menu-icon" data-castle="hunt" title="Охота на разбойника">
+          <img src="assets/menu/hunt.png" alt="" draggable="false">
+          <span class="mi-label">Охота</span>
+        </button>
+      </div>
+    </nav>
+
     <!-- ── середина: главная панель (страница симметрична) ──────────── -->
     <div class="game-mid">
 
@@ -135,7 +160,13 @@
           <div class="loc-picture" id="loc-picture">
             <span class="loc-name" id="loc-name"></span>
           </div>
-          <div class="loc-actions" id="loc-actions"></div>
+          <div class="loc-body" id="loc-body">
+            <div class="loc-scene-head">
+              <span class="loc-scene-title" id="loc-scene-title"></span>
+              <button type="button" class="loc-scene-close" id="loc-scene-close" title="Закрыть">✕</button>
+            </div>
+            <div class="loc-actions" id="loc-actions"></div>
+          </div>
         </section>
 
         <!-- экран боя -->
@@ -170,57 +201,79 @@
 
     </div>
 
-    <!-- ── нижняя панель с вкладками ─────────────────────────────────── -->
-    <section class="bottom-dock" id="bottom-dock">
-      <!-- ручка: потянуть вверх — окно растёт, вниз/тап — исходная высота -->
-      <div class="dock-grip" id="dock-grip" title="Потяните вверх, чтобы расширить"><span></span></div>
-      <div class="dock-tabs" id="dock-tabs">
-        <button class="dock-tab" data-pane="members" data-battle-only>Участники боя (2)</button>
-        <button class="dock-tab" data-pane="battlelog" data-battle-only>Лог боя</button>
-        <button class="dock-tab" data-pane="chat">Чат</button>
-        <button class="dock-tab" data-pane="players">Список игроков в локации</button>
-      </div>
-      <div class="dock-body">
+    <!-- низ первой локации: панель (участники/чат) + основное меню -->
+    <div class="castle-bottom" id="castle-bottom">
+      <section class="bottom-dock" id="bottom-dock">
+        <div class="dock-grip" id="dock-grip" title="Потяните вверх, чтобы расширить"><span></span></div>
+        <div class="dock-tabs" id="dock-tabs">
+          <button class="dock-tab" data-pane="members" data-battle-only>Участники боя</button>
+          <button class="dock-tab" data-pane="battlelog" data-battle-only>Лог боя</button>
+          <button class="dock-tab" data-pane="chat">Чат</button>
+          <button class="dock-tab" data-pane="players">Список игроков в локации</button>
+        </div>
+        <div class="dock-body">
 
-        <div class="dock-pane" id="pane-members">
-          <div class="members-grid hide-dead" id="members-grid">
-            <div class="team">
-              <div class="team-title">1я команда</div>
-              <div class="team-list" id="team-left"></div>
-            </div>
-            <div class="members-center">
-              <button class="ghost-btn" id="show-dead">Показать убитых</button>
-            </div>
-            <div class="team">
-              <div class="team-title">2я команда</div>
-              <div class="team-list" id="team-right"></div>
+          <div class="dock-pane" id="pane-members">
+            <div class="members-grid hide-dead" id="members-grid">
+              <div class="team">
+                <div class="team-title">1я команда</div>
+                <div class="team-list" id="team-left"></div>
+              </div>
+              <div class="members-center">
+                <button class="ghost-btn" id="show-dead">Показать убитых</button>
+              </div>
+              <div class="team">
+                <div class="team-title">2я команда</div>
+                <div class="team-list" id="team-right"></div>
+              </div>
             </div>
           </div>
-        </div>
 
-        <div class="dock-pane" id="pane-battlelog">
-          <div class="battle-log" id="battle-log" aria-live="polite"></div>
-        </div>
-
-        <div class="dock-pane" id="pane-chat">
-          <div class="chat-tabs">
-            <button class="chat-tab active" data-chat="common">Общий</button>
-            <button class="chat-tab" data-chat="clan">Клановый</button>
+          <div class="dock-pane" id="pane-battlelog">
+            <div class="battle-log" id="battle-log" aria-live="polite"></div>
           </div>
-          <div class="chat-log" id="chat-log"></div>
-          <form class="chat-input-row" id="chat-form">
-            <input class="chat-input" id="chat-input" type="text"
-                   placeholder="Введите сообщение…" autocomplete="off" maxlength="200">
-            <button class="chat-send" type="submit">Отправить</button>
-          </form>
-        </div>
 
-        <div class="dock-pane" id="pane-players">
-          <div class="players-list" id="players-list"></div>
-        </div>
+          <div class="dock-pane" id="pane-chat">
+            <div class="chat-tabs">
+              <button class="chat-tab active" data-chat="common">Общий</button>
+              <button class="chat-tab" data-chat="clan">Клановый</button>
+            </div>
+            <div class="chat-log" id="chat-log"></div>
+            <form class="chat-input-row" id="chat-form">
+              <input class="chat-input" id="chat-input" type="text"
+                     placeholder="Введите сообщение…" autocomplete="off" maxlength="200">
+              <button class="chat-send" type="submit">Отправить</button>
+            </form>
+          </div>
 
-      </div>
-    </section>
+          <div class="dock-pane" id="pane-players">
+            <div class="players-list" id="players-list"></div>
+          </div>
+
+        </div>
+      </section>
+
+      <nav class="castle-main-menu" id="castle-main-menu" aria-label="Основное меню">
+        <button type="button" class="sprite-main" data-mm="location" title="Переходы, действия и жители локации">
+          <span class="sm-ico" style="--sx:0;--sy:0"></span><span class="sm-label">Локация</span>
+        </button>
+        <button type="button" class="sprite-main" data-mm="chat" title="Чат локации">
+          <span class="sm-ico" style="--sx:1;--sy:0"></span><span class="sm-label">Чат</span>
+        </button>
+        <button type="button" class="sprite-main" data-mm="players" title="Список игроков в локации">
+          <span class="sm-ico" style="--sx:2;--sy:0"></span><span class="sm-label">Игроки</span>
+        </button>
+        <button type="button" class="sprite-main" data-mm="battlelog" title="Журнал боя">
+          <span class="sm-ico" style="--sx:0;--sy:1"></span><span class="sm-label">Лог боя</span>
+        </button>
+        <button type="button" class="sprite-main" data-mm="members" title="Участники боя">
+          <span class="sm-ico" style="--sx:1;--sy:1"></span><span class="sm-label">Участники</span>
+        </button>
+        <button type="button" class="sprite-main" data-mm="clan" title="Клан">
+          <span class="sm-ico" style="--sx:2;--sy:1"></span><span class="sm-label">Клан</span>
+        </button>
+      </nav>
+    </div>
 
   </div>
 

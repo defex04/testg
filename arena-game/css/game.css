@@ -35,11 +35,6 @@
   --ember: #ff9a3d;          /* акцент атаки */
   --steel: #6fb3ff;          /* акцент блока */
 
-  /* совместимость со старыми именами */
-  --orange: var(--gold);
-  --orange-dark: var(--gold-deep);
-  --border: var(--line-dim);
-
   --font-display: 'Philosopher', Georgia, 'Times New Roman', serif;
 
   /* собранные тени рамок — мягкие, без жёстких контуров */
@@ -136,6 +131,485 @@ button { font-family: inherit; }
    освобождаем место под арену (см. setMode в main.js) */
 body.in-battle .hud-top,
 body.in-battle .hud-nav { display: none; }
+body.in-battle.loc-castle .castle-perimeter { display: none; }
+
+/* ---------- первая локация: фон «перед замком» + спрайт-меню ---------- */
+
+/* по умолчанию скрыто; включается body.loc-castle */
+.castle-bg,
+.castle-perimeter,
+.castle-main-menu { display: none; }
+
+body.loc-castle {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  min-height: 100dvh;
+  background: #050705;
+}
+
+body.loc-castle .hud-nav { display: none; }
+
+body.loc-castle .castle-bg { display: block; }
+body.loc-castle .castle-perimeter { display: flex; }
+body.loc-castle .castle-main-menu { display: flex; }
+
+body.loc-castle .game {
+  position: relative;
+  width: min(100vw, calc(100dvh * 9 / 16));
+  height: 100dvh;
+  max-height: calc(100vw * 16 / 9);
+  max-width: none;
+  margin: 0 auto;
+  padding: 0;
+  gap: 0;
+  overflow: hidden;
+  background: transparent;
+}
+
+/* фон 9:16 — отдельный слой; картинку конкретной локации ставит JS
+   (applyUILayout в main.js), здесь только подложка на время загрузки */
+.castle-bg {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background: #0a0e07;
+}
+
+body.loc-castle .hud-top,
+body.loc-castle .castle-perimeter,
+body.loc-castle .game-mid,
+body.loc-castle .castle-bottom {
+  position: relative;
+  z-index: 1;
+  flex-shrink: 0;
+}
+
+/* низ экрана: панель над меню */
+.castle-bottom {
+  display: contents;
+}
+
+body.loc-castle .castle-bottom {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 auto;
+  flex-shrink: 0;
+  width: 100%;
+  z-index: 5;
+}
+
+body.loc-castle .hud-top {
+  padding: max(6px, env(safe-area-inset-top)) 6px 0;
+}
+
+body.loc-castle .player-plate {
+  background:
+    linear-gradient(180deg, rgba(20, 24, 14, .88), rgba(10, 13, 6, .82));
+  backdrop-filter: blur(4px);
+  border-radius: 12px;
+  padding: 6px 8px 6px 6px;
+  gap: 8px;
+}
+body.loc-castle .pp-level { width: 36px; height: 36px; font-size: 14px; }
+body.loc-castle .pp-name { font-size: 12px; }
+body.loc-castle .pp-bar { height: 12px; }
+body.loc-castle .pp-money { padding: 4px 8px; gap: 2px 8px; }
+body.loc-castle .pp-money-cell { font-size: 11px; }
+
+/* верхнее меню: слева рюкзак+почта, справа аукцион+охота.
+   display задаёт только body.loc-castle .castle-perimeter — на обычных
+   локациях меню замка скрыто и не смешивается со старым интерфейсом */
+.castle-perimeter {
+  flex: 0 0 auto;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 2px 10px 0;
+}
+
+.castle-perimeter-side {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.menu-icon {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  line-height: 0;
+  transition: transform .12s, filter .15s;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.menu-icon img {
+  display: block;
+  width: clamp(46px, 12.5vmin, 58px);
+  height: auto;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-drag: none;
+  filter: drop-shadow(0 2px 5px rgba(0, 0, 0, .5));
+}
+
+/* подпись под иконкой — чтобы назначение читалось без угадывания */
+.mi-label {
+  font-family: var(--font-display);
+  font-size: 10px;
+  line-height: 1.2;
+  letter-spacing: .3px;
+  color: #ecdcab;
+  text-shadow: 0 1px 2px #000, 0 0 6px rgba(0, 0, 0, .9);
+}
+
+.menu-icon:hover { transform: scale(1.05); }
+.menu-icon:hover img { filter: drop-shadow(0 3px 8px rgba(0, 0, 0, .6)); }
+.menu-icon:hover .mi-label { color: var(--gold-bright); }
+.menu-icon:active { transform: scale(.94); }
+
+body.loc-castle .game-mid {
+  flex: 1 1 auto;
+  min-height: 0;
+  gap: 0;
+  padding: 0;
+}
+
+body.loc-castle .main-panel {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  overflow: visible;
+}
+
+body.loc-castle .screen-location {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  padding: 0;
+  gap: 0;
+  overflow: visible;
+}
+
+body.loc-castle .loc-picture { display: none; }
+
+/* панель действий локации — всплывает по кнопке «Локация» */
+body.loc-castle .loc-body {
+  display: none;
+}
+body.loc-castle .loc-body.open {
+  position: absolute;
+  left: 50%;
+  bottom: clamp(72px, 11vh, 92px);
+  transform: translateX(-50%);
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  width: min(420px, calc(100% - 24px));
+  max-height: min(48vh, 360px);
+  padding: 12px 14px 14px;
+  background:
+    linear-gradient(180deg, rgba(24, 30, 16, .94), rgba(12, 16, 8, .92));
+  border: 1px solid rgba(138, 111, 60, .55);
+  border-radius: 18px;
+  backdrop-filter: blur(6px);
+  box-shadow: 0 12px 36px rgba(0, 0, 0, .55), inset 0 1px 0 rgba(244, 205, 111, .08);
+  animation: screen-in .3s ease;
+}
+
+body:not(.loc-castle) .loc-scene-head { display: none; }
+
+body:not(.loc-castle) .loc-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.loc-scene-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+  flex: 0 0 auto;
+}
+.loc-scene-title {
+  flex: 1;
+  font-family: var(--font-display);
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--gold-bright);
+  text-shadow: 0 1px 3px #000;
+}
+.loc-scene-close {
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  border: 1px solid rgba(138, 111, 60, .45);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, .25);
+  color: var(--text);
+  font-size: 14px;
+  cursor: pointer;
+  transition: border-color .15s, color .15s;
+}
+.loc-scene-close:hover { border-color: var(--gold); color: var(--gold-bright); }
+
+body.loc-castle .loc-actions {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+/* основное меню внизу — один ряд иконок.
+   display задаёт только body.loc-castle .castle-main-menu (см. выше) */
+.castle-main-menu {
+  flex: 0 0 auto;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-evenly;
+  width: 100%;
+  gap: 4px;
+  padding: 4px 8px max(6px, env(safe-area-inset-bottom));
+  background: linear-gradient(0deg, rgba(5, 7, 3, .88) 55%, transparent);
+}
+
+/* вне боя — без «Участники боя» и «Лог боя»; в бою — без «Локация» */
+body.loc-castle:not(.in-battle) .sprite-main[data-mm="members"],
+body.loc-castle:not(.in-battle) .sprite-main[data-mm="battlelog"] { display: none; }
+body.loc-castle.in-battle .sprite-main[data-mm="location"] { display: none; }
+
+/* кнопка нижнего меню: иконка из спрайта + подпись */
+.sprite-main {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  transition: transform .12s;
+  -webkit-tap-highlight-color: transparent;
+}
+.sprite-main .sm-ico {
+  --sprite-cols: 3;
+  --sprite-rows: 2;
+  --sx: 0;
+  --sy: 0;
+  display: block;
+  width: 14vmin;
+  height: 14vmin;
+  max-width: 56px;
+  max-height: 56px;
+  min-width: 42px;
+  min-height: 42px;
+  background-image: url('../assets/menu/main_menu.png');
+  background-repeat: no-repeat;
+  background-size: calc(var(--sprite-cols) * 100%) calc(var(--sprite-rows) * 100%);
+  background-position:
+    calc(var(--sx) * 100% / (var(--sprite-cols) - 1))
+    calc(var(--sy) * 100% / (var(--sprite-rows) - 1));
+  filter: drop-shadow(0 3px 8px rgba(0, 0, 0, .7));
+  transition: filter .15s;
+}
+.sm-label {
+  font-family: var(--font-display);
+  font-size: 10px;
+  line-height: 1.2;
+  letter-spacing: .3px;
+  color: #ecdcab;
+  text-shadow: 0 1px 2px #000, 0 0 6px rgba(0, 0, 0, .9);
+  white-space: nowrap;
+  transition: color .15s;
+}
+.sprite-main:hover:not(:disabled) { transform: scale(1.05); }
+.sprite-main:active:not(:disabled) { transform: scale(.94); }
+.sprite-main.active .sm-ico {
+  filter: drop-shadow(0 0 12px rgba(244, 205, 111, .55)) drop-shadow(0 4px 10px rgba(0, 0, 0, .6));
+}
+.sprite-main.active .sm-label { color: var(--gold-bright); }
+.sprite-main:disabled { cursor: default; }
+
+/* нижняя панель в режиме замка: над основным меню, тянется вверх */
+body.loc-castle .bottom-dock {
+  flex: 0 0 auto;
+  --dock-h: 0;
+  height: auto;
+  min-height: 0;
+  padding: 0 6px;
+  margin: 0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+/* высота открытой панели: чату/игрокам/логу нужно место под содержимое
+   (вкладки чата + сообщения + поле ввода не наезжают друг на друга) */
+body.loc-castle .bottom-dock.dock-open {
+  --dock-h: clamp(180px, 28vh, 250px);
+  height: var(--dock-h);
+  min-height: var(--dock-h);
+}
+
+/* участники боя — компактная плашка, не загораживает арену */
+body.loc-castle .bottom-dock.dock-open[data-pane="members"] {
+  --dock-h: clamp(96px, 16vh, 140px);
+}
+
+body.loc-castle .dock-tabs { display: none; }
+
+body.loc-castle .bottom-dock:not(.dock-open) .dock-grip,
+body.loc-castle .bottom-dock:not(.dock-open) .dock-body { display: none; }
+
+body.loc-castle .bottom-dock.dock-open .dock-grip {
+  display: flex;
+  flex: 0 0 auto;
+  padding: 4px 0 2px;
+}
+
+body.loc-castle .dock-body {
+  display: none;
+  flex: 1 1 auto;
+  min-height: 0;
+  border-radius: 14px 14px 0 0;
+  border-bottom: none;
+  background: rgba(8, 10, 5, .58);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 -4px 18px rgba(0, 0, 0, .28);
+  overflow: hidden;
+}
+
+body.loc-castle .bottom-dock.dock-open .dock-body {
+  display: flex;
+  flex-direction: column;
+  padding: 6px 12px 8px;
+}
+
+body.loc-castle .dock-pane { display: none; height: 100%; overflow-y: auto; }
+body.loc-castle .dock-pane.active { display: flex; flex-direction: column; }
+body.loc-castle #pane-chat.active { overflow: hidden; }
+/* чат в выдвижной панели — компактные отступы, сообщениям больше места */
+body.loc-castle .chat-tabs { margin-bottom: 6px; }
+body.loc-castle .chat-input-row { margin-top: 8px; }
+
+/* ---------- бой в первой локации ---------- */
+
+body.loc-castle.in-battle .castle-bg { display: none; }
+
+body.loc-castle.in-battle .game-mid {
+  flex: 1 1 0%;
+  min-height: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+body.loc-castle.in-battle .main-panel {
+  flex: 1;
+  min-height: 0;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  background: var(--bg);
+  overflow: hidden;
+}
+
+body.loc-castle.in-battle .screen-battle {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+body.loc-castle.in-battle .battle-head {
+  flex: 0 0 auto;
+  padding: max(6px, env(safe-area-inset-top)) 8px 4px;
+}
+
+body.loc-castle.in-battle .arena-stage {
+  flex: 1 1 0%;
+  min-height: 0;
+  background: linear-gradient(180deg, #0d120a 0%, #1a2210 45%, #0d120a 100%) !important;
+}
+
+body.loc-castle.in-battle .skill-bar {
+  flex: 0 0 auto;
+  padding: 4px 10px 6px;
+}
+
+/* штурвал ударов — внизу сцены, не перекрывает бойцов */
+body.loc-castle.in-battle .strike-wheel {
+  --sw-scale: .8;
+  top: auto;
+  bottom: 6px;
+  transform: translate(-50%, 0) scale(var(--sw-scale));
+  padding: 8px 10px 6px;
+  gap: 5px;
+  background: rgba(10, 13, 6, .72);
+}
+
+body.loc-castle.in-battle .strike-wheel.off {
+  transform: translate(-50%, 0) scale(calc(var(--sw-scale) * .92));
+}
+
+body.loc-castle.in-battle .bui-wait {
+  bottom: 8px;
+}
+
+body.loc-castle.in-battle .elixir-belt {
+  top: 38%;
+}
+
+/* участники / чат / игроки — полупрозрачная выдвижная панель */
+body.loc-castle.in-battle .bottom-dock.dock-open .dock-body {
+  background: rgba(8, 10, 5, .55);
+  border: 1px solid rgba(138, 111, 60, .32);
+  border-bottom: none;
+}
+
+body.loc-castle.in-battle .members-grid {
+  gap: 6px;
+}
+
+body.loc-castle.in-battle .team-title {
+  margin-bottom: 6px;
+  font-size: 12px;
+}
+
+body.loc-castle.in-battle .member {
+  margin: 3px 0;
+  font-size: 12px;
+}
+
+body.loc-castle.in-battle .ghost-btn {
+  padding: 5px 10px;
+  font-size: 10px;
+}
+
+/* меню внизу — один ряд */
+body.loc-castle.in-battle .castle-main-menu {
+  padding: 2px 6px max(4px, env(safe-area-inset-bottom));
+  background: linear-gradient(0deg, rgba(5, 7, 3, .9) 65%, transparent);
+}
+
+body.loc-castle.in-battle .sprite-main .sm-ico {
+  width: 13vmin;
+  height: 13vmin;
+  max-width: 52px;
+  max-height: 52px;
+  min-width: 40px;
+  min-height: 40px;
+}
 
 /* тонкие золотистые скроллбары внутри панелей */
 .dock-pane, .chat-log, .dressing-items, .loc-actions {
@@ -1907,4 +2381,43 @@ body.in-battle .hud-nav { display: none; }
   .bh-damage { margin-top: 3px; }
   .arena-stage { min-height: 190px; }
   .bottom-dock { --dock-h: clamp(140px, 24vh, 190px); }
+}
+
+/* первая локация на телефоне 9:16 */
+@media (max-width: 700px) {
+  body.loc-castle .game {
+    width: min(100vw, calc(100dvh * 9 / 16));
+    height: min(100dvh, calc(100vw * 16 / 9));
+  }
+  body.loc-castle .hud-top { padding: max(4px, env(safe-area-inset-top)) 4px 0; }
+  .castle-perimeter { padding: 0 6px; }
+  .castle-perimeter-side { gap: 4px; }
+  .menu-icon img { width: clamp(40px, 11vmin, 50px); }
+  .mi-label, .sm-label { font-size: 9px; }
+  .sprite-main .sm-ico { width: min(16vw, 54px); height: min(16vw, 54px); }
+  body.loc-castle .loc-body.open {
+    width: calc(100% - 12px);
+    bottom: calc(min(18vw, 58px) + 20px);
+    max-height: 42vh;
+  }
+  body.loc-castle .bottom-dock.dock-open .dock-body {
+    padding: 8px 10px 6px;
+  }
+  body.loc-castle.in-battle #pane-members.active {
+    max-height: 20vh;
+  }
+  body.loc-castle.in-battle .sprite-main .sm-ico {
+    width: 12vmin;
+    height: 12vmin;
+    max-width: 52px;
+    max-height: 52px;
+  }
+}
+
+@media (max-aspect-ratio: 9/16) {
+  body.loc-castle .game {
+    width: 100vw;
+    height: calc(100vw * 16 / 9);
+    max-height: 100dvh;
+  }
 }

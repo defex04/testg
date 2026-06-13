@@ -65,7 +65,25 @@ export class Arena {
     window.addEventListener('resize', this._onWinResize);
     this._resize();
 
-    renderer.setAnimationLoop(() => this._tick());
+    // autostart: false — рендер-цикл запускается вручную (start/stop),
+    // чтобы скрытая арена не жгла GPU, пока игрок ходит по локациям
+    this._running = false;
+    if (opts.autostart ?? true) this.start();
+  }
+
+  /** Запустить рендер-цикл (повторный вызов безопасен). */
+  start() {
+    if (this._running) return;
+    this._running = true;
+    this.clock.getDelta();   // сбросить накопленное за паузу время
+    this.renderer.setAnimationLoop(() => this._tick());
+  }
+
+  /** Остановить рендер-цикл; сцена и бойцы остаются загруженными. */
+  stop() {
+    if (!this._running) return;
+    this._running = false;
+    this.renderer.setAnimationLoop(null);
   }
 
   _buildGround() {
@@ -169,7 +187,7 @@ export class Arena {
   }
 
   dispose() {
-    this.renderer.setAnimationLoop(null);
+    this.stop();
     this._resizeObserver.disconnect();
     window.removeEventListener('resize', this._onWinResize);
     this.removeFighter('left');

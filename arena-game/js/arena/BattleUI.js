@@ -14,6 +14,12 @@
  */
 import { ZONES, BLOCKS } from './BattleSystem.js';
 
+/* Имена бойцов приходят с сервера (ники Telegram) — в HTML только экранированно. */
+const esc = (v) => String(v ?? '').replace(/[&<>"]/g,
+  (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+const MAX_LOG_ENTRIES = 250;   // журнал боя не растёт бесконечно
+
 /* Пиктограммы зон: шлем / кираса / понож (inline-SVG, цвет — currentColor). */
 const ZONE_ICONS = {
   high: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -57,7 +63,7 @@ export class BattleUI {
     this.block = null;    // выбранный блок (id или null)
     this._locked = true;  // до первого turnStart кнопки неактивны
     this._build(opts);
-    this.log(`<b>${opts.left.name}</b> против <b>${opts.right.name}</b> — бой начинается!`);
+    this.log(`<b>${esc(opts.left.name)}</b> против <b>${esc(opts.right.name)}</b> — бой начинается!`);
   }
 
   _build(opts) {
@@ -67,7 +73,7 @@ export class BattleUI {
         <div class="bh-plate bh-left">
           <div class="bh-level">${opts.left.level ?? ''}</div>
           <div class="bh-info">
-            <div class="bh-name">${opts.left.name}</div>
+            <div class="bh-name">${esc(opts.left.name)}</div>
             <div class="bh-bar bh-hp"><div class="bh-fill"></div><span class="bh-text"></span></div>
             <div class="bh-bar bh-mp"><div class="bh-fill"></div></div>
           </div>
@@ -75,7 +81,7 @@ export class BattleUI {
         <div class="bh-plate bh-right">
           <div class="bh-level">${opts.right.level ?? ''}</div>
           <div class="bh-info">
-            <div class="bh-name">${opts.right.name}</div>
+            <div class="bh-name">${esc(opts.right.name)}</div>
             <div class="bh-bar bh-hp"><div class="bh-fill"></div><span class="bh-text"></span></div>
             <div class="bh-bar bh-mp"><div class="bh-fill"></div></div>
           </div>
@@ -177,7 +183,7 @@ export class BattleUI {
       this.teamEls[side].innerHTML = '';
       const m = document.createElement('div');
       m.className = 'member';
-      m.innerHTML = `${opts[side].name} <span class="m-lvl">[${opts[side].level ?? '?'}]</span>`;
+      m.innerHTML = `${esc(opts[side].name)} <span class="m-lvl">[${opts[side].level ?? '?'}]</span>`;
       this.teamEls[side].appendChild(m);
       this._members[side] = m;
     }
@@ -298,6 +304,7 @@ export class BattleUI {
     const scroller = pane && pane.classList.contains('dock-pane') ? pane : el;
     const stick = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 36;
     el.appendChild(node);
+    while (el.children.length > MAX_LOG_ENTRIES) el.firstChild.remove();
     if (stick) scroller.scrollTop = scroller.scrollHeight;
   }
 
