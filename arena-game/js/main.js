@@ -15,7 +15,7 @@ import { Arena } from './arena/Arena.js';
 import { api, ServerBattle } from './net/net.js';
 import { BattleUI } from './arena/BattleUI.js';
 import { DressingRoom } from './arena/DressingRoom.js';
-import { FIGHTERS, LOCATIONS, ITEMS, SLOT_META } from './content.js';
+import { FIGHTERS, LOCATIONS, ITEMS, SLOT_META, ELIXIR_SLOTS } from './content.js';
 
 // ---------------------------------------------------------------------------
 // Утилиты и состояние игрока
@@ -421,24 +421,32 @@ async function initBattle(resumedBattle = null, starter = null) {
              level: battle.sides.right.level ?? '?' },
     onStrike: (move) => {
       ui.hideControls();
+      setBeltLive(false);          // удар завершает ввод хода — пояс блокируется
       battle.submitMove('left', move);
     },
   });
-  ui.setHP('left', battle.sides.left.hp, battle.sides.left.maxHp);
-  ui.setHP('right', battle.sides.right.hp, battle.sides.right.maxHp);
+  resetElixirBattle();             // новый бой — заряды пояса и эффекты с нуля
+  showHP('left', battle.sides.left.hp, battle.sides.left.maxHp);
+  showHP('right', battle.sides.right.hp, battle.sides.right.maxHp);
   totalDamage = 0;
   ui.setDamage(0);
 
   battle.addEventListener('turnStart', (e) => {
     ui.setTurn(e.detail.turn);
     ui.setTimer(e.detail.timeLeft);
-    if (battle.kind === 'pvp' && e.detail.canAct === false) ui.showWaitTimer();
-    else ui.showControls();
+    if (battle.kind === 'pvp' && e.detail.canAct === false) {
+      ui.showWaitTimer();
+      setBeltLive(false);          // чужой ход — эликсиры недоступны
+    } else {
+      ui.showControls();
+      setBeltLive(true);           // свой ход — пояс активен
+    }
   });
 
   battle.addEventListener('timer', (e) => ui.setTimer(e.detail.timeLeft));
 
   battle.addEventListener('resolve', async (e) => {
+    setBeltLive(false);            // ход разыгрывается — пояс блокируется
     if (battle.kind === 'pvp') ui.showWaitTimer();
     else ui.hideControls(false);
     for (const side of e.detail.passed || []) {
@@ -452,6 +460,7 @@ async function initBattle(resumedBattle = null, starter = null) {
 
   battle.addEventListener('battleEnd', (e) => {
     ui.hideControls(false);
+    setBeltLive(false);
     if (e.detail.aborted) {
       showToast(e.detail.reason === 'admin'
         ? 'Бой прерван администратором' : 'Вы покинули бой');
@@ -498,21 +507,35 @@ async function playStrike(s, sides) {
   const attacker = fighters[s.attacker];
   const defender = fighters[s.defender];
 
+  // Эликсир мощи усиливает удары игрока. Базовый урон считает сервер, поэтому
+  // прибавку держим на клиенте: добавочный урон уходит в elixirHp защитника
+  // (отрицательный бонус), и серверные пересчёты HP его не стирают.
+  let dmg = s.damage;
+  if (s.attacker === 'left' && !s.dodged && powerBuff && powerBuff.turns > 0) {
+    dmg = Math.round(s.damage * powerBuff.mult);
+    elixirHp[s.defender] -= (dmg - s.damage);
+    powerBuff.turns -= 1;
+    if (powerBuff.turns <= 0) {
+      powerBuff = null;
+      ui.log('Действие «Эликсира мощи» закончилось.');
+    }
+  }
+
   await attacker.strike(defender, () => {
     const pos = arena.worldToScreen(defender.headPoint());
     if (s.dodged) {
       ui.popup(pos, 'Уворот!', 'dodge');
     } else if (s.blocked && !s.crit) {
       defender.hitReact();
-      ui.popup(pos, `Блок −${s.damage}`, 'block');
+      ui.popup(pos, `Блок −${dmg}`, 'block');
     } else {
       defender.hitReact();
-      ui.popup(pos, `−${s.damage}`, s.crit ? 'crit' : 'dmg');
+      ui.popup(pos, `−${dmg}`, s.crit ? 'crit' : 'dmg');
     }
-    ui.setHP(s.defender, s.defenderHp, sides[s.defender].maxHp);
+    showHP(s.defender, s.defenderHp, sides[s.defender].maxHp);
     // «Урон» в шапке — общий урон, нанесённый игроком за весь бой
     if (s.attacker === 'left' && !s.dodged) {
-      totalDamage += s.damage;
+      totalDamage += dmg;
       ui.setDamage(totalDamage);
     }
 
@@ -521,9 +544,9 @@ async function playStrike(s, sides) {
     const zone = ZONE_LABELS[s.zone] || s.zone;
     let text;
     if (s.dodged) text = `<b>${whom}</b> уклонился от удара`;
-    else if (s.crit) text = `<b>${who}</b> наносит <span class="crit">критический удар</span> в ${zone}: −${s.damage}`;
-    else if (s.blocked) text = `<b>${whom}</b> блокирует удар в ${zone}: −${s.damage}`;
-    else text = `<b>${who}</b> бьёт в ${zone}: −${s.damage}`;
+    else if (s.crit) text = `<b>${who}</b> наносит <span class="crit">критический удар</span> в ${zone}: −${dmg}`;
+    else if (s.blocked) text = `<b>${whom}</b> блокирует удар в ${zone}: −${dmg}`;
+    else text = `<b>${who}</b> бьёт в ${zone}: −${dmg}`;
     ui.log(text);
   });
 
@@ -996,6 +1019,134 @@ async function syncServerEquip(slotName, itemKey, prevKey = null) {
 }
 
 // ---------------------------------------------------------------------------
+// Эликсиры: боевой пояс из ELIXIR_SLOTS ячеек. Надеваются в гардеробе,
+// используются в бою; число доступных за бой = вместимость пояса (по заряду
+// на ячейку). Бой ведёт сервер и об эликсирах не знает, поэтому эффект держим
+// на клиенте поверх серверного HP: elixirHp — бонус «эффективного HP» по
+// сторонам, переживающий серверные пересчёты. Когда сервер начнёт принимать
+// действие «эликсир», эту клиентскую надстройку можно будет убрать.
+// ---------------------------------------------------------------------------
+
+// иконка-призрак пустой ячейки пояса (как в исходном боевом оверлее)
+const FLASK_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 3.5h4M10.8 3.5v5L5.6 17a3.2 3.2 0 0 0 2.9 4.6h7a3.2 3.2 0 0 0 2.9-4.6l-5.2-8.5v-5"/><path d="M7.5 14.5h9"/></svg>`;
+
+const elixirBelt = new Array(ELIXIR_SLOTS).fill(null);  // ячейка -> ключ ITEMS | null
+const elixirSpent = new Set();         // индексы ячеек, использованных в этом бою
+const elixirHp = { left: 0, right: 0 };// клиентский бонус эффективного HP
+let powerBuff = null;                  // { mult, turns } — активный эликсир мощи
+let beltLive = false;                  // можно ли использовать пояс прямо сейчас
+
+const battleBeltEl = $('elixir-belt');
+const dressingBeltEl = $('dressing-belt');
+
+/** Показать HP стороны с учётом клиентского эликсир-бонуса (heal/мощь).
+ *  Сервер решает смерть: при baseHp<=0 показываем 0, иначе не ниже 1. */
+function showHP(side, baseHp, maxHp) {
+  const hp = baseHp <= 0 ? 0
+    : Math.min(maxHp, Math.max(1, baseHp + elixirHp[side]));
+  ui.setHP(side, hp, maxHp);
+}
+
+/** Сбросить эликсир-эффекты и заряды к началу боя. */
+function resetElixirBattle() {
+  elixirSpent.clear();
+  elixirHp.left = 0;
+  elixirHp.right = 0;
+  powerBuff = null;
+  beltLive = false;
+  renderBattleBelt();
+}
+
+function setBeltLive(v) {
+  beltLive = v;
+  renderBattleBelt();
+}
+
+/** Боевой пояс: показываем только заполненные ячейки, клик — использовать. */
+function renderBattleBelt() {
+  if (!battleBeltEl) return;
+  const filled = elixirBelt.some((k) => k);
+  battleBeltEl.classList.toggle('hidden', !filled || mode !== 'battle');
+  battleBeltEl.innerHTML = '';
+  if (!filled) return;
+  for (let i = 0; i < ELIXIR_SLOTS; i++) {
+    const key = elixirBelt[i];
+    if (!key) continue;
+    const el = ITEMS[key];
+    const spent = elixirSpent.has(i);
+    const slot = document.createElement('button');
+    slot.type = 'button';
+    slot.className = `belt-slot elixir filled kind-${el.kind === 'health' ? 'health' : 'power'}`
+      + (spent ? ' spent' : '');
+    slot.disabled = spent || !beltLive;
+    slot.title = spent ? `${el.name} — использован` : `${el.name} — использовать`;
+    slot.innerHTML = `<span class="bs-ico">${el.icon || '🧪'}</span>`;
+    slot.addEventListener('click', () => useElixir(i));
+    battleBeltEl.appendChild(slot);
+  }
+}
+
+/** Использовать эликсир из ячейки i (только в свой ход, по разу на ячейку). */
+function useElixir(i) {
+  if (mode !== 'battle' || !battle || battle.phase === 'ended' || !beltLive) return;
+  const key = elixirBelt[i];
+  if (!key || elixirSpent.has(i)) return;
+  const el = ITEMS[key];
+  const s = battle.sides.left;
+  const pos = fighters.left
+    ? arena.worldToScreen(fighters.left.headPoint())
+    : { x: 70, y: 90 };
+
+  if (el.kind === 'health') {
+    const heal = Math.round(s.maxHp * (el.potency ?? 0.3));
+    elixirHp.left += heal;
+    showHP('left', s.hp, s.maxHp);
+    ui.popup(pos, `+${heal}`, 'heal');
+    ui.log(`<b>${esc(s.name)}</b> выпивает «${esc(el.name)}»: +${heal} HP`);
+  } else {
+    const pct = Math.round((el.potency ?? 0.3) * 100);
+    powerBuff = { mult: 1 + (el.potency ?? 0.3), turns: el.turns ?? 3 };
+    ui.popup(pos, `Мощь +${pct}%`, 'crit');
+    ui.log(`<b>${esc(s.name)}</b> выпивает «${esc(el.name)}»: урон +${pct}% на ${powerBuff.turns} х.`);
+  }
+  elixirSpent.add(i);
+  renderBattleBelt();
+}
+
+/** Пояс в гардеробе: пряжка + все ячейки; клик по заполненной — убрать. */
+function renderDressingBelt() {
+  if (!dressingBeltEl) return;
+  dressingBeltEl.innerHTML = '<span class="belt-buckle" aria-hidden="true"></span>';
+  for (let i = 0; i < ELIXIR_SLOTS; i++) {
+    const key = elixirBelt[i];
+    const el = key ? ITEMS[key] : null;
+    const slot = document.createElement('button');
+    slot.type = 'button';
+    slot.className = 'belt-slot elixir round'
+      + (el ? ` filled kind-${el.kind === 'health' ? 'health' : 'power'}` : '');
+    slot.title = el ? `${el.name} (клик — убрать из пояса)`
+      : 'Пустая ячейка — добавьте эликсир кнопкой «В пояс»';
+    slot.innerHTML = el ? `<span class="bs-ico">${el.icon || '🧪'}</span>` : FLASK_SVG;
+    slot.addEventListener('click', () => {
+      if (!el) { showToast('Добавьте эликсир из рюкзака кнопкой «В пояс»'); return; }
+      elixirBelt[i] = null;
+      renderDressingBelt();
+      renderInventory();
+    });
+    dressingBeltEl.appendChild(slot);
+  }
+}
+
+/** Положить эликсир в первую свободную ячейку пояса. */
+function addElixirToBelt(key) {
+  const free = elixirBelt.indexOf(null);
+  if (free === -1) { showToast('Пояс эликсиров заполнен'); return; }
+  elixirBelt[free] = key;
+  renderDressingBelt();
+  renderInventory();
+}
+
+// ---------------------------------------------------------------------------
 // Гардероб (примерочная): только СВОЙ персонаж, вещи меряются на нём
 // ---------------------------------------------------------------------------
 
@@ -1020,9 +1171,10 @@ const SLOT_ICONS = {
   feet: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4v8l-4 3v3h9l5-2c0-2-1.5-3.5-4-4l-2-1V4H9Z"/></svg>`,
 };
 
-/** Кукла и рюкзак рисуются всегда вместе — состояние у них общее. */
+/** Кукла, пояс эликсиров и рюкзак рисуются вместе — состояние у них общее. */
 function renderDressingUI() {
   renderDoll();
+  renderDressingBelt();
   renderInventory();
 }
 
@@ -1092,7 +1244,12 @@ function renderInventory() {
     name.textContent = item.name
       + (inst && inst.quantity > 1 ? ` ×${inst.quantity}` : '');
     head.append(icon, name);
-    if (slotName) {       // бейдж слота: понятно, куда вещь надевается
+    if (item.type === 'elixir') {     // бейдж: эликсир кладётся в пояс
+      const badge = document.createElement('span');
+      badge.className = 'inv-slot';
+      badge.textContent = 'Пояс';
+      head.appendChild(badge);
+    } else if (slotName) {            // бейдж слота: понятно, куда вещь надевается
       const badge = document.createElement('span');
       badge.className = 'inv-slot';
       badge.textContent = SLOT_META[slotName]?.name || slotName;
@@ -1100,7 +1257,16 @@ function renderInventory() {
     }
     const actions = document.createElement('div');
     actions.className = 'inv-actions';
-    if (slotName) {       // вещь надевается — кнопка «Надеть/Снять»
+    if (item.type === 'elixir') {     // эликсир — кнопка «В пояс»
+      const inBelt = elixirBelt.filter((k) => k === key).length;
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'inv-btn';
+      b.disabled = elixirBelt.every((k) => k !== null);
+      b.textContent = inBelt ? `В пояс (×${inBelt})` : 'В пояс';
+      b.addEventListener('click', () => addElixirToBelt(key));
+      actions.appendChild(b);
+    } else if (slotName) { // вещь надевается — кнопка «Надеть/Снять»
       const b = document.createElement('button');
       b.type = 'button';
       b.className = 'inv-btn' + (equipped ? ' equipped' : '');

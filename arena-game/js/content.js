@@ -137,7 +137,20 @@ export const ITEMS = {
   oakenShield:    { name: 'Дубовый щит',           icon: '🛡️', slot: 'offhand',   noModel: true, demo: true },
   mercenaryPants: { name: 'Штаны наёмника',        icon: '👖', slot: 'legs',      noModel: true, demo: true },
   courierBoots:   { name: 'Сапоги гонца',          icon: '🥾', slot: 'feet',      noModel: true, demo: true },
+
+  // Эликсиры — расходники для боевого пояса (не надеваются в слот куклы).
+  //   type:'elixir'  — кладётся в пояс, а не в слот экипировки;
+  //   kind:'health'  — лечит potency·100% от макс. HP за глоток;
+  //   kind:'power'   — повышает урон игрока на potency·100% на turns ходов.
+  // Заряд тратится в бою (см. пояс эликсиров в main.js).
+  healthElixir: { name: 'Эликсир здоровья', icon: '🧪', type: 'elixir', kind: 'health', potency: 0.30, demo: true },
+  powerElixir:  { name: 'Эликсир мощи',     icon: '⚗️', type: 'elixir', kind: 'power',  potency: 0.30, turns: 3, demo: true },
 };
+
+// Ячеек в боевом поясе эликсиров (пряжка + 4 слота на арт-макете).
+// Каждая заполненная ячейка = один заряд на бой, поэтому число доступных
+// в бою эликсиров ограничено вместимостью пояса.
+export const ELIXIR_SLOTS = 4;
 
 // ---------------------------------------------------------------------------
 // Кукла экипировки: какие слоты есть, как зовутся и с какой стороны от

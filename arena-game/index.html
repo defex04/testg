@@ -173,13 +173,9 @@
         <section class="screen screen-battle hidden" id="screen-battle">
           <div class="battle-head" id="battle-head"></div>
           <div class="arena-stage" id="arena-stage">
-            <!-- пояс эликсиров: оверлей у левого края сцены, только в бою -->
-            <div class="elixir-belt">
-              <div class="belt-slot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 3.5h4M10.8 3.5v5L5.6 17a3.2 3.2 0 0 0 2.9 4.6h7a3.2 3.2 0 0 0 2.9-4.6l-5.2-8.5v-5"/><path d="M7.5 14.5h9"/></svg></div>
-              <div class="belt-slot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 3.5h4M10.8 3.5v5L5.6 17a3.2 3.2 0 0 0 2.9 4.6h7a3.2 3.2 0 0 0 2.9-4.6l-5.2-8.5v-5"/><path d="M7.5 14.5h9"/></svg></div>
-              <div class="belt-slot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 3.5h4M10.8 3.5v5L5.6 17a3.2 3.2 0 0 0 2.9 4.6h7a3.2 3.2 0 0 0 2.9-4.6l-5.2-8.5v-5"/><path d="M7.5 14.5h9"/></svg></div>
-              <div class="belt-slot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 3.5h4M10.8 3.5v5L5.6 17a3.2 3.2 0 0 0 2.9 4.6h7a3.2 3.2 0 0 0 2.9-4.6l-5.2-8.5v-5"/><path d="M7.5 14.5h9"/></svg></div>
-            </div>
+            <!-- пояс эликсиров: оверлей у левого края сцены, только в бою.
+                 Заполняется из пояса гардероба (renderBattleBelt в main.js). -->
+            <div class="elixir-belt hidden" id="elixir-belt"></div>
             <div class="arena-loading hidden" id="arena-loading">
               <div class="arena-loading-spinner"></div>
               Загрузка бойцов…
@@ -298,6 +294,8 @@
                 <button class="doll-zoom-btn" id="doll-zoom-in" title="Приблизить">+</button>
               </div>
             </div>
+            <!-- пояс эликсиров: ячейки заполняются из рюкзака (renderDressingBelt) -->
+            <div class="dressing-belt" id="dressing-belt"></div>
           </div>
           <div class="doll-side" id="doll-right"></div>
         </div>

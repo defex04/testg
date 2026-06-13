@@ -1401,6 +1401,11 @@ body.loc-castle.in-battle .sprite-main .sm-ico {
 .bui-popup.crit { font-size: 36px; color: #ffab40; }
 .bui-popup.block { font-size: 20px; color: #90caf9; }
 .bui-popup.dodge { font-size: 20px; color: #a5d6a7; }
+.bui-popup.heal {
+  font-size: 26px;
+  color: #8be28b;
+  text-shadow: 0 2px 4px #000, 0 0 12px rgba(120, 230, 120, .65);
+}
 @keyframes popup-rise {
   0%   { opacity: 0; margin-top: 0; transform: translate(-50%, -50%) scale(.4); }
   12%  { opacity: 1; transform: translate(-50%, -50%) scale(1.15); }
@@ -1875,14 +1880,67 @@ body.loc-castle.in-battle .sprite-main .sm-ico {
   flex: 1;
   min-width: 0;
   display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 .doll-center .dressing-view {
   flex: 1;
+  min-height: 0;
   border: 1px solid var(--line-soft);
   border-radius: 14px;
   overflow: hidden;
   box-shadow: var(--slot-shadow);
 }
+
+/* пояс эликсиров в гардеробе — горизонтальная лента под 3D-куклой */
+.dressing-belt {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 10px 16px;
+  background:
+    radial-gradient(120% 160% at 7% 50%, rgba(244, 205, 111, .14), transparent 42%),
+    linear-gradient(180deg, #2a2010, #14100a);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  box-shadow: var(--frame-shadow);
+}
+/* пряжка слева — как на арт-макете пояса */
+.belt-buckle {
+  flex: 0 0 auto;
+  width: 26px;
+  height: 38px;
+  border-radius: 7px;
+  background: radial-gradient(circle at 38% 30%, #ffe9ab, #d7a541 55%, #8a5e1c);
+  border: 1px solid #5e4716;
+  box-shadow: inset 0 0 0 3px rgba(0, 0, 0, .28), 0 2px 6px rgba(0, 0, 0, .55);
+}
+
+/* эликсиры в поясе (бой + гардероб) */
+button.belt-slot { padding: 0; font: inherit; color: inherit; -webkit-tap-highlight-color: transparent; }
+.belt-slot.elixir {
+  cursor: pointer;
+  transition: border-color .2s, box-shadow .2s, transform .12s, filter .15s;
+}
+.belt-slot.round { border-radius: 50%; }
+.belt-slot .bs-ico {
+  font-size: 23px;
+  line-height: 1;
+  filter: drop-shadow(0 2px 3px rgba(0, 0, 0, .85));
+}
+.belt-slot.elixir.filled.kind-health {
+  border-color: #e0654c;
+  box-shadow: 0 0 11px rgba(224, 101, 76, .4), var(--slot-shadow);
+}
+.belt-slot.elixir.filled.kind-power {
+  border-color: var(--steel);
+  box-shadow: 0 0 11px rgba(111, 179, 255, .38), var(--slot-shadow);
+}
+.belt-slot.elixir.filled:not(:disabled):hover { transform: translateY(-1px); }
+.belt-slot.elixir:disabled { cursor: default; filter: saturate(.5) brightness(.72); }
+.belt-slot.elixir.spent { opacity: .42; filter: grayscale(.85) brightness(.62); }
 
 .doll-cell {
   position: relative;
@@ -2314,6 +2372,8 @@ body.loc-castle.in-battle .sprite-main .sm-ico {
 
   .belt-slot { width: 36px; height: 36px; border-radius: 9px; }
   .belt-slot svg { width: 16px; height: 16px; }
+  .belt-slot.round { border-radius: 50%; }
+  .belt-slot .bs-ico { font-size: 18px; }
   .elixir-belt { left: 7px; gap: 5px; padding: 7px; border-radius: 13px; }
   .skill-bar { padding: 7px 10px 11px; }
   .skill-plate { gap: 6px; padding: 7px 8px; border-radius: 13px; }
@@ -2348,6 +2408,9 @@ body.loc-castle.in-battle .sprite-main .sm-ico {
   }
   .dressing-body { flex-direction: column; }
   .doll { flex: 1 1 58%; padding: 8px; gap: 7px; }
+  .doll-center { gap: 7px; }
+  .dressing-belt { gap: 9px; padding: 8px 10px; border-radius: 13px; }
+  .belt-buckle { width: 22px; height: 32px; }
   .doll-side { width: 46px; gap: 6px; }
   .doll-cell { border-radius: 9px; }
   .doll-cell .dc-item { font-size: 19px; }
