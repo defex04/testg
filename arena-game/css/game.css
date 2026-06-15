@@ -37,6 +37,13 @@
 
   --font-display: 'Philosopher', Georgia, 'Times New Roman', serif;
 
+  /* Высота видимой области приложения и смещение видимого вьюпорта. JS
+     привязывает их к window.visualViewport (см. блок «мобильная клавиатура»
+     в main.js): когда выезжает клавиатура телефона, --app-h уменьшается до
+     области над ней, а вёрстка не «съезжает». Фолбэк — динамический вьюпорт. */
+  --app-h: 100dvh;
+  --vv-top: 0px;
+
   /* собранные тени рамок — мягкие, без жёстких контуров */
   --frame-shadow:
     0 10px 30px rgba(0, 0, 0, .45),
@@ -121,8 +128,10 @@ html, body {
    на body при резиновом скролле — фиксируем жёстко) */
 body {
   position: fixed;
-  inset: 0;
+  top: var(--vv-top, 0px);
+  left: 0;
   width: 100%;
+  height: var(--app-h, 100dvh);
 }
 
 button { font-family: inherit; }
@@ -144,7 +153,7 @@ body.loc-castle {
   display: flex;
   justify-content: center;
   align-items: flex-start;
-  min-height: 100dvh;
+  min-height: var(--app-h, 100dvh);
   background: #050705;
 }
 
@@ -156,8 +165,11 @@ body.loc-castle .castle-main-menu { display: flex; }
 
 body.loc-castle .game {
   position: relative;
+  /* ширина — по «полному» вьюпорту (100dvh от клавиатуры не зависит), чтобы
+     при открытой клавиатуре мир не сжимался в узкую колонку; высота же идёт
+     по --app-h и уменьшается до области над клавиатурой (см. main.js). */
   width: min(100vw, calc(100dvh * 9 / 16));
-  height: 100dvh;
+  height: var(--app-h, 100dvh);
   max-height: calc(100vw * 16 / 9);
   max-width: none;
   margin: 0 auto;
@@ -375,12 +387,14 @@ body.loc-castle .loc-actions {
 .castle-main-menu {
   flex: 0 0 auto;
   flex-direction: row;
-  align-items: center;
-  justify-content: space-evenly;
+  align-items: flex-end;
+  justify-content: center;
   width: 100%;
-  gap: 4px;
-  padding: 4px 8px max(6px, env(safe-area-inset-bottom));
-  background: linear-gradient(0deg, rgba(5, 7, 3, .88) 55%, transparent);
+  gap: 6px;
+  padding: 7px 8px max(8px, env(safe-area-inset-bottom));
+  background: linear-gradient(0deg, rgba(5, 7, 3, .94) 62%, rgba(5, 7, 3, .55) 88%, transparent);
+  border-top: 1px solid rgba(212, 175, 90, .22);
+  box-shadow: inset 0 1px 0 rgba(255, 222, 150, .08);
 }
 
 /* вне боя — без «Участники боя» и «Лог боя»; в бою — без «Локация» */
@@ -390,11 +404,13 @@ body.loc-castle.in-battle .sprite-main[data-mm="location"] { display: none; }
 
 /* кнопка нижнего меню: иконка из спрайта + подпись */
 .sprite-main {
-  flex: 0 0 auto;
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: 96px;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 2px;
+  gap: 0;
   padding: 0;
   border: none;
   background: transparent;
@@ -403,42 +419,52 @@ body.loc-castle.in-battle .sprite-main[data-mm="location"] { display: none; }
   -webkit-tap-highlight-color: transparent;
 }
 .sprite-main .sm-ico {
-  --sprite-cols: 3;
-  --sprite-rows: 2;
-  --sx: 0;
-  --sy: 0;
+  /* main_menu.png — сетка 3×2 (300% × 200%). Медальоны нарисованы со
+     смещением внутри ячеек и не по центру, а нижний ряд ещё и сидит выше
+     верхнего. Поэтому --px (центр по X) и --py (центр по Y) подобраны
+     попиксельно для каждой иконки (значения — в разметке span.sm-ico),
+     а не по ровной формуле sx/sy. Иначе картинки отличаются по высоте,
+     а подписи «съезжают» вбок и стоят на разном расстоянии. */
+  --px: 50%;
+  --py: 50%;
   display: block;
-  width: 14vmin;
-  height: 14vmin;
-  max-width: 56px;
-  max-height: 56px;
-  min-width: 42px;
-  min-height: 42px;
+  width: min(17.5vw, 68px);
+  height: min(17.5vw, 68px);
+  max-width: 68px;
+  max-height: 68px;
+  min-width: 48px;
+  min-height: 48px;
   background-image: url('../assets/menu/main_menu.png');
   background-repeat: no-repeat;
-  background-size: calc(var(--sprite-cols) * 100%) calc(var(--sprite-rows) * 100%);
-  background-position:
-    calc(var(--sx) * 100% / (var(--sprite-cols) - 1))
-    calc(var(--sy) * 100% / (var(--sprite-rows) - 1));
+  background-size: 300% 200%;
+  background-position: var(--px) var(--py);
   filter: drop-shadow(0 3px 8px rgba(0, 0, 0, .7));
-  transition: filter .15s;
+  transition: filter .15s, transform .15s;
 }
 .sm-label {
   font-family: var(--font-display);
-  font-size: 10px;
-  line-height: 1.2;
-  letter-spacing: .3px;
-  color: #ecdcab;
+  font-size: 11px;
+  line-height: 1.1;
+  letter-spacing: .2px;
+  color: #f2e4ba;
   text-shadow: 0 1px 2px #000, 0 0 6px rgba(0, 0, 0, .9);
+  text-align: center;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
-  transition: color .15s;
+  margin-top: -3px;
+  transition: color .15s, text-shadow .15s;
 }
-.sprite-main:hover:not(:disabled) { transform: scale(1.05); }
+.sprite-main:hover:not(:disabled) { transform: translateY(-2px) scale(1.04); }
 .sprite-main:active:not(:disabled) { transform: scale(.94); }
 .sprite-main.active .sm-ico {
   filter: drop-shadow(0 0 12px rgba(244, 205, 111, .55)) drop-shadow(0 4px 10px rgba(0, 0, 0, .6));
 }
-.sprite-main.active .sm-label { color: var(--gold-bright); }
+.sprite-main.active .sm-label {
+  color: var(--gold-bright);
+  text-shadow: 0 1px 2px #000, 0 0 8px rgba(244, 205, 111, .6);
+}
 .sprite-main:disabled { cursor: default; }
 
 /* нижняя панель в режиме замка: над основным меню, тянется вверх */
@@ -457,14 +483,14 @@ body.loc-castle .bottom-dock {
 /* высота открытой панели: чату/игрокам/логу нужно место под содержимое
    (вкладки чата + сообщения + поле ввода не наезжают друг на друга) */
 body.loc-castle .bottom-dock.dock-open {
-  --dock-h: clamp(180px, 28vh, 250px);
+  --dock-h: clamp(180px, calc(var(--app-h, 100dvh) * .28), 250px);
   height: var(--dock-h);
   min-height: var(--dock-h);
 }
 
 /* участники боя — компактная плашка, не загораживает арену */
 body.loc-castle .bottom-dock.dock-open[data-pane="members"] {
-  --dock-h: clamp(96px, 16vh, 140px);
+  --dock-h: clamp(96px, calc(var(--app-h, 100dvh) * .16), 140px);
 }
 
 body.loc-castle .dock-tabs { display: none; }
@@ -603,12 +629,12 @@ body.loc-castle.in-battle .castle-main-menu {
 }
 
 body.loc-castle.in-battle .sprite-main .sm-ico {
-  width: 13vmin;
-  height: 13vmin;
-  max-width: 52px;
-  max-height: 52px;
-  min-width: 40px;
-  min-height: 40px;
+  width: 14vmin;
+  height: 14vmin;
+  max-width: 58px;
+  max-height: 58px;
+  min-width: 44px;
+  min-height: 44px;
 }
 
 /* тонкие золотистые скроллбары внутри панелей */
@@ -2450,14 +2476,17 @@ button.belt-slot { padding: 0; font: inherit; color: inherit; -webkit-tap-highli
 @media (max-width: 700px) {
   body.loc-castle .game {
     width: min(100vw, calc(100dvh * 9 / 16));
-    height: min(100dvh, calc(100vw * 16 / 9));
+    /* высоту ограничиваем видимой областью (--app-h) — при открытой
+       клавиатуре игра ужимается над ней, а не прячет поле ввода под неё */
+    height: min(var(--app-h, 100dvh), calc(100vw * 16 / 9));
   }
   body.loc-castle .hud-top { padding: max(4px, env(safe-area-inset-top)) 4px 0; }
   .castle-perimeter { padding: 0 6px; }
   .castle-perimeter-side { gap: 4px; }
   .menu-icon img { width: clamp(40px, 11vmin, 50px); }
-  .mi-label, .sm-label { font-size: 9px; }
-  .sprite-main .sm-ico { width: min(16vw, 54px); height: min(16vw, 54px); }
+  .mi-label { font-size: 9px; }
+  .sm-label { font-size: 10px; }
+  .sprite-main .sm-ico { width: min(18.5vw, 66px); height: min(18.5vw, 66px); }
   body.loc-castle .loc-body.open {
     width: calc(100% - 12px);
     bottom: calc(min(18vw, 58px) + 20px);
@@ -2470,10 +2499,10 @@ button.belt-slot { padding: 0; font: inherit; color: inherit; -webkit-tap-highli
     max-height: 20vh;
   }
   body.loc-castle.in-battle .sprite-main .sm-ico {
-    width: 12vmin;
-    height: 12vmin;
-    max-width: 52px;
-    max-height: 52px;
+    width: 13vmin;
+    height: 13vmin;
+    max-width: 56px;
+    max-height: 56px;
   }
 }
 
@@ -2481,6 +2510,7 @@ button.belt-slot { padding: 0; font: inherit; color: inherit; -webkit-tap-highli
   body.loc-castle .game {
     width: 100vw;
     height: calc(100vw * 16 / 9);
-    max-height: 100dvh;
+    /* при открытой клавиатуре потолок высоты опускается до видимой области */
+    max-height: var(--app-h, 100dvh);
   }
 }

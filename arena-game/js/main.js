@@ -765,6 +765,39 @@ $('chat-form').addEventListener('submit', (e) => {
 });
 
 // ---------------------------------------------------------------------------
+// Мобильная клавиатура. При фокусе на поле ввода (чат) виртуальная клавиатура
+// уменьшает видимую область экрана, но dvh/layout-вьюпорт остаются прежними —
+// поле уезжает под клавиатуру, а фикс-вёрстка «съезжает». Привязываем высоту
+// приложения (--app-h) и смещение (--vv-top) к window.visualViewport: когда
+// клавиатура открыта, .game ужимается до области над ней, и поле остаётся видимым.
+// ---------------------------------------------------------------------------
+(() => {
+  const vv = window.visualViewport;
+  if (!vv) return;                         // старые браузеры: оставляем фолбэк 100dvh
+  const root = document.documentElement;
+  let raf = 0;
+  const sync = () => {
+    raf = 0;
+    root.style.setProperty('--app-h', Math.round(vv.height) + 'px');
+    root.style.setProperty('--vv-top', Math.round(vv.offsetTop) + 'px');
+  };
+  const schedule = () => { if (!raf) raf = requestAnimationFrame(sync); };
+  vv.addEventListener('resize', schedule);
+  vv.addEventListener('scroll', schedule);
+  sync();
+
+  // при фокусе на поле чата дать клавиатуре раскрыться, затем показать поле и
+  // последние сообщения над ней (скролл внутри своих контейнеров, не документа)
+  document.addEventListener('focusin', (e) => {
+    if (!e.target.closest('.chat-input-row')) return;
+    setTimeout(() => {
+      scrollChatToBottom();
+      e.target.scrollIntoView({ block: 'nearest' });
+    }, 250);
+  });
+})();
+
+// ---------------------------------------------------------------------------
 // Список игроков в локации — живой, из Redis-присутствия сервера
 // ---------------------------------------------------------------------------
 
