@@ -32,6 +32,16 @@ INSERT INTO npc_spawns (id, npc_template_id, location_id) VALUES
 INSERT INTO game_config (key, value) VALUES
     ('battle.turn_time',     '20'),
     ('battle.reward.hunt',   '{"currency": "copper", "amount": 50, "exp": 120}'),
+    -- вмешательство в бой по умолчанию: в охоту нельзя, в PvP можно;
+    -- переопределяется на уровне локации (locations.flags) и конкретного боя
+    ('battle.intervention.default', '{"hunt": false, "pvp": true}'),
+    ('battle.max_per_side',  '10'),
+    -- выбор цели в NvN: соперник «липкий», переключается с вероятностью
+    -- switch_chance; боец без размена cold_turns раундов — «холодный», и его
+    -- приоритетно берут в цель (вес растёт на cold_weight за раунд «холода»)
+    ('battle.target.switch_chance', '0.25'),
+    ('battle.target.cold_turns',    '2'),
+    ('battle.target.cold_weight',   '1.5'),
     ('character.start',      '{"level": 15, "hp": 2330, "damage": [160, 240],
                                "crit": 0.14, "dodge": 0.07, "height": 1.85,
                                "xp_max": 2000, "pvp_xp_max": 1000}'),

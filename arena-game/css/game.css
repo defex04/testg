@@ -266,8 +266,13 @@ body.loc-castle .pp-money-cell { font-size: 11px; }
 
 .menu-icon img {
   display: block;
-  width: clamp(46px, 12.5vmin, 58px);
-  height: auto;
+  /* размер задаём по ВЫСОТЕ (а не по ширине): PNG-иконки имеют чуть разные
+     пропорции, и при фикс. ширине рендерились разной высотой — из-за чего
+     подписи под ними съезжали по вертикали. Фикс. высота → все иконки одной
+     высоты и подписи стоят в одну линию. Ширина (auto) гуляет на ~2px — это
+     незаметно (у иконок и так разный размах «крыльев»). */
+  width: auto;
+  height: clamp(55px, 15vmin, 70px);
   pointer-events: none;
   user-select: none;
   -webkit-user-drag: none;
@@ -399,10 +404,23 @@ body.loc-castle .loc-actions {
   box-shadow: inset 0 1px 0 rgba(255, 222, 150, .08);
 }
 
-/* вне боя — без «Участники боя» и «Лог боя»; в бою — без «Локация» */
+/* вне боя — без «Участники боя» и «Лог боя»; в бою — без «Локация» и «Клан» */
 body.loc-castle:not(.in-battle) .sprite-main[data-mm="members"],
 body.loc-castle:not(.in-battle) .sprite-main[data-mm="battlelog"] { display: none; }
-body.loc-castle.in-battle .sprite-main[data-mm="location"] { display: none; }
+body.loc-castle.in-battle .sprite-main[data-mm="location"],
+body.loc-castle.in-battle .sprite-main[data-mm="clan"] { display: none; }
+
+/* порядок иконок вне боя: Локация · Клан · Чат · Игроки */
+body.loc-castle:not(.in-battle) .sprite-main[data-mm="location"] { order: 1; }
+body.loc-castle:not(.in-battle) .sprite-main[data-mm="clan"]     { order: 2; }
+body.loc-castle:not(.in-battle) .sprite-main[data-mm="chat"]     { order: 3; }
+body.loc-castle:not(.in-battle) .sprite-main[data-mm="players"]  { order: 4; }
+
+/* порядок иконок в бою: Участники · Лог боя · Чат · Игроки */
+body.loc-castle.in-battle .sprite-main[data-mm="members"]   { order: 1; }
+body.loc-castle.in-battle .sprite-main[data-mm="battlelog"] { order: 2; }
+body.loc-castle.in-battle .sprite-main[data-mm="chat"]      { order: 3; }
+body.loc-castle.in-battle .sprite-main[data-mm="players"]   { order: 4; }
 
 /* кнопка нижнего меню: иконка из спрайта + подпись */
 .sprite-main {
@@ -421,14 +439,9 @@ body.loc-castle.in-battle .sprite-main[data-mm="location"] { display: none; }
   -webkit-tap-highlight-color: transparent;
 }
 .sprite-main .sm-ico {
-  /* main_menu.png — сетка 3×2 (300% × 200%). Медальоны нарисованы со
-     смещением внутри ячеек и не по центру, а нижний ряд ещё и сидит выше
-     верхнего. Поэтому --px (центр по X) и --py (центр по Y) подобраны
-     попиксельно для каждой иконки (значения — в разметке span.sm-ico),
-     а не по ровной формуле sx/sy. Иначе картинки отличаются по высоте,
-     а подписи «съезжают» вбок и стоят на разном расстоянии. */
-  --px: 50%;
-  --py: 50%;
+  /* каждый медальон — отдельная квадратная картинка (mm-*.webp), вырезан из
+     общего арта и центрирован в своём файле. Рисуется по центру бокса; все
+     файлы одного размера → иконки выровнены и стоят на одной высоте. */
   display: block;
   width: min(17.5vw, 68px);
   height: min(17.5vw, 68px);
@@ -436,13 +449,18 @@ body.loc-castle.in-battle .sprite-main[data-mm="location"] { display: none; }
   max-height: 68px;
   min-width: 48px;
   min-height: 48px;
-  background-image: url('../assets/menu/main_menu.png');
   background-repeat: no-repeat;
-  background-size: 300% 200%;
-  background-position: var(--px) var(--py);
+  background-size: contain;
+  background-position: center;
   filter: drop-shadow(0 3px 8px rgba(0, 0, 0, .7));
   transition: filter .15s, transform .15s;
 }
+.sprite-main[data-mm="location"]  .sm-ico { background-image: url('../assets/menu/mm-location.webp'); }
+.sprite-main[data-mm="chat"]      .sm-ico { background-image: url('../assets/menu/mm-chat.webp'); }
+.sprite-main[data-mm="players"]   .sm-ico { background-image: url('../assets/menu/mm-players.webp'); }
+.sprite-main[data-mm="battlelog"] .sm-ico { background-image: url('../assets/menu/mm-battlelog.webp'); }
+.sprite-main[data-mm="members"]   .sm-ico { background-image: url('../assets/menu/mm-members.webp'); }
+.sprite-main[data-mm="clan"]      .sm-ico { background-image: url('../assets/menu/mm-clan.webp'); }
 .sm-label {
   font-family: var(--font-display);
   font-size: 11px;
@@ -1419,6 +1437,82 @@ body.loc-castle.in-battle .sprite-main .sm-ico {
 .strike-wheel.waiting .swb { filter: saturate(.4) brightness(.65); }
 .strike-wheel.waiting .sw-status { animation: statpulse 1.1s infinite alternate; }
 @keyframes statpulse { to { opacity: .55; } }
+
+/* выбор цели (NvN): кнопки живых врагов над штурвалом */
+.sw-targets {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+.sw-targets.hidden { display: none; }
+.swt {
+  padding: 4px 9px;
+  font-family: var(--font-display);
+  font-size: 11px;
+  color: #cdbd8d;
+  background: rgba(255, 255, 255, .03);
+  border: 1px solid rgba(138, 111, 60, .4);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: color .15s, border-color .15s, box-shadow .15s;
+}
+.swt:hover { color: var(--gold-bright); border-color: rgba(244, 205, 111, .7); }
+.swt.active {
+  color: #ffd9b0;
+  border-color: rgba(255, 150, 90, .8);
+  box-shadow: 0 0 9px rgba(216, 120, 63, .3);
+}
+
+/* состав команды во вкладке «Участники боя»: имя + полоса HP */
+.member .m-line {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.member .m-bar {
+  height: 6px;
+  margin-top: 3px;
+  border: 1px solid var(--line-dim);
+  border-radius: 4px;
+  background: rgba(0, 0, 0, .45);
+  overflow: hidden;
+}
+.member .m-fill {
+  height: 100%;
+  background: linear-gradient(180deg, #7fbf4d, #44761f);
+  transition: width .4s;
+}
+.member.dead .m-fill { background: linear-gradient(180deg, #8a4a4a, #5a2b2b); }
+
+/* кнопки «Вмешаться» в окне боя */
+.bi-join {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line-dim);
+}
+.bi-join span { font-size: 12px; color: #cdbd8d; }
+.bi-join-btn {
+  padding: 7px 13px;
+  font-family: var(--font-display);
+  font-size: 12px;
+  color: #ffd9b0;
+  background: rgba(216, 120, 63, .12);
+  border: 1px solid rgba(255, 150, 90, .55);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background .15s, box-shadow .15s;
+}
+.bi-join-btn:hover {
+  background: rgba(216, 120, 63, .25);
+  box-shadow: 0 0 10px rgba(216, 120, 63, .3);
+}
 
 /* ---------- всплывающий урон ---------- */
 
@@ -2493,7 +2587,7 @@ button.belt-slot { padding: 0; font: inherit; color: inherit; -webkit-tap-highli
   body.loc-castle .hud-top { padding: max(4px, env(safe-area-inset-top)) 4px 0; }
   .castle-perimeter { padding: 0 6px; }
   .castle-perimeter-side { gap: 4px; }
-  .menu-icon img { width: clamp(40px, 11vmin, 50px); }
+  .menu-icon img { height: clamp(48px, 13.2vmin, 60px); }  /* высотой, не шириной — см. базовое правило */
   .mi-label { font-size: 9px; }
   .sm-label { font-size: 10px; }
   .sprite-main .sm-ico { width: min(18.5vw, 66px); height: min(18.5vw, 66px); }

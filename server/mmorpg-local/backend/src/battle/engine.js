@@ -1,116 +1,210 @@
 /**
- * Серверный порт BattleSystem.js — формулы и семантика 1:1:
- * 3 зоны удара × 3 блока, таймер хода, pass при таймауте,
- * blocked ×0.12, crit ×1.8, crit+block ×0.85.
+ * Серверный движок боя — командный NvN. Формулы и семантика 1:1 с прежней
+ * версией: 3 зоны удара × 3 блока, blocked ×0.12, crit ×1.8, crit+block ×0.85,
+ * dodge. Бой 1×1 (охота, дуэль) — частный случай команд из одного бойца.
  *
- * Режимы:
- *  - hunt: оба выбирают ход одновременно, удары в одном resolve;
- *  - pvp: поочерёдно — сначала инициатива, удар сразу, потом ход соперника.
+ * Модель хода:
+ *  - стороны left/right — массивы бойцов;
+ *  - раунд: каждый живой боец действует один раз в порядке инициативы (по убыванию);
+ *  - порядок инициативы считается ОДИН РАЗ со стабильным тай-брейком и
+ *    переиспользуется каждый раунд → строго чередование, без ударов подряд
+ *    одним бойцом (это и был баг «ходит дважды» при равной инициативе);
+ *  - удар активного бойца разыгрывается сразу (sub-turn), затем ход переходит
+ *    следующему по инициативе — отсюда естественное «переключение» соперника.
  */
 export const ZONES = ['high', 'mid', 'low'];
 const rnd = (min, max) => min + Math.random() * (max - min);
-const other = (s) => (s === 'left' ? 'right' : 'left');
 
 export class Engine {
-  constructor(sides, { turnTime = 20, mode = 'hunt' } = {}) {
-    this.mode = mode;
+  /**
+   * sides: { left: [def...], right: [def...] }
+   * def: { id?, name, level, hp, damage:[min,max], crit?, dodge?, initiative?, isAI?, charId? }
+   */
+  constructor(sides, { turnTime = 20, target = {} } = {}) {
     this.turnTime = turnTime;
-    this.sides = {};
-    for (const k of ['left', 'right']) {
-      const s = sides[k];
-      this.sides[k] = { ...s, maxHp: s.hp, hp: s.hp,
-        crit: s.crit ?? 0.1, dodge: s.dodge ?? 0.06,
-        initiative: Number(s.initiative ?? s.level ?? 0) };
+    // выбор цели: соперник «липкий» (держится несколько ходов), меняется
+    // принудительно (умер), с вероятностью switchChance или если боец «холодный»
+    // (давно не дрался). Новый соперник выбирается взвешенно, с приоритетом
+    // «холодным» врагам — простаивающих втягиваем в бой. См. README/plan.
+    this.target = {
+      switchChance: target.switchChance ?? 0.25,
+      coldTurns: target.coldTurns ?? 2,
+      coldWeight: target.coldWeight ?? 1.5,
+    };
+    this.fighters = new Map();           // id -> боец
+    this.teams = { left: [], right: [] };
+    this._seq = 0;
+    for (const side of ['left', 'right']) {
+      for (const def of sides[side] || []) this._add(side, def);
     }
     this.turn = 0;
-    this.phase = 'idle';
-    this.moves = { left: null, right: null };
-    this.moveOrder = [];
-    // PvP: блок держится между ходами, пока игрок не сменит
-    this.blocks = { left: null, right: null };
-    this.activeSide = null;
-    this.acted = { left: false, right: false };
+    this.phase = 'idle';                  // idle | choose | resolving | ended
+    this.order = [];                     // id в порядке инициативы (фиксирован)
+    this.idx = -1;                       // позиция текущего бойца в order
+    this.acted = new Set();              // кто уже походил в этом раунде
+    this._pending = null;                // выбранный, но ещё не разыгранный ход
+    this._buildOrder();
   }
 
-  /** Охота: оба выбирают ход одновременно. */
-  startTurn() {
-    this.turn += 1;
-    this.phase = 'choose';
-    this.moves = { left: null, right: null };
-    this.moveOrder = [];
-    return { turn: this.turn, timeLeft: this.turnTime };
+  _add(side, def) {
+    const id = def.id != null ? String(def.id) : `ai${++this._seq}`;
+    const hp = def.hp;
+    const f = {
+      id, side,
+      name: def.name, level: def.level ?? 1,
+      charId: def.charId ?? null,
+      isAI: !!def.isAI,
+      maxHp: hp, hp,
+      damage: def.damage,
+      crit: def.crit ?? 0.1,
+      dodge: def.dodge ?? 0.06,
+      initiative: Number(def.initiative ?? def.level ?? 0),
+      // тай-брейк фиксируется при создании: при равной инициативе порядок
+      // постоянен между раундами, поэтому никто не бьёт дважды подряд
+      tiebreak: Math.random(),
+      alive: hp > 0,
+      block: null,                       // держится между раундами, пока не сменят
+      opponentId: null,                  // «липкий» соперник (цель/фокус)
+      lastActiveTurn: 0,                 // раунд последнего размена — для «холода»
+    };
+    this.fighters.set(id, f);
+    this.teams[side].push(id);
+    return f;
   }
 
-  /** PvP: новый раунд — первым ходит с большей инициативой. */
+  _buildOrder() {
+    // инициатива по убыванию; при равной — игроки раньше ИИ (приоритет живых),
+    // затем фиксированный тай-брейк (постоянный между раундами → нет ударов подряд)
+    this.order = [...this.fighters.values()]
+      .sort((a, b) => (b.initiative - a.initiative)
+        || ((a.isAI ? 1 : 0) - (b.isAI ? 1 : 0))
+        || (a.tiebreak - b.tiebreak))
+      .map((f) => f.id);
+  }
+
+  fighter(id)   { return this.fighters.get(String(id)); }
+  enemySide(s)  { return s === 'left' ? 'right' : 'left'; }
+  aliveOf(side) { return this.teams[side].map((id) => this.fighters.get(id)).filter((f) => f.alive); }
+  enemiesOf(id) {
+    const f = this.fighter(id);
+    return f ? this.aliveOf(this.enemySide(f.side)) : [];
+  }
+
+  /** Горячий вход в идущий бой (вмешательство): боец вступает со следующего раунда. */
+  addFighter(side, def) {
+    const f = this._add(side, def);
+    this._buildOrder();
+    if (this.phase !== 'idle') this.acted.add(f.id);  // в текущем раунде уже «походил»
+    return f;
+  }
+
+  /** Новый раунд: сбрасываем «походивших», порядок инициативы НЕ перевыбираем. */
   startRound() {
     this.turn += 1;
     this.phase = 'choose';
-    this.moves = { left: null, right: null };
-    this.moveOrder = [];
-    this.acted = { left: false, right: false };
-    const li = this.sides.left.initiative;
-    const ri = this.sides.right.initiative;
-    this.activeSide = li === ri
-      ? (Math.random() < 0.5 ? 'left' : 'right')
-      : (li > ri ? 'left' : 'right');
-    return { turn: this.turn, timeLeft: this.turnTime, active: this.activeSide };
+    this.acted = new Set();
+    this.idx = -1;
+    return this._nextActor();
   }
 
-  /** PvP: второй удар в том же раунде. */
-  startSubTurn() {
-    this.activeSide = other(this.activeSide);
-    this.phase = 'choose';
-    return { turn: this.turn, timeLeft: this.turnTime, active: this.activeSide };
+  _nextActor() {
+    for (let i = this.idx + 1; i < this.order.length; i++) {
+      const f = this.fighters.get(this.order[i]);
+      if (f.alive && !this.acted.has(f.id) && this.enemiesOf(f.id).length) {
+        this.idx = i;
+        this.phase = 'choose';
+        return { turn: this.turn, timeLeft: this.turnTime, active: f.id };
+      }
+    }
+    this.idx = this.order.length;
+    return null;   // раунд окончен
   }
 
-  randomMove() {
-    return { attack: ZONES[(Math.random() * 3) | 0], block: ZONES[(Math.random() * 3) | 0] };
+  /** Следующий sub-turn в текущем раунде (null → раунд окончен). */
+  advance() { return this._nextActor(); }
+
+  currentActorId() {
+    const id = this.order[this.idx];
+    return id != null && this.idx < this.order.length ? id : null;
+  }
+  currentActor() { return this.fighter(this.currentActorId()); }
+
+  /** Насколько боец «холодный» (раундов без размена). */
+  coldness(f) { return Math.max(0, this.turn - (f.lastActiveTurn || 0)); }
+
+  /** Вес выбора цели: база + приоритет «холодным» (на кого давно не нападали). */
+  _targetWeight(enemy) { return 1 + this.target.coldWeight * this.coldness(enemy); }
+
+  _weightedPick(list) {
+    if (list.length <= 1) return list[0] || null;
+    const w = list.map((e) => this._targetWeight(e));
+    let r = Math.random() * w.reduce((a, b) => a + b, 0);
+    for (let i = 0; i < list.length; i++) { r -= w[i]; if (r <= 0) return list[i]; }
+    return list[list.length - 1];
   }
 
-  submit(side, move) {
-    if (this.phase !== 'choose' || this.moves[side]) return false;
-    if (this.mode === 'pvp' && side !== this.activeSide) return false;
-    if (!move.pass && !ZONES.includes(move.attack)) return false;
+  /**
+   * Закрепить/обновить соперника бойца (липкий фокус + вероятностное
+   * переключение + «холод»). Возвращает выбранного живого врага.
+   */
+  chooseOpponent(actorId) {
+    const f = this.fighter(actorId);
+    if (!f) return null;
+    const enemies = this.enemiesOf(actorId);
+    if (!enemies.length) { f.opponentId = null; return null; }
+    const cur = f.opponentId ? this.fighter(f.opponentId) : null;
+    const valid = cur && cur.alive && cur.side !== f.side;
+    const selfCold = this.coldness(f) >= this.target.coldTurns;
+    const wantSwitch = !valid || selfCold || Math.random() < this.target.switchChance;
+    const pick = wantSwitch ? this._weightedPick(enemies) : cur;
+    f.opponentId = pick ? pick.id : null;
+    return pick;
+  }
+
+  /** Текущий соперник без пере-выбора (для фокуса зрителя). */
+  opponentOf(actorId) {
+    const f = this.fighter(actorId);
+    const cur = f && f.opponentId ? this.fighter(f.opponentId) : null;
+    return cur && cur.alive && cur.side !== f.side ? cur : null;
+  }
+
+  aiMove(actorId) {
+    const t = this.chooseOpponent(actorId);
+    return { attack: ZONES[(Math.random() * 3) | 0], block: ZONES[(Math.random() * 3) | 0],
+             target: t ? t.id : null };
+  }
+
+  /** Выбор хода активного бойца. move: { attack, block, target, pass }. */
+  submit(actorId, move) {
+    if (this.phase !== 'choose') return false;
+    const f = this.fighter(actorId);
+    if (!f || !f.alive || this.currentActorId() !== f.id) return false;
     if (move.block != null && !ZONES.includes(move.block)) return false;
-    this.moves[side] = move;
-    if (move.block != null) this.blocks[side] = move.block;
-    this.moveOrder.push(side);
+    let target = null;
+    if (!move.pass) {
+      if (!ZONES.includes(move.attack)) return false;
+      target = this.fighter(move.target);
+      if (target && target.alive && target.side !== f.side) {
+        f.opponentId = target.id;          // явный выбор закрепляем как соперника
+      } else {
+        // нет/павшая/своя цель — берём уже закреплённого, иначе выбираем нового
+        target = this.opponentOf(f.id) || this.chooseOpponent(f.id);
+      }
+      if (!target) return false;
+    }
+    if (move.block != null) f.block = move.block;
+    this._pending = { actorId: f.id, targetId: target ? target.id : null,
+                      attack: move.attack, pass: !!move.pass };
     return true;
   }
 
-  get ready() { return !!(this.moves.left && this.moves.right); }
-
-  /** Таймаут хода (охота): ИИ бьёт наугад, игрок без выбора пропускает удар. */
-  fillTimeouts() {
-    for (const side of ['left', 'right']) {
-      if (!this.moves[side]) {
-        this.submit(side, this.sides[side].isAI
-          ? this.randomMove()
-          : { attack: null, block: null, pass: true });
-      }
-    }
-  }
-
-  /** Таймаут хода (PvP): активный игрок пропускает удар, блок сохраняется. */
-  fillTimeoutActive() {
-    if (!this.moves[this.activeSide]) {
-      this.submit(this.activeSide, { attack: null, block: null, pass: true });
-    }
-  }
-
-  _defenderBlock(defenderSide) {
-    return this.mode === 'pvp'
-      ? this.blocks[defenderSide]
-      : this.moves[defenderSide]?.block ?? null;
-  }
-
-  _strike(attackerSide, defenderSide, zone) {
-    const attacker = this.sides[attackerSide];
-    const defender = this.sides[defenderSide];
-    const blocked = this._defenderBlock(defenderSide) === zone;
+  _strike(attacker, defender, zone) {
+    // размен «согревает» обоих: учитывается «холод» при выборе целей
+    attacker.lastActiveTurn = this.turn;
+    defender.lastActiveTurn = this.turn;
+    const blocked = defender.block === zone;
     const dodged = !blocked && Math.random() < defender.dodge;
     const crit = !dodged && Math.random() < attacker.crit;
-
     let damage = 0;
     if (!dodged) {
       damage = rnd(attacker.damage[0], attacker.damage[1]);
@@ -119,58 +213,34 @@ export class Engine {
       else if (blocked) damage *= 0.12;
       damage = Math.max(1, Math.round(damage));
       defender.hp = Math.max(0, defender.hp - damage);
+      if (defender.hp <= 0) defender.alive = false;
     }
-    return { attacker: attackerSide, defender: defenderSide, zone,
-      blocked, dodged, crit, damage, defenderHp: defender.hp,
-      killed: defender.hp <= 0 };
+    return {
+      attackerId: attacker.id, defenderId: defender.id,
+      attackerSide: attacker.side, defenderSide: defender.side,
+      zone, blocked, dodged, crit, damage,
+      defenderHp: defender.hp, killed: !defender.alive,
+    };
   }
 
-  /** Охота: оба удара за раунд. */
-  resolve() {
-    this.phase = 'resolving';
-    const order = [...this.moveOrder].sort((a, b) =>
-      (this.sides[a].isAI ? 1 : 0) - (this.sides[b].isAI ? 1 : 0));
-    const passed = order.filter((s) => this.moves[s].pass);
-    const strikes = [];
-
-    for (const attackerSide of order) {
-      if (this.moves[attackerSide].pass) continue;
-      const defenderSide = other(attackerSide);
-      const attacker = this.sides[attackerSide];
-      const defender = this.sides[defenderSide];
-      if (attacker.hp <= 0 || defender.hp <= 0) continue;
-
-      const zone = this.moves[attackerSide].attack;
-      strikes.push(this._strike(attackerSide, defenderSide, zone));
-      if (defender.hp <= 0) break;
-    }
-    return { turn: this.turn, strikes, passed };
-  }
-
-  /** PvP: удар только активного игрока, сразу после выбора. */
+  /** Разыграть удар активного бойца (один sub-turn). */
   resolveActive() {
     this.phase = 'resolving';
-    const attackerSide = this.activeSide;
-    const move = this.moves[attackerSide];
-    const passed = move.pass ? [attackerSide] : [];
-    const strikes = [];
-
-    if (!move.pass) {
-      const defenderSide = other(attackerSide);
-      const attacker = this.sides[attackerSide];
-      const defender = this.sides[defenderSide];
-      if (attacker.hp > 0 && defender.hp > 0) {
-        strikes.push(this._strike(attackerSide, defenderSide, move.attack));
-      }
+    const p = this._pending; this._pending = null;
+    const strikes = [], passed = [];
+    if (!p) return { turn: this.turn, strikes, passed };
+    const actor = this.fighter(p.actorId);
+    this.acted.add(actor.id);
+    if (p.pass || !p.targetId) {
+      passed.push(actor.id);
+    } else {
+      const target = this.fighter(p.targetId);
+      if (actor.alive && target && target.alive) strikes.push(this._strike(actor, target, p.attack));
     }
     return { turn: this.turn, strikes, passed };
   }
 
-  finished() {
-    return this.sides.left.hp <= 0 || this.sides.right.hp <= 0;
-  }
-
-  winner() {
-    return this.sides.left.hp > 0 ? 'left' : this.sides.right.hp > 0 ? 'right' : null;
-  }
+  finished() { return !this.aliveOf('left').length || !this.aliveOf('right').length; }
+  winner()   { return this.aliveOf('left').length ? 'left'
+                   : this.aliveOf('right').length ? 'right' : null; }
 }

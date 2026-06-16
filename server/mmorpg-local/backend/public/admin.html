@@ -203,7 +203,8 @@ function barChart(rows, labelKey, valueKey){
 
 const SECTIONS = [
   ['stats','Общая статистика'],['chars','Персонажи'],['accounts','Аккаунты'],
-  ['battles','Бои'],['ledger','Гроссбух'],['items','Предметы'],['quests','Задания'],
+  ['battles','Бои'],['battlecfg','Настройки боёв'],
+  ['ledger','Гроссбух'],['items','Предметы'],['quests','Задания'],
   ['market','Аукцион'],['mail','Почта'],['chat','Чат'],['config','Конфиг'],['audit','Аудит'],
 ];
 let current = 'stats';
@@ -493,7 +494,9 @@ window.openBattle = async (id) => {
     <h2 style="margin:0;font-family:Georgia,serif;font-variant:small-caps">Бой #${id}
       <span class="muted">· ${dict(D.bType,d.battle.type)} · ${dict(D.bStatus,d.battle.status)}</span></h2>
     ${d.battle.status === 2 || d.battle.status === 1
-      ? `<button class="danger" onclick="abortBattle(${id})">Прервать бой</button>` : ''}</div>
+      ? `<button class="brass" onclick="toggleIntervention(${id}, ${d.battle.intervention !== 1})">
+           ${d.battle.intervention === 1 ? 'Закрыть вмешательство' : 'Открыть вмешательство'}</button>
+         <button class="danger" onclick="abortBattle(${id})">Прервать бой</button>` : ''}</div>
   <div class="panel"><h3>Участники</h3>
     ${table([{h:'Сторона',v:r=>r.side},{h:'Имя',v:r=>r.name},
       {h:'Итог',v:r=>dict(D.result,r.result)},{h:'Урон',v:r=>r.damage_dealt},
@@ -509,6 +512,71 @@ window.abortBattle = async (id) => {
       ? new Error('бой #' + id + ' уже завершён или прерван') : e);
     openBattle(id);   // показать актуальный статус
   }
+};
+window.toggleIntervention = async (id, open) => {
+  try { await api(`/battles/${id}/intervention`, { open });
+    ok(`вмешательство ${open ? 'открыто' : 'закрыто'} в бою #${id}`); openBattle(id); }
+  catch (e) { fail(e); }
+};
+
+/* ============= Настройки боёв: глобально + по локациям ============= */
+R.battlecfg = async () => {
+  const [cfgRows, locs] = await Promise.all([api('/config'), api('/locations')]);
+  const cfg = Object.fromEntries(cfgRows.map((r) => [r.key, r.value]));
+  const def = cfg['battle.intervention.default'] || { hunt: false, pvp: true };
+  const maxPer = cfg['battle.max_per_side'] ?? 10;
+  const ynNull = (v) => `<option value="">по умолчанию</option>
+    <option value="1" ${v === true ? 'selected' : ''}>можно</option>
+    <option value="0" ${v === false ? 'selected' : ''}>нельзя</option>`;
+  const f = (l) => l.flags || {};
+  return `
+  <div class="panel"><h3>Что это</h3>
+    <p class="muted" style="margin:0">Кто может вмешаться в идущий бой и можно ли из боя
+    выйти. Приоритет: настройка конкретного боя (на странице боя) → настройка локации →
+    глобальный дефолт ниже. Изменения вступают в силу для новых боёв сразу.</p></div>
+
+  <div class="panel"><h3>Глобальные дефолты</h3>
+    <div class="form" id="bc-def">
+      <div><label>Вмешательство в охоту (PvE)</label>
+        <select data-k="hunt"><option value="1" ${def.hunt ? 'selected' : ''}>можно</option>
+          <option value="0" ${!def.hunt ? 'selected' : ''}>нельзя</option></select></div>
+      <div><label>Вмешательство в PvP</label>
+        <select data-k="pvp"><option value="1" ${def.pvp ? 'selected' : ''}>можно</option>
+          <option value="0" ${!def.pvp ? 'selected' : ''}>нельзя</option></select></div>
+      <div><label>Лимит бойцов на сторону</label>
+        <input data-k="max" type="number" min="1" value="${esc(maxPer)}"></div>
+    </div>
+    <div class="toolbar" style="margin-top:10px">
+      <button class="brass" onclick="saveBattleDefaults()">Сохранить дефолты</button></div></div>
+
+  <div class="panel"><h3>По локациям</h3>
+    <table><thead><tr><th>Локация</th><th>Вмешательство</th><th>Выход из боя</th><th></th></tr></thead>
+    <tbody>${locs.map((l) => `<tr data-loc="${l.id}">
+      <td>${esc(l.name)} <span class="muted">#${l.id}</span></td>
+      <td><select data-k="intervention">${ynNull(f(l).intervention)}</select></td>
+      <td><select data-k="allow_leave">${ynNull(f(l).allow_leave)}</select></td>
+      <td><button class="sm brass" onclick="saveLocFlags(${l.id})">Сохранить</button></td>
+    </tr>`).join('')}</tbody></table></div>`;
+};
+window.saveBattleDefaults = async () => {
+  const box = $('#bc-def');
+  const g = (k) => box.querySelector(`[data-k="${k}"]`).value;
+  try {
+    await api('/config', { key: 'battle.intervention.default',
+      value: { hunt: g('hunt') === '1', pvp: g('pvp') === '1' } });
+    await api('/config', { key: 'battle.max_per_side', value: Number(g('max')) || 10 });
+    ok('дефолты боёв');
+  } catch (e) { fail(e); }
+};
+window.saveLocFlags = async (id) => {
+  const row = document.querySelector(`tr[data-loc="${id}"]`);
+  const pick = (k) => { const v = row.querySelector(`[data-k="${k}"]`).value;
+    return v === '' ? null : v === '1'; };
+  try {
+    await api(`/locations/${id}/flags`,
+      { intervention: pick('intervention'), allow_leave: pick('allow_leave') });
+    ok('локация #' + id);
+  } catch (e) { fail(e); }
 };
 
 /* ================= Гроссбух ================= */

@@ -64,6 +64,10 @@ export function createHub(server) {
             await battle.startDuel(me, targetCh, send, target.send);
             break;
           }
+          case 'join': {       // вмешательство: войти в идущий бой на сторону
+            await battle.joinBattle(ch.id, Number(m.battleId), m.side, send);
+            break;
+          }
           case 'move':     battle.submitMove(ch.id, m); break;
           case 'turnDone': await battle.finishTurn(ch.id); break;
           case 'escape':   await battle.escapeBattle(ch.id); break;

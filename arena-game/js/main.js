@@ -324,6 +324,8 @@ let ui = null;
 let battleLoading = false;
 let fighters = { left: null, right: null };
 let totalDamage = 0;     // суммарный урон игрока за текущий бой
+let lastTurnShown = 0;   // чтобы не дублировать «ход N» на sub-turn'ах раунда
+let currentFocusId = null;   // id сфокусированного соперника — чтобы не пересобирать шапку зря
 
 const BATTLE_ERRORS = {
   target_offline: 'игрок не в сети',
@@ -332,6 +334,10 @@ const BATTLE_ERRORS = {
   cannot_attack_self: 'нельзя напасть на себя',
   not_same_location: 'игрок в другой локации',
   no_hunt_here: 'здесь не на кого охотиться',
+  intervention_closed: 'в этот бой нельзя вмешаться',
+  battle_not_found: 'бой уже завершён',
+  side_full: 'в команде нет места',
+  bad_side: 'неверная сторона',
 };
 
 /**
@@ -426,34 +432,58 @@ async function initBattle(resumedBattle = null, starter = null) {
     },
   });
   resetElixirBattle();             // новый бой — заряды пояса и эффекты с нуля
+  lastTurnShown = 0;
+  currentFocusId = battle.focus ? (battle.focus.id ?? null) : null;
   showHP('left', battle.sides.left.hp, battle.sides.left.maxHp);
   showHP('right', battle.sides.right.hp, battle.sides.right.maxHp);
+  ui.setRoster(battle.roster);
+  ui.setOpponent(battle.focus);
   totalDamage = 0;
   ui.setDamage(0);
 
   battle.addEventListener('turnStart', (e) => {
-    ui.setTurn(e.detail.turn);
-    ui.setTimer(e.detail.timeLeft);
-    if (battle.kind === 'pvp' && e.detail.canAct === false) {
-      ui.showWaitTimer();
-      setBeltLive(false);          // чужой ход — эликсиры недоступны
-    } else {
+    const d = e.detail;
+    if (d.turn !== lastTurnShown) { ui.setTurn(d.turn); lastTurnShown = d.turn; }
+    ui.setTimer(d.timeLeft);
+    if (d.roster) ui.setRoster(d.roster);
+    if (d.canAct) {                // мой ход
+      applyFocus(d.focus);
+      ui.setTargets(d.targets || [], d.focus ? d.focus.id : null);
       ui.showControls();
-      setBeltLive(true);           // свой ход — пояс активен
+      setBeltLive(true);
+    } else if (d.waiting) {        // ходит союзник — ждём своего соперника
+      setOpponentVisible(false);   // картинка второго соперника скрывается
+      ui.showWait();
+      setBeltLive(false);
+    } else {                       // ходит враг — смотрим на него
+      applyFocus(d.focus);
+      ui.showWaitTimer();
+      setBeltLive(false);
     }
   });
 
   battle.addEventListener('timer', (e) => ui.setTimer(e.detail.timeLeft));
 
+  battle.addEventListener('rosterUpdate', (e) => {
+    if (e.detail.roster) ui.setRoster(e.detail.roster);
+  });
+
   battle.addEventListener('resolve', async (e) => {
+    const d = e.detail;
     setBeltLive(false);            // ход разыгрывается — пояс блокируется
-    if (battle.kind === 'pvp') ui.showWaitTimer();
-    else ui.hideControls(false);
-    for (const side of e.detail.passed || []) {
-      ui.log(`<b>${esc(e.detail.sides[side].name)}</b> пропускает ход`);
+    ui.showWaitTimer();
+    if (d.roster) ui.setRoster(d.roster);
+    if (d.focus) applyFocus(d.focus);
+    for (const side of d.passed || []) {
+      const nm = d.sides[side] ? d.sides[side].name : '';
+      ui.log(`<b>${esc(nm)}</b> пропускает ход`);
     }
-    for (const s of e.detail.strikes) {
-      await playStrike(s, e.detail.sides);
+    for (const s of d.strikes) {
+      if (s.offscreen) {           // удар между другими бойцами — только в журнал
+        ui.log(offscreenLog(s));
+        continue;
+      }
+      await playStrike(s, d.sides);
     }
     battle.finishTurn();
   });
@@ -907,6 +937,12 @@ binfoEl.addEventListener('click', (e) => {
 
 const RESULT_LABELS = { 1: 'победа', 2: 'поражение', 3: 'ничья', 4: 'побег', 5: 'таймаут' };
 
+/** Вмешаться в идущий бой #id на сторону side — войти как в свой бой. */
+function intervene(id, side) {
+  closeBattleInfo();
+  enterBattle({ starter: () => ServerBattle.join(id, side) });
+}
+
 async function openBattleInfo(id) {
   binfoTitle.textContent = `Бой #${id}`;
   binfoBody.innerHTML = '<div class="bi-empty">Загрузка…</div>';
@@ -940,13 +976,24 @@ async function renderBattleInfo(id) {
         ${bar(p.hp, p.maxHp, 'bi-hp')}
         ${bar(p.mp, p.maxMp, 'bi-mp')}
       </div>`;
+    // вмешаться можно, если бой это разрешает и сам игрок сейчас не в бою
+    const canJoin = d.allowJoin && mode !== 'battle' && online;
+    const joinBar = canJoin ? `
+      <div class="bi-join">
+        <span>Вмешаться:</span>
+        <button class="bi-join-btn" data-side="left">за 1ю команду</button>
+        <button class="bi-join-btn" data-side="right">за 2ю команду</button>
+      </div>` : '';
     binfoBody.innerHTML = `
       <div class="bi-teams">
         <div class="bi-team"><div class="bi-team-title">1я команда</div>
           ${d.teams.left.map(member).join('')}</div>
         <div class="bi-team"><div class="bi-team-title">2я команда</div>
           ${d.teams.right.map(member).join('')}</div>
-      </div>`;
+      </div>${joinBar}`;
+    for (const btn of binfoBody.querySelectorAll('.bi-join-btn')) {
+      btn.addEventListener('click', () => intervene(id, btn.dataset.side));
+    }
     // живой бой — обновляем картину раз в 2 секунды
     if (!binfoTimer) {
       binfoTimer = setInterval(() => {
@@ -1127,6 +1174,30 @@ function showHP(side, baseHp, maxHp) {
     : Math.min(maxHp, Math.max(1, baseHp + elixirHp[side]));
   ui.setHP(side, hp, maxHp);
 }
+
+/** Показать/скрыть 3D-модель соперника (на ожидании она прячется). */
+function setOpponentVisible(v) {
+  if (fighters.right && fighters.right.root) fighters.right.root.visible = v;
+}
+
+/** Сфокусировать соперника: имя/уровень в шапке, HP, и показать модель. */
+function applyFocus(focus) {
+  if (!focus) return;
+  // тот же соперник (липкий фокус с сервера) — не пересобираем шапку, только HP
+  if (focus.id == null || focus.id !== currentFocusId) {
+    currentFocusId = focus.id ?? null;
+    ui.setOpponent(focus);
+  }
+  if (focus.maxHp) showHP('right', focus.hp, focus.maxHp);
+  setOpponentVisible(true);
+}
+
+const offscreenLog = (s) => {
+  const a = `<b>${esc(s.attackerName)}</b>`, t = `<b>${esc(s.defenderName)}</b>`;
+  if (s.dodged) return `${t} уворачивается от удара ${a}`;
+  if (s.blocked) return `${t} блокирует удар ${a} — ${s.damage}`;
+  return `${a} бьёт ${t}${s.crit ? ' (крит)' : ''} — ${s.damage}`;
+};
 
 /** Сбросить эликсир-эффекты и заряды к началу боя. */
 function resetElixirBattle() {

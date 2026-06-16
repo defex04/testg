@@ -94,6 +94,7 @@ export class BattleUI {
     const wheel = document.createElement('div');
     wheel.className = 'strike-wheel';
     wheel.innerHTML = `
+      <div class="sw-targets hidden" title="Выбрать цель"></div>
       <div class="sw-row sw-attack"><span class="sw-tag" title="Удар">${SWORD_ICON}</span><div class="sw-btns"></div></div>
       <div class="sw-row sw-block"><span class="sw-tag" title="Блок">${SHIELD_ICON}</span><div class="sw-btns"></div></div>
       <button class="sw-skip" type="button" title="Не бить в этот ход (выбранный блок остаётся)">Пропустить ход</button>
@@ -177,6 +178,10 @@ export class BattleUI {
     this._skipBtn = wheel.querySelector('.sw-skip');
     this._skipBtn.addEventListener('click', () => this._skip());
 
+    // выбор цели (NvN): по умолчанию — текущий сфокусированный соперник
+    this._targetRow = wheel.querySelector('.sw-targets');
+    this.target = null;
+
     // --- вкладка «Участники боя»: составы команд ---
     this._members = {};
     for (const side of ['left', 'right']) {
@@ -196,13 +201,67 @@ export class BattleUI {
     if (this._locked) return;
     this._locked = true; // защита от двойного клика до hideControls()
     btn.classList.add('chosen');
-    this.onStrike({ attack: zoneId, block: this.block });
+    this.onStrike({ attack: zoneId, block: this.block, target: this.target });
   }
 
   _skip() {
     if (this._locked) return;
     this._locked = true;
-    this.onStrike({ attack: null, block: this.block, pass: true });
+    this.onStrike({ attack: null, block: this.block, pass: true, target: this.target });
+  }
+
+  /**
+   * Список живых врагов для выбора цели. До 1 цели — строка скрыта,
+   * цель всё равно проставляется (для NvN на сервере).
+   */
+  setTargets(list = [], focusId = null) {
+    const targets = list.filter((t) => t && t.alive !== false);
+    this.target = (focusId != null && targets.some((t) => t.id === focusId))
+      ? focusId : (targets[0] ? targets[0].id : null);
+    this._targetRow.innerHTML = '';
+    this._targetRow.classList.toggle('hidden', targets.length <= 1);
+    if (targets.length <= 1) return;
+    for (const t of targets) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'swt';
+      b.dataset.id = t.id;
+      b.textContent = `${esc(t.name)} [${t.level ?? '?'}]`;
+      b.classList.toggle('active', t.id === this.target);
+      b.addEventListener('click', () => {
+        if (this._locked) return;
+        this.target = t.id;
+        for (const x of this._targetRow.children)
+          x.classList.toggle('active', x.dataset.id === String(t.id));
+      });
+      this._targetRow.appendChild(b);
+    }
+  }
+
+  /** Обновить «правую» плашку шапки под текущего сфокусированного соперника. */
+  setOpponent(info) {
+    if (!info) return;
+    const plate = this.headEl.querySelector('.bh-right');
+    if (!plate) return;
+    plate.querySelector('.bh-name').textContent = info.name ?? '';
+    plate.querySelector('.bh-level').textContent = info.level ?? '';
+  }
+
+  /** Составы команд во вкладке «Участники боя» с полосками HP. */
+  setRoster(roster) {
+    if (!roster) return;
+    for (const side of ['left', 'right']) {
+      const host = this.teamEls[side];
+      host.innerHTML = '';
+      for (const f of roster[side] || []) {
+        const pct = f.maxHp ? Math.max(0, (f.hp / f.maxHp) * 100) : 0;
+        const m = document.createElement('div');
+        m.className = 'member' + (f.alive === false || f.hp <= 0 ? ' dead' : '');
+        m.innerHTML = `<div class="m-line">${esc(f.name)} <span class="m-lvl">[${f.level ?? '?'}]</span></div>
+          <div class="m-bar"><div class="m-fill" style="width:${pct}%"></div></div>`;
+        host.appendChild(m);
+      }
+    }
   }
 
   _selectBlock(id) {
@@ -275,6 +334,14 @@ export class BattleUI {
     this._setLocked(true, null);
     this.wheel.classList.add('off');
     this.waitEl.classList.add('hidden');
+  }
+
+  /** Ожидание соперника (NvN): плашка с текстом, штурвал скрыт. */
+  showWait(text = '⏳ Ожидание соперника…') {
+    this._setLocked(true, null);
+    this.wheel.classList.add('off');
+    this.waitEl.textContent = text;
+    this.waitEl.classList.remove('hidden');
   }
 
   /** Всплывающая цифра урона в экранной точке {x, y} (координаты сцены). */

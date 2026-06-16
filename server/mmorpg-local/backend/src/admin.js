@@ -3,7 +3,7 @@ import { randomUUID } from 'crypto';
 import fs from 'fs';
 import { game, auth, redis, tx, adminPg, clearConfigCache } from './db.js';
 import { addCurrency, wallet, CUR } from './economy.js';
-import { adminAbort } from './battle/manager.js';
+import { adminAbort, adminSetIntervention } from './battle/manager.js';
 import { cfg } from './config.js';
 
 /**
@@ -339,7 +339,7 @@ export function adminRoutes(app) {
     const status = Number(req.query.status) || null;
     const type = Number(req.query.type) || null;
     const { rows } = await game.query(
-      `SELECT DISTINCT b.id, b.type, b.status, b.winner_side, b.meta,
+      `SELECT DISTINCT b.id, b.type, b.status, b.winner_side, b.meta, b.intervention,
               l.name AS location, b.started_at, b.ended_at,
               (SELECT count(*) FROM battle_participants x
                 WHERE x.battle_id = b.id) AS members,
@@ -355,6 +355,16 @@ export function adminRoutes(app) {
           AND ($3::int IS NULL OR b.type = $3)
         ORDER BY b.id DESC LIMIT 100`, [q, status, type]);
     res.json(rows);
+  });
+
+  // живой переключатель «можно/нельзя вмешаться» для конкретного боя
+  app.post('/admin/api/battles/:id/intervention', guard, async (req, res) => {
+    const id = Number(req.params.id);
+    const open = !!(req.body || {}).open;
+    const done = await adminSetIntervention(id, open);
+    if (!done) throw bad(404, 'battle_not_found');
+    await audit('battle.intervention', 4, id, { open });
+    res.json({ ok: true, intervention: open ? 'open' : 'closed' });
   });
 
   app.get('/admin/api/battles/:id', guard, async (req, res) => {
@@ -620,7 +630,29 @@ export function adminRoutes(app) {
 
   app.get('/admin/api/locations', guard, async (req, res) => {
     res.json((await game.query(
-      `SELECT id, name, type, min_level FROM locations ORDER BY id`)).rows);
+      `SELECT id, name, type, min_level, flags FROM locations ORDER BY id`)).rows);
+  });
+
+  // настройки боёв на уровне локации: вмешательство / выход / разрешён ли PvP.
+  // null = «как глобальный дефолт»; пишем в locations.flags (static — adminPg).
+  app.post('/admin/api/locations/:id/flags', guard, async (req, res) => {
+    const id = Number(req.params.id);
+    const b = req.body || {};
+    const loc = (await adminPg().query(
+      `SELECT flags FROM locations WHERE id = $1`, [id])).rows[0];
+    if (!loc) throw bad(404, 'not_found');
+    const flags = { ...(loc.flags || {}) };
+    for (const k of ['intervention', 'allow_leave', 'pvp_enabled']) {
+      if (k in b) {
+        if (b[k] === null) delete flags[k];        // вернуть к глобальному дефолту
+        else flags[k] = !!b[k];
+      }
+    }
+    await adminPg().query(
+      `UPDATE locations SET flags = $2, version = version + 1 WHERE id = $1`,
+      [id, JSON.stringify(flags)]);
+    await audit('location.flags', 7, id, flags);
+    res.json({ ok: true, flags });
   });
 
   app.get('/admin/api/audit', guard, async (req, res) => {

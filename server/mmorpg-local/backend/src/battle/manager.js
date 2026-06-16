@@ -2,7 +2,7 @@ import { randomUUID } from 'crypto';
 import { game, tx, redis, gameConfig } from '../db.js';
 import { Engine } from './engine.js';
 import { addCurrency, CUR } from '../economy.js';
-import { addExp, combatProfileFor } from '../characters.js';
+import { addExp, combatProfileFor, getCharacter } from '../characters.js';
 import { onHuntVictory } from '../quests.js';
 import { sendSystemChat } from '../chat.js';
 
@@ -10,43 +10,130 @@ import { sendSystemChat } from '../chat.js';
  * Бои живут в памяти процесса; снапшот хода — в Redis battle:{id}:state;
  * в PostgreSQL — battles/battle_participants (старт, итоги) и battle_rounds.
  *
- * Виды боя: охота (игрок против ИИ) и дуэль PvP (игрок против игрока).
- * Внутри движка стороны абсолютные (left = инициатор), но каждому игроку
- * события отправляются «зеркально» — клиент всегда видит себя слева.
+ * Стороны — команды бойцов (NvN); 1×1 (охота, дуэль) — частный случай.
+ * Движок ведёт абсолютные стороны (left = инициатор), но каждому игроку
+ * события отправляются «зеркально»: своя команда — слева, и показывается
+ * один «сфокусированный» соперник (тот, кто сейчас ходит против него,
+ * либо его текущая цель). Пока ход у союзника — клиент видит плашку
+ * «ожидание соперника» и прячет правую модель.
  *
- * Правила выхода: обрыв связи и F5 бой НЕ прерывают (ходы игрока проходят
- * пропуском, при реконнекте бой возвращается). Покинуть идущий бой можно
- * только Эликсиром побега; админ может прервать бой из панели.
+ * Вмешательство (joinBattle) разрешено, если у боя intervention = open
+ * (флаг считается из конфига + locations.flags при старте, админ может
+ * переключить вживую).
  */
 const live = new Map();    // battleId(Number) -> b
 const byChar = new Map();  // charId(String) -> battleId
 const noop = () => {};
-// BIGINT из pg приходит строкой, из сессии/роутов — числом; ключ всегда строка
 const cid = (v) => String(v);
 
 const snapKey = (id) => `battle:${id}:state`;
 const err = (msg, status) => Object.assign(new Error(msg), { status });
-
-// b.players: { left, right } — у охоты right = null (ИИ).
-// Игрок: { charId, send, attached, totalDamage, turnDone }
-const player = (charId, send) =>
-  ({ charId: cid(charId), send: send || noop, attached: true,
-     totalDamage: 0, turnDone: false });
-
 const other = (s) => (s === 'left' ? 'right' : 'left');
-const humanSides = (b) => ['left', 'right'].filter((s) => b.players[s]);
-const sideOf = (b, charId) =>
-  humanSides(b).find((s) => b.players[s].charId === cid(charId));
 
-// --- зеркалирование: зритель v видит свою сторону как left ---
-const viewSide = (s, v) => (v === 'left' ? s : other(s));
-const pubSide = (s) =>
-  ({ name: s.name, level: s.level, hp: s.hp, maxHp: s.maxHp });
-const sidesFor = (e, v) =>
-  ({ left: pubSide(e.sides[v]), right: pubSide(e.sides[other(v)]) });
+// --- сетевой слой игрока поверх бойца движка ---
+function makeBattle(id, kind, locationId, policy, engine) {
+  return { id, kind, locationId, engine, policy,
+    players: new Map(), timer: null, finishTimer: null, turnEndsAt: 0,
+    step: 0 };   // токен sub-turn: отложенные колбэки устаревают при смене (анти-двойной-advance)
+}
+function addPlayer(b, charId, send, side) {
+  b.players.set(cid(charId),
+    { charId: cid(charId), side, send: send || noop, attached: true,
+      totalDamage: 0, turnDone: false });
+  return b.players.get(cid(charId));
+}
+const playerList = (b) => [...b.players.values()];
+const attachedList = (b) => playerList(b).filter((p) => p.attached);
 
 function broadcast(b, payloadFor) {
-  for (const s of humanSides(b)) b.players[s].send(payloadFor(s));
+  for (const p of b.players.values()) p.send(payloadFor(p));
+}
+
+// --- зеркалирование: команда зрителя как left ---
+const pub = (f) => f && ({ id: f.id, name: f.name, level: f.level,
+  hp: Math.round(f.hp), maxHp: f.maxHp, alive: f.alive });
+const rosterFor = (b, vSide) => ({
+  left:  b.engine.teams[vSide].map((id) => pub(b.engine.fighter(id))),
+  right: b.engine.teams[other(vSide)].map((id) => pub(b.engine.fighter(id))),
+});
+/** Любой враг для «правой» модели (живой в приоритете), иначе первый из команды. */
+function anyEnemy(b, vSide) {
+  const e = b.engine;
+  return e.aliveOf(other(vSide))[0] || e.fighter(e.teams[other(vSide)][0]) || null;
+}
+function sidesFor(b, p, focus) {
+  const me = b.engine.fighter(p.charId);
+  const right = focus || anyEnemy(b, me.side);
+  return { left: pub(me), right: pub(right) };
+}
+
+/** turnStart для зрителя: кто активен, можно ли ходить, на кого смотреть. */
+function turnStartFor(b, p) {
+  const e = b.engine;
+  const me = e.fighter(p.charId);
+  const vSide = me.side;
+  const af = e.currentActor();
+  let canAct = false, waiting = false, focus = null;
+  if (af) {
+    if (af.id === me.id) {            // мой ход — смотрю на своего «липкого» соперника
+      canAct = true; focus = e.opponentOf(me.id) || e.enemiesOf(me.id)[0] || null;
+    } else if (af.side !== vSide) { focus = af; }  // ходит враг — смотрим на него
+    else { waiting = true; }                        // ходит союзник — ждём соперника
+  }
+  return {
+    type: 'turnStart', turn: e.turn,
+    timeLeft: Math.max(0, Math.ceil((b.turnEndsAt - Date.now()) / 1000)),
+    canAct, waiting,
+    active: af ? (af.side === vSide ? 'left' : 'right') : 'left',
+    focus: focus ? pub(focus) : null,
+    targets: e.enemiesOf(me.id).map(pub),   // живые враги — для выбора цели
+    roster: rosterFor(b, vSide),
+  };
+}
+
+/** resolve для зрителя: удары переведены в его систему (он — left, фокус — right). */
+function resolveFor(b, p, r) {
+  const e = b.engine;
+  const me = e.fighter(p.charId);
+  const vSide = me.side;
+  let focus = null;
+  const strikes = r.strikes.map((s) => {
+    const att = e.fighter(s.attackerId), def = e.fighter(s.defenderId);
+    const meIsAtt = att.id === me.id, meIsDef = def.id === me.id;
+    if (meIsAtt || meIsDef) {
+      focus = meIsAtt ? def : att;     // в кадре — мой соперник по этому удару
+      return { ...s, attacker: meIsAtt ? 'left' : 'right',
+        defender: meIsAtt ? 'right' : 'left',
+        attackerName: att.name, defenderName: def.name };
+    }
+    // удар между другими бойцами — только в журнал, без 3D
+    return { ...s, offscreen: true,
+      attacker: att.side === vSide ? 'left' : 'right',
+      defender: def.side === vSide ? 'left' : 'right',
+      attackerName: att.name, defenderName: def.name };
+  });
+  const passed = r.passed.map((id) => e.fighter(id).side === vSide ? 'left' : 'right');
+  return { type: 'resolve', turn: r.turn, strikes, passed,
+    sides: sidesFor(b, p, focus), focus: focus ? pub(focus) : null,
+    roster: rosterFor(b, vSide) };
+}
+
+function startView(b, p) {
+  const me = b.engine.fighter(p.charId);
+  const enemy = anyEnemy(b, me.side);
+  return { left: pub(me), right: pub(enemy),
+    roster: rosterFor(b, me.side), focus: pub(enemy),
+    policy: { intervention: b.policy.intervention } };
+}
+
+/** Настройки выбора цели (липкость/«холод») из конфига; есть дефолты. */
+const numCfg = (v, d) => (v == null || Number.isNaN(Number(v)) ? d : Number(v));
+async function targetCfg() {
+  return {
+    switchChance: numCfg(await gameConfig('battle.target.switch_chance'), 0.25),
+    coldTurns:    numCfg(await gameConfig('battle.target.cold_turns'), 2),
+    coldWeight:   numCfg(await gameConfig('battle.target.cold_weight'), 1.5),
+  };
 }
 
 /** Инициатива PvP: ловкость персонажа (agi), иначе уровень. */
@@ -56,19 +143,18 @@ async function initiativeFor(charId, level) {
   return Number(row?.agi) || Number(level) || 0;
 }
 
-/** turnStart для зрителя v: активная сторона и canAct (свой ход = left). */
-function turnStartPayload(b, v) {
-  const active = b.engine.activeSide;
-  const mirrored = active ? viewSide(active, v) : 'left';
-  return {
-    turn: b.engine.turn,
-    timeLeft: Math.max(0, Math.ceil((b.turnEndsAt - Date.now()) / 1000)),
-    active: mirrored,
-    canAct: mirrored === 'left',
-  };
+/** Политика вмешательства/выхода: приоритет локация → глобальный дефолт по виду боя. */
+async function resolvePolicy(kind, locationId) {
+  const def = (await gameConfig('battle.intervention.default')) || {};
+  const maxPerSide = Number(await gameConfig('battle.max_per_side')) || 10;
+  const loc = (await game.query(
+    `SELECT flags FROM locations WHERE id = $1`, [locationId])).rows[0];
+  const flags = (loc && loc.flags) || {};
+  const open = typeof flags.intervention === 'boolean' ? flags.intervention : !!def[kind];
+  const allowLeave = typeof flags.allow_leave === 'boolean' ? flags.allow_leave : false;
+  return { intervention: open ? 'open' : 'closed', allowLeave, maxPerSide };
 }
 
-/** При старте процесса: зависших «идущих» боёв быть не должно. */
 export async function battleBoot() {
   const r = await game.query(
     `UPDATE battles SET status = 4, ended_at = now() WHERE status IN (1, 2)`);
@@ -77,7 +163,8 @@ export async function battleBoot() {
 
 async function snapshot(id, b) {
   await redis.set(snapKey(id), JSON.stringify({
-    turn: b.engine.turn, phase: b.engine.phase, sides: b.engine.sides,
+    turn: b.engine.turn, phase: b.engine.phase,
+    teams: b.engine.teams, fighters: [...b.engine.fighters.values()],
   }), { EX: 3600 });
 }
 
@@ -104,6 +191,9 @@ async function logRounds(battleId, turn, strikes) {
   }
 }
 
+// ============================================================
+// Создание боёв
+// ============================================================
 export async function startHunt(ch, send) {
   if (byChar.has(cid(ch.id))) throw err('already_in_battle', 409);
 
@@ -115,41 +205,37 @@ export async function startHunt(ch, send) {
 
   const start = await gameConfig('character.start');
   const turnTime = Number(await gameConfig('battle.turn_time')) || 20;
+  const policy = await resolvePolicy('hunt', ch.location_id);
 
   const ins = await game.query(
     `INSERT INTO battles (type, location_id, status, node_id, max_per_side,
         intervention, allow_leave, started_at, meta)
-     VALUES (1, $1, 2, 'local', 1, 2, FALSE, now(), $2) RETURNING id`,
-    [ch.location_id, JSON.stringify({ kind: 'hunt', npc: npc.id, npcName: npc.name })]);
-  // BIGINT приходит из pg строкой; ключ в live должен совпадать
-  // с Number(battleId) из админки (adminAbort)
+     VALUES (1, $1, 2, 'local', $2, $3, $4, now(), $5) RETURNING id`,
+    [ch.location_id, policy.maxPerSide, policy.intervention === 'open' ? 1 : 2,
+     policy.allowLeave, JSON.stringify({ kind: 'hunt', npc: npc.id, npcName: npc.name })]);
   const battleId = Number(ins.rows[0].id);
   await game.query(
     `INSERT INTO battle_participants (battle_id, character_id, side, status)
      VALUES ($1, $2, 1, 1)`, [battleId, ch.id]);
 
   const engine = new Engine({
-    // профиль с бонусами экипировки: надетые вещи влияют на hp/урон/крит/уворот
-    left:  { name: ch.name, level: ch.level, isAI: false,
-             ...(await combatProfileFor(ch.id, start)) },
-    right: { name: npc.name, level: npc.level, isAI: true, ...npc.stats },
-  }, { turnTime, mode: 'hunt' });
+    left:  [{ id: ch.id, charId: ch.id, name: ch.name, level: ch.level,
+              isAI: false, ...(await combatProfileFor(ch.id, start)) }],
+    right: [{ name: npc.name, level: npc.level, isAI: true, ...npc.stats }],
+  }, { turnTime, target: await targetCfg() });
 
-  const b = { id: battleId, kind: 'hunt', engine,
-    players: { left: player(ch.id, send), right: null },
-    timer: null, finishTimer: null, turnEndsAt: 0 };
+  const b = makeBattle(battleId, 'hunt', ch.location_id, policy, engine);
+  const p = addPlayer(b, ch.id, send, 'left');
   live.set(battleId, b);
   byChar.set(cid(ch.id), battleId);
   await snapshot(battleId, b);
   console.log(`Бой ${battleId}: старт охоты, char=${ch.id} (${ch.name})`);
-  // объявление в чат локации; клиент делает «Бой #N» ссылкой на окно боя
   sendSystemChat(ch.location_id,
     `⚔ Бой #${battleId}: ${ch.name} против «${npc.name}» — начался!`)
     .catch(console.error);
 
-  b.players.left.send(
-    { type: 'battleStart', battleId, kind: 'hunt', ...sidesFor(engine, 'left') });
-  beginTurn(b);
+  p.send({ type: 'battleStart', battleId, kind: 'hunt', ...startView(b, p) });
+  beginRound(b);
   return battleId;
 }
 
@@ -162,12 +248,14 @@ export async function startDuel(att, def, sendAtt, sendDef) {
 
   const start = await gameConfig('character.start');
   const turnTime = Number(await gameConfig('battle.turn_time')) || 20;
+  const policy = await resolvePolicy('pvp', att.location_id);
 
   const ins = await game.query(
     `INSERT INTO battles (type, location_id, status, node_id, max_per_side,
         intervention, allow_leave, started_at, meta)
-     VALUES (2, $1, 2, 'local', 1, 2, FALSE, now(), $2) RETURNING id`,
-    [att.location_id, JSON.stringify({ kind: 'pvp' })]);
+     VALUES (2, $1, 2, 'local', $2, $3, $4, now(), $5) RETURNING id`,
+    [att.location_id, policy.maxPerSide, policy.intervention === 'open' ? 1 : 2,
+     policy.allowLeave, JSON.stringify({ kind: 'pvp' })]);
   const battleId = Number(ins.rows[0].id);
   await game.query(
     `INSERT INTO battle_participants (battle_id, character_id, side, status)
@@ -178,64 +266,106 @@ export async function startDuel(att, def, sendAtt, sendDef) {
     initiativeFor(def.id, def.level),
   ]);
   const engine = new Engine({
-    left:  { name: att.name, level: att.level, isAI: false, initiative: attIni,
-             ...(await combatProfileFor(att.id, start)) },
-    right: { name: def.name, level: def.level, isAI: false, initiative: defIni,
-             ...(await combatProfileFor(def.id, start)) },
-  }, { turnTime, mode: 'pvp' });
+    left:  [{ id: att.id, charId: att.id, name: att.name, level: att.level,
+              isAI: false, initiative: attIni, ...(await combatProfileFor(att.id, start)) }],
+    right: [{ id: def.id, charId: def.id, name: def.name, level: def.level,
+              isAI: false, initiative: defIni, ...(await combatProfileFor(def.id, start)) }],
+  }, { turnTime, target: await targetCfg() });
 
-  const b = { id: battleId, kind: 'pvp', engine,
-    players: { left: player(att.id, sendAtt), right: player(def.id, sendDef) },
-    timer: null, finishTimer: null, turnEndsAt: 0 };
+  const b = makeBattle(battleId, 'pvp', att.location_id, policy, engine);
+  addPlayer(b, att.id, sendAtt, 'left');
+  addPlayer(b, def.id, sendDef, 'right');
   live.set(battleId, b);
-  for (const s of humanSides(b)) byChar.set(b.players[s].charId, battleId);
+  byChar.set(cid(att.id), battleId);
+  byChar.set(cid(def.id), battleId);
   await snapshot(battleId, b);
   console.log(`Бой ${battleId}: PvP, ${att.name} (${att.id}) напал на ${def.name} (${def.id})`);
   sendSystemChat(att.location_id,
     `⚔ Бой #${battleId}: ${att.name} против ${def.name} — начался!`)
     .catch(console.error);
 
-  broadcast(b, (s) =>
-    ({ type: 'battleStart', battleId, kind: 'pvp', ...sidesFor(engine, s) }));
-  beginTurn(b);
+  broadcast(b, (p) => ({ type: 'battleStart', battleId, kind: 'pvp', ...startView(b, p) }));
+  beginRound(b);
   return battleId;
 }
 
-/** Снимок идущего боя для battleResume / GET /api/battle/current. */
+/** Вмешательство: войти в идущий бой на сторону side ('left' | 'right'). */
+export async function joinBattle(charId, battleId, side, send) {
+  if (byChar.has(cid(charId))) throw err('already_in_battle', 409);
+  const b = live.get(Number(battleId));
+  if (!b || b.engine.phase === 'ended') throw err('battle_not_found', 404);
+  if (b.policy.intervention !== 'open') throw err('intervention_closed', 403);
+  if (side !== 'left' && side !== 'right') throw err('bad_side', 400);
+
+  const ch = await getCharacter(charId);
+  if (ch.location_id !== b.locationId) throw err('not_same_location', 400);
+  if (b.engine.aliveOf(side).length >= b.policy.maxPerSide) throw err('side_full', 403);
+
+  const start = await gameConfig('character.start');
+  const initiative = await initiativeFor(ch.id, ch.level);
+  b.engine.addFighter(side, { id: ch.id, charId: ch.id, name: ch.name, level: ch.level,
+    isAI: false, initiative, ...(await combatProfileFor(ch.id, start)) });
+  const p = addPlayer(b, ch.id, send, side);
+  byChar.set(cid(ch.id), battleId);
+  await game.query(
+    `INSERT INTO battle_participants (battle_id, character_id, side, status, joined_round)
+     VALUES ($1, $2, $3, 1, $4)
+     ON CONFLICT (battle_id, character_id) DO NOTHING`,
+    [b.id, ch.id, side === 'left' ? 1 : 2, b.engine.turn]);
+  await snapshot(b.id, b);
+  console.log(`Бой ${b.id}: вмешательство char=${ch.id} (${ch.name}) на сторону ${side}`);
+  sendSystemChat(b.locationId,
+    `⚔ Бой #${b.id}: ${ch.name} вмешивается в бой!`).catch(console.error);
+
+  p.send({ type: 'battleStart', battleId: b.id, kind: b.kind, ...startView(b, p) });
+  // остальным — обновлённый состав; активный ход не трогаем
+  for (const q of b.players.values()) {
+    if (q !== p) q.send({ type: 'rosterUpdate',
+      roster: rosterFor(b, b.engine.fighter(q.charId).side) });
+  }
+  return b.id;
+}
+
+// ============================================================
+// Резюм / реконнект
+// ============================================================
 export function resumePayload(charId) {
   const battleId = byChar.get(cid(charId));
   if (!battleId) return null;
   const b = live.get(battleId);
-  const side = sideOf(b, charId);
+  if (!b) return null;
+  const me = b.engine.fighter(cid(charId));
+  if (!me) return null;
   const payload = {
     type: 'battleResume', battleId, kind: b.kind,
-    sides: sidesFor(b.engine, side),
+    sides: sidesFor(b, { charId: cid(charId) }),
+    roster: rosterFor(b, me.side),
     turn: b.engine.turn, phase: b.engine.phase,
     timeLeft: Math.max(0, Math.ceil((b.turnEndsAt - Date.now()) / 1000)),
-    moveSubmitted: !!b.engine.moves[side],
+    policy: { intervention: b.policy.intervention },
+    moveSubmitted: b.engine.acted.has(me.id),
   };
-  if (b.kind === 'pvp' && b.engine.phase === 'choose') {
-    Object.assign(payload, turnStartPayload(b, side));
+  if (b.engine.phase === 'choose') {
+    Object.assign(payload, turnStartFor(b, { charId: cid(charId) }));
+    payload.type = 'battleResume';
   }
   return payload;
 }
 
-/** Реконнект: вернуть бой и заново привязать сокет. */
 export function attach(charId, send) {
   const payload = resumePayload(charId);
   if (!payload) return null;
   const b = live.get(payload.battleId);
-  const p = b.players[sideOf(b, charId)];
+  const p = b.players.get(cid(charId));
+  if (!p) return null;
   p.send = send;
   p.attached = true;
   console.log(`Бой ${b.id}: реконнект char=${charId}, фаза=${b.engine.phase}`);
-  // реконнект посреди фазы resolving: не ждать страховочные 20 секунд,
-  // если других игроков, доигрывающих анимации, нет
-  const othersAnimating = humanSides(b).some((s) =>
-    b.players[s] !== p && b.players[s].attached && !b.players[s].turnDone);
+  const othersAnimating = attachedList(b).some((x) => x !== p && !x.turnDone);
   if (b.engine.phase === 'resolving' && !othersAnimating) {
     clearTimeout(b.finishTimer);
-    b.finishTimer = setTimeout(() => advanceTurn(b), 1500);
+    const step = b.step;
+    b.finishTimer = setTimeout(() => { if (b.step === step) advance(b); }, 1500);
   }
   return payload;
 }
@@ -244,175 +374,142 @@ export function detach(charId) {
   const battleId = byChar.get(cid(charId));
   if (!battleId) return;
   const b = live.get(battleId);
-  const p = b.players[sideOf(b, charId)];
-  p.send = noop;        // бой живёт дальше без зрителя
+  const p = b && b.players.get(cid(charId));
+  if (!p) return;
+  p.send = noop;
   p.attached = false;
   console.log(`Бой ${battleId}: зритель отключился (char=${charId}), бой продолжается`);
 }
 
-function startTurnTimer(b, onTimeout) {
+// ============================================================
+// Конвейер хода (единый sub-turn для всех видов боя)
+// ============================================================
+function startTurnTimer(b) {
+  const step = b.step;
   let left = Math.max(0, Math.ceil((b.turnEndsAt - Date.now()) / 1000));
   clearInterval(b.timer);
   b.timer = setInterval(() => {
+    if (b.step !== step) { clearInterval(b.timer); return; }   // sub-turn сменился
     left -= 1;
     broadcast(b, () => ({ type: 'timer', timeLeft: left }));
-    if (left <= 0) onTimeout(b);
+    if (left <= 0) { clearInterval(b.timer); onTurnTimeout(b); }
   }, 1000);
 }
 
-function broadcastTurnStart(b, t) {
-  b.turnEndsAt = Date.now() + b.engine.turnTime * 1000;
-  broadcast(b, (v) => ({ type: 'turnStart', ...t, ...turnStartPayload(b, v) }));
-  startTurnTimer(b, (bt) => {
-    if (bt.kind === 'pvp') {
-      bt.engine.fillTimeoutActive();
-      resolvePvPMove(bt, bt.engine.activeSide);
-    } else {
-      bt.engine.fillTimeouts();
-      maybeResolve(bt);
-    }
-  });
+function onTurnTimeout(b) {
+  if (b.engine.phase !== 'choose') return;
+  const af = b.engine.currentActor();
+  if (!af) return;
+  b.engine.submit(af.id, af.isAI
+    ? b.engine.aiMove(af.id)
+    : { attack: null, block: null, pass: true });
+  resolveCurrent(b);
 }
 
-function beginTurn(b) {
-  if (b.kind === 'pvp') return beginPvPRound(b);
-  const t = b.engine.startTurn();
-  for (const s of humanSides(b)) b.players[s].turnDone = false;
-  broadcastTurnStart(b, t);
-
-  if (!b.players.right) {           // противник — ИИ (охота)
+function enterActor(b) {
+  b.step += 1;                       // новый sub-turn → старые таймеры устаревают
+  const step = b.step;
+  for (const p of b.players.values()) p.turnDone = false;
+  b.turnEndsAt = Date.now() + b.engine.turnTime * 1000;
+  const af = b.engine.currentActor();
+  // живому игроку заранее закрепляем «липкого» соперника — фокус не прыгает,
+  // и удар без явной цели придётся ровно по тому, кого показали (см. submit)
+  if (af && !af.isAI) b.engine.chooseOpponent(af.id);
+  broadcast(b, (p) => turnStartFor(b, p));
+  startTurnTimer(b);
+  if (af && af.isAI) {
     setTimeout(() => {
-      if (b.engine.phase === 'choose' && !b.engine.moves.right) {
-        b.engine.submit('right', b.engine.randomMove());
-        maybeResolve(b);
+      if (b.step !== step) return;   // ход уже сменился — не дублируем
+      if (b.engine.phase === 'choose' && b.engine.currentActorId() === af.id) {
+        b.engine.submit(af.id, b.engine.aiMove(af.id));
+        resolveCurrent(b);
       }
     }, 400 + Math.random() * 900);
   }
 }
 
-function beginPvPRound(b) {
+function beginRound(b) {
   const t = b.engine.startRound();
-  for (const s of humanSides(b)) b.players[s].turnDone = false;
-  broadcastTurnStart(b, t);
-}
-
-function beginPvPSubTurn(b) {
-  const t = b.engine.startSubTurn();
-  for (const s of humanSides(b)) b.players[s].turnDone = false;
-  broadcastTurnStart(b, t);
+  if (!t) {
+    if (b.engine.finished()) endBattle(b).catch(console.error);
+    return;
+  }
+  enterActor(b);
 }
 
 export function submitMove(charId, move) {
   const b = live.get(byChar.get(cid(charId)));
   if (!b) return false;
-  const side = sideOf(b, charId);
-  if (!side) return false;
-  const ok = b.engine.submit(side, {
-    attack: move.attack, block: move.block ?? null, pass: !!move.pass });
+  if (!b.engine.fighter(cid(charId))) return false;
+  const ok = b.engine.submit(cid(charId), {
+    attack: move.attack, block: move.block ?? null,
+    target: move.target ?? null, pass: !!move.pass });
   if (!ok) return false;
-  if (b.kind === 'pvp') resolvePvPMove(b, side);
-  else maybeResolve(b);
+  resolveCurrent(b);
   return true;
 }
 
-async function resolvePvPMove(b, side) {
+async function resolveCurrent(b) {
   if (b.engine.phase !== 'choose') return;
   clearInterval(b.timer);
   const r = b.engine.resolveActive();
   for (const s of r.strikes) {
-    s.actorId  = b.players[s.attacker] ? b.players[s.attacker].charId : null;
-    s.targetId = b.players[s.defender] ? b.players[s.defender].charId : null;
-  }
-  for (const s of humanSides(b)) {
-    b.players[s].totalDamage += r.strikes
-      .filter((st) => st.attacker === s && !st.dodged)
-      .reduce((a, st) => a + st.damage, 0);
-  }
-  b.engine.acted[side] = true;
-  await snapshot(b.id, b);
-  logRounds(b.id, r.turn, r.strikes).catch(console.error);
-  broadcast(b, (v) => ({ type: 'resolve', turn: r.turn,
-    strikes: r.strikes.map((st) => ({ ...st,
-      attacker: viewSide(st.attacker, v), defender: viewSide(st.defender, v) })),
-    passed: r.passed.map((p) => viewSide(p, v)),
-    sides: sidesFor(b.engine, v) }));
-  const anyAttached = humanSides(b).some((s) => b.players[s].attached);
-  b.pvpAfterResolve = () => {
-    if (b.engine.finished()) return void endBattle(b).catch(console.error);
-    const otherSide = other(side);
-    if (!b.engine.acted[otherSide]) return beginPvPSubTurn(b);
-    return beginPvPRound(b);
-  };
-  b.finishTimer = setTimeout(() => advanceTurn(b), anyAttached ? 20000 : 1500);
-}
-
-async function maybeResolve(b) {
-  if (!b.engine.ready || b.engine.phase !== 'choose') return;
-  clearInterval(b.timer);
-  const r = b.engine.resolve();
-  for (const s of r.strikes) {
-    s.actorId  = b.players[s.attacker] ? b.players[s.attacker].charId : null;
-    s.targetId = b.players[s.defender] ? b.players[s.defender].charId : null;
-  }
-  for (const s of humanSides(b)) {
-    b.players[s].totalDamage += r.strikes
-      .filter((st) => st.attacker === s && !st.dodged)
-      .reduce((a, st) => a + st.damage, 0);
+    s.actorId  = b.engine.fighter(s.attackerId)?.charId ?? null;
+    s.targetId = b.engine.fighter(s.defenderId)?.charId ?? null;
+    const ap = s.actorId && b.players.get(cid(s.actorId));
+    if (ap && !s.dodged) ap.totalDamage += s.damage;
   }
   await snapshot(b.id, b);
   logRounds(b.id, r.turn, r.strikes).catch(console.error);
-  broadcast(b, (v) => ({ type: 'resolve', turn: r.turn,
-    strikes: r.strikes.map((st) => ({ ...st,
-      attacker: viewSide(st.attacker, v), defender: viewSide(st.defender, v) })),
-    passed: r.passed.map((p) => viewSide(p, v)),
-    sides: sidesFor(b.engine, v) }));
+  broadcast(b, (p) => resolveFor(b, p, r));
   // клиент проигрывает анимации и шлёт turnDone; страховка — авто.
   // Если все игроки отключены, ждать некого: заочный бой идёт в полном темпе.
-  const anyAttached = humanSides(b).some((s) => b.players[s].attached);
-  b.finishTimer = setTimeout(() => advanceTurn(b), anyAttached ? 20000 : 1500);
+  const anyAttached = attachedList(b).length > 0;
+  const step = b.step;
+  b.finishTimer = setTimeout(() => { if (b.step === step) advance(b); },
+    anyAttached ? 20000 : 1500);
 }
 
 export async function finishTurn(charId) {
   const b = live.get(byChar.get(cid(charId)));
   if (!b || b.engine.phase !== 'resolving') return;
-  const side = sideOf(b, charId);
-  if (side) b.players[side].turnDone = true;
-  // следующий ход — когда все подключённые игроки доиграли анимации
-  if (humanSides(b).some((s) => b.players[s].attached && !b.players[s].turnDone)) return;
-  advanceTurn(b);
+  const p = b.players.get(cid(charId));
+  if (p) p.turnDone = true;
+  if (attachedList(b).some((x) => !x.turnDone)) return;
+  advance(b);
 }
 
-function advanceTurn(b) {
+function advance(b) {
   if (b.engine.phase !== 'resolving') return;
   clearTimeout(b.finishTimer);
-  if (b.kind === 'pvp' && b.pvpAfterResolve) {
-    const next = b.pvpAfterResolve;
-    b.pvpAfterResolve = null;
-    return next();
-  }
   if (b.engine.finished()) return void endBattle(b).catch(console.error);
-  beginTurn(b);
+  const next = b.engine.advance();
+  if (next) enterActor(b);
+  else beginRound(b);
 }
 
+// ============================================================
+// Завершение / прерывание / побег
+// ============================================================
 function dropLive(b) {
   clearInterval(b.timer); clearTimeout(b.finishTimer);
   live.delete(b.id);
-  for (const s of humanSides(b)) byChar.delete(b.players[s].charId);
+  for (const p of b.players.values()) byChar.delete(p.charId);
 }
 
 async function endBattle(b) {
   dropLive(b);
-  const winner = b.engine.winner();
+  b.engine.phase = 'ended';
+  const winner = b.engine.winner();   // абсолютная сторона
   const reward = b.kind === 'hunt' ? await gameConfig('battle.reward.hunt') : null;
 
   await tx(async (c) => {
     await c.query(
       `UPDATE battles SET status = 3, ended_at = now(), winner_side = $2 WHERE id = $1`,
       [b.id, winner === 'left' ? 1 : winner === 'right' ? 2 : null]);
-    for (const s of humanSides(b)) {
-      const p = b.players[s];
-      const me = b.engine.sides[s];
-      const victory = winner === s;
+    for (const p of b.players.values()) {
+      const me = b.engine.fighter(p.charId);
+      const victory = winner === p.side;
       await c.query(
         `UPDATE battle_participants SET status = $3, result = $4, left_round = $5,
             damage_dealt = $6, exp_gained = $7, kills = $8, deaths = $9
@@ -431,67 +528,40 @@ async function endBattle(b) {
     }
   });
   await redis.del(snapKey(b.id));
-  broadcast(b, (v) => ({ type: 'battleEnd',
-    winner: winner ? viewSide(winner, v) : null, victory: winner === v,
-    sides: sidesFor(b.engine, v),
-    reward: winner === v && reward ? reward : null }));
+  broadcast(b, (p) => ({ type: 'battleEnd',
+    winner: winner ? (winner === p.side ? 'left' : 'right') : null,
+    victory: winner === p.side,
+    sides: sidesFor(b, p), roster: rosterFor(b, p.side),
+    reward: winner === p.side && reward ? reward : null }));
 
   if (b.kind === 'hunt' && winner === 'left') {
-    onHuntVictory(b.players.left.charId, (text) =>
-      b.players.left.send({ type: 'chat', from: 'Система', text }))
-      .catch(console.error);
+    const lp = playerList(b).find((p) => p.side === 'left');
+    if (lp) onHuntVictory(lp.charId, (text) =>
+      lp.send({ type: 'chat', from: 'Система', text })).catch(console.error);
   }
 }
 
 async function abortBattle(b, reason) {
   dropLive(b);
+  b.engine.phase = 'ended';
   await tx(async (c) => {
     await c.query(
       `UPDATE battles SET status = 4, ended_at = now() WHERE id = $1`, [b.id]);
-    for (const s of humanSides(b)) {
-      const p = b.players[s];
+    for (const p of b.players.values()) {
       await c.query(
         `UPDATE battle_participants SET status = 3, result = 4, left_round = $3
           WHERE battle_id = $1 AND character_id = $2`,
         [b.id, p.charId, b.engine.turn]);
       await c.query(`UPDATE characters SET hp_cur = $2 WHERE id = $1`,
-        [p.charId, b.engine.sides[s].maxHp]);
+        [p.charId, b.engine.fighter(p.charId).maxHp]);
     }
   });
   await redis.del(snapKey(b.id));
-  broadcast(b, (v) => ({ type: 'battleEnd', winner: null, victory: false,
-    aborted: true, reason, sides: sidesFor(b.engine, v) }));
+  broadcast(b, (p) => ({ type: 'battleEnd', winner: null, victory: false,
+    aborted: true, reason, sides: sidesFor(b, p), roster: rosterFor(b, p.side) }));
 }
 
-/** Побег из PvP: сбежавший засчитывается как проигравший, противник победил. */
-async function escapeDuel(b, escaper) {
-  dropLive(b);
-  const winner = other(escaper);
-  await tx(async (c) => {
-    await c.query(
-      `UPDATE battles SET status = 3, ended_at = now(), winner_side = $2 WHERE id = $1`,
-      [b.id, winner === 'left' ? 1 : 2]);
-    for (const s of humanSides(b)) {
-      const p = b.players[s];
-      await c.query(
-        `UPDATE battle_participants SET status = $3, result = $4, left_round = $5,
-            damage_dealt = $6
-          WHERE battle_id = $1 AND character_id = $2`,
-        [b.id, p.charId, s === escaper ? 3 : 1, s === escaper ? 4 : 1,
-         b.engine.turn, p.totalDamage]);
-      await c.query(`UPDATE characters SET hp_cur = $2 WHERE id = $1`,
-        [p.charId, b.engine.sides[s].maxHp]);
-    }
-  });
-  await redis.del(snapKey(b.id));
-  broadcast(b, (v) => v === escaper
-    ? { type: 'battleEnd', winner: null, victory: false, aborted: true,
-        reason: 'escape', sides: sidesFor(b.engine, v) }
-    : { type: 'battleEnd', winner: 'left', victory: true,
-        sides: sidesFor(b.engine, v), reward: null });
-}
-
-/** Эликсир побега: расход предмета и прерывание боя — одно целое. */
+/** Эликсир побега: расход предмета и выход из боя — одно целое. */
 export async function escapeBattle(charId) {
   const b = live.get(byChar.get(cid(charId)));
   if (!b) throw err('no_battle', 400);
@@ -518,8 +588,39 @@ export async function escapeBattle(charId) {
        VALUES ($1, $2, $3, 1, 1, $4, 7, 1, $5)`,
       [randomUUID(), it.id, tplId, charId, b.id]);
   });
-  if (b.kind === 'pvp') await escapeDuel(b, sideOf(b, charId));
-  else await abortBattle(b, 'escape');
+  await escapeFighter(b, cid(charId));
+}
+
+/** Боец покидает бой: остальным бой продолжается, если на стороне ещё есть живые. */
+async function escapeFighter(b, charId) {
+  const p = b.players.get(charId);
+  const f = b.engine.fighter(charId);
+  if (!p || !f) return;
+  f.alive = false; f.hp = 0;
+  b.engine.acted.add(f.id);
+
+  await tx(async (c) => {
+    await c.query(
+      `UPDATE battle_participants SET status = 3, result = 4, left_round = $3,
+          damage_dealt = $4 WHERE battle_id = $1 AND character_id = $2`,
+      [b.id, charId, b.engine.turn, p.totalDamage]);
+    await c.query(`UPDATE characters SET hp_cur = $2 WHERE id = $1`, [charId, f.maxHp]);
+  });
+  p.send({ type: 'battleEnd', winner: null, victory: false, aborted: true,
+    reason: 'escape', sides: sidesFor(b, p), roster: rosterFor(b, f.side) });
+  byChar.delete(charId);
+  b.players.delete(charId);
+  await snapshot(b.id, b);
+
+  if (b.engine.finished()) return void endBattle(b).catch(console.error);
+  // если уходил активный боец — двигаем ход дальше
+  if (b.engine.phase === 'choose' && b.engine.currentActorId() === charId) {
+    const next = b.engine.advance();
+    if (next) enterActor(b); else beginRound(b);
+  } else {
+    for (const q of b.players.values())
+      q.send({ type: 'rosterUpdate', roster: rosterFor(b, b.engine.fighter(q.charId).side) });
+  }
 }
 
 /** Кнопка «Прервать бой» в админке. */
@@ -530,7 +631,6 @@ export async function adminAbort(battleId) {
     await abortBattle(b, 'admin');
     return true;
   }
-  // боя нет в памяти (например, после рестарта сервера) — закрываем в БД
   const r = await game.query(
     `UPDATE battles SET status = 4, ended_at = now()
       WHERE id = $1 AND status IN (1, 2)`, [battleId]);
@@ -538,51 +638,67 @@ export async function adminAbort(battleId) {
   return r.rowCount > 0;
 }
 
-export function leaveBattle(charId) {
-  if (byChar.has(cid(charId))) {
-    throw err('cannot_leave', 403);
+/** Админка: открыть/закрыть вмешательство в конкретный бой вживую. */
+export async function adminSetIntervention(battleId, open) {
+  const r = await game.query(
+    `UPDATE battles SET intervention = $2 WHERE id = $1`,
+    [battleId, open ? 1 : 2]);
+  const b = live.get(Number(battleId));
+  if (b) {
+    b.policy.intervention = open ? 'open' : 'closed';
+    broadcast(b, () => ({ type: 'policy', intervention: b.policy.intervention }));
   }
+  return r.rowCount > 0 || !!b;
 }
 
-/** REST-страховка к push battleResume: клиент сам спрашивает идущий бой. */
+export function leaveBattle(charId) {
+  const b = live.get(byChar.get(cid(charId)));
+  if (b && !b.policy.allowLeave) throw err('cannot_leave', 403);
+  // allowLeave — выход без эликсира (бой продолжается для остальных)
+  if (b) return escapeFighter(b, cid(charId));
+}
+
+// ============================================================
+// REST-страховка к push battleResume + окно «Бой #N»
+// ============================================================
 export function battleRoutes(app, authed) {
   app.get('/api/battle/current', authed, (req, res) => {
     res.json(resumePayload(req.session.character_id) || { battleId: null });
   });
 
-  // Окно боя из ссылки в чате: идущий — составы с hp/mp, иначе — итоги
   app.get('/api/battles/:id', authed, async (req, res) => {
     const id = Number(req.params.id);
     const battle = (await game.query(
-      `SELECT id, type, status, winner_side, meta, started_at, ended_at
+      `SELECT id, type, status, winner_side, meta, started_at, ended_at, intervention
          FROM battles WHERE id = $1`, [id])).rows[0];
     if (!battle) throw err('not_found', 404);
     const meta = battle.meta || {};
 
     const b = live.get(id);
     if (b) {
-      const member = async (s) => {
-        const side = b.engine.sides[s];
-        const p = b.players[s];
-        let mpCur = 0;
-        if (p) {
-          const mp = (await game.query(
-            `SELECT mp_cur FROM characters WHERE id = $1`, [p.charId])).rows[0];
-          mpCur = mp ? mp.mp_cur : 0;
+      const teamMembers = async (side) => {
+        const out = [];
+        for (const fid of b.engine.teams[side]) {
+          const f = b.engine.fighter(fid);
+          let mp = 0;
+          if (f.charId) {
+            const mr = (await game.query(
+              `SELECT mp_cur FROM characters WHERE id = $1`, [f.charId])).rows[0];
+            mp = mr ? mr.mp_cur : 0;
+          }
+          out.push({ name: f.name, level: f.level, hp: Math.round(f.hp),
+            maxHp: f.maxHp, mp: f.charId ? mp : 0, maxMp: 100, alive: f.alive });
         }
-        return { name: side.name, level: side.level, hp: Math.round(side.hp),
-                 maxHp: side.maxHp, mp: mpCur, maxMp: 100 };
+        return out;
       };
       return res.json({
         battleId: id, status: 'active', turn: b.engine.turn,
-        teams: {
-          left:  [await member('left')],
-          right: [await member('right')],
-        },
+        intervention: b.policy.intervention,
+        allowJoin: b.policy.intervention === 'open',
+        teams: { left: await teamMembers('left'), right: await teamMembers('right') },
       });
     }
 
-    // итоги: участники-персонажи из БД…
     const parts = (await game.query(
       `SELECT bp.side, bp.result, bp.damage_dealt, bp.kills, bp.deaths,
               bp.exp_gained, bp.valor_gained, ch.name, ch.level
@@ -595,7 +711,6 @@ export function battleRoutes(app, authed) {
       result: p.result,
     }));
 
-    // …и противник-NPC: его цифры собираются из журнала ходов
     if (meta.npcName) {
       const npc = (await game.query(
         `SELECT coalesce(sum(value) FILTER (WHERE actor_id IS NULL AND action_type <> 5), 0) AS damage,

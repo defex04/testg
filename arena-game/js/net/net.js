@@ -87,12 +87,16 @@ function connectSocket() {
 
 function wireBattleHandlers() {
   socketHandlers.set('battleStart', (m) => {
+    // повторный battleStart (вмешательство в уже идущий бой) не пересоздаёт окно
+    if (currentBattle && currentBattle.battleId === m.battleId
+        && currentBattle.phase !== 'ended') return;
     currentBattle = new ServerBattle(
       { battleId: m.battleId, phase: 'choose', kind: m.kind,
-        left: m.left, right: m.right });
+        left: m.left, right: m.right, roster: m.roster, focus: m.focus,
+        policy: m.policy });
     if (pendingHunt) { pendingHunt.resolve(currentBattle); pendingHunt = null; }
     else if (resumeCb) {
-      // бой начат не нами (на нас напали) — входим как при battleResume
+      // бой начат не нами (на нас напали / мы вмешались) — входим как при resume
       currentBattle.fresh = true;
       resumeCb(currentBattle);
     }
@@ -104,23 +108,31 @@ function wireBattleHandlers() {
     console.log('battleResume:', m.battleId, 'фаза', m.phase);
     const b = new ServerBattle(
       { battleId: m.battleId, phase: m.phase, kind: m.kind,
-        left: m.sides.left, right: m.sides.right });
+        left: m.sides.left, right: m.sides.right, roster: m.roster,
+        focus: m.focus, policy: m.policy });
     currentBattle = b;
     if (m.phase === 'choose') {
       b._on('turnStart', { turn: m.turn, timeLeft: m.timeLeft,
-        canAct: m.canAct !== false, active: m.active });
+        canAct: m.canAct !== false, active: m.active, waiting: !!m.waiting,
+        focus: m.focus, targets: m.targets || [], roster: m.roster });
     }
     if (resumeCb) resumeCb(b);
   });
   socketHandlers.set('turnStart', (m) =>
     currentBattle && currentBattle._on('turnStart', {
       turn: m.turn, timeLeft: m.timeLeft,
-      canAct: m.canAct !== false, active: m.active }));
+      canAct: m.canAct !== false, active: m.active, waiting: !!m.waiting,
+      focus: m.focus, targets: m.targets || [], roster: m.roster }));
   socketHandlers.set('timer', (m) =>
     currentBattle && currentBattle._on('timer', { timeLeft: m.timeLeft }));
   socketHandlers.set('resolve', (m) =>
     currentBattle && currentBattle._on('resolve',
-      { turn: m.turn, strikes: m.strikes, passed: m.passed || [], sides: m.sides }));
+      { turn: m.turn, strikes: m.strikes, passed: m.passed || [], sides: m.sides,
+        focus: m.focus, roster: m.roster }));
+  socketHandlers.set('rosterUpdate', (m) =>
+    currentBattle && currentBattle._on('rosterUpdate', { roster: m.roster }));
+  socketHandlers.set('policy', (m) =>
+    currentBattle && currentBattle._on('policy', { intervention: m.intervention }));
   socketHandlers.set('battleEnd', (m) =>
     currentBattle && currentBattle._on('battleEnd',
       { winner: m.winner, victory: m.victory, aborted: !!m.aborted,
@@ -138,7 +150,12 @@ export class ServerBattle extends EventTarget {
     this.battleId = init.battleId;
     this.phase = init.phase || 'choose';
     this.kind = init.kind || 'hunt';   // 'hunt' | 'pvp'
-    this.sides = { left: { ...init.left }, right: { ...init.right } };
+    this.sides = { left: { ...init.left }, right: { ...(init.right || init.focus || {}) } };
+    // ростер обеих команд (своя — left) и текущий сфокусированный соперник
+    this.roster = init.roster || { left: [init.left].filter(Boolean),
+                                   right: [init.right || init.focus].filter(Boolean) };
+    this.focus = init.focus || init.right || null;
+    this.policy = init.policy || {};
     this.active = false;
     this.queue = [];
   }
@@ -158,17 +175,35 @@ export class ServerBattle extends EventTarget {
     });
   }
 
+  /** Вмешательство: войти в идущий бой #battleId на сторону side ('left'|'right'). */
+  static join(battleId, side) {
+    return new Promise((resolve, reject) => {
+      pendingHunt = { resolve, reject };
+      socket.send(JSON.stringify({ type: 'join', battleId, side }));
+    });
+  }
+
   _applySides(s) {
     if (!s) return;
-    this.sides.left.hp = s.left.hp;
-    this.sides.right.hp = s.right.hp;
+    if (s.left)  this.sides.left.hp = s.left.hp;
+    if (s.right) this.sides.right = { ...s.right };
+  }
+  _applyFocus(focus) {
+    if (focus !== undefined) this.focus = focus;
+    if (focus) this.sides.right = { ...focus };
   }
 
   /** Состояние применяется сразу; события — после activate(). */
   _on(type, detail) {
-    if (type === 'turnStart') this.phase = 'choose';
+    if (detail && detail.roster) this.roster = detail.roster;
+    if (type === 'turnStart') {
+      this.phase = 'choose';
+      if ('focus' in detail) this._applyFocus(detail.focus);
+    }
+    if (type === 'policy') this.policy.intervention = detail.intervention;
     if (type === 'resolve') {
       this.phase = 'resolving';
+      if ('focus' in detail) this._applyFocus(detail.focus);
       this._applySides(detail.sides);
       detail.sides = this.sides;
     }
@@ -190,11 +225,12 @@ export class ServerBattle extends EventTarget {
   }
   start() { this.activate(); }  // совместимость с интерфейсом BattleSystem
 
-  /** move: { attack: 'high'|'mid'|'low', block: ..., pass: bool } — как в BattleSystem. */
+  /** move: { attack, block, pass, target } — target = id выбранного врага (NvN). */
   submitMove(side, move) {
     const block = move.block ? String(move.block).replace(/^b-/, '') : null;
     socket.send(JSON.stringify(
-      { type: 'move', attack: move.attack ?? null, block, pass: !!move.pass }));
+      { type: 'move', attack: move.attack ?? null, block,
+        pass: !!move.pass, target: move.target ?? null }));
     return true;
   }
   finishTurn()    { socket.send(JSON.stringify({ type: 'turnDone' })); }
