@@ -834,6 +834,15 @@ $('chat-form').addEventListener('submit', (e) => {
   };
   document.addEventListener('focusin', (e) => onChatFocus(e, true));
   document.addEventListener('focusout', (e) => onChatFocus(e, false));
+
+  // тап по области локации (сцена/фон вне дока и меню) снимает фокус с поля
+  // ввода чата → клавиатура закрывается. На тач-устройствах сцена перехватывает
+  // тач и сама по себе фокус не сбрасывает, поэтому делаем это явно.
+  const gameMid = document.querySelector('.game-mid');
+  gameMid?.addEventListener('pointerdown', () => {
+    const ae = document.activeElement;
+    if (ae && ae.closest && ae.closest('.chat-input-row')) ae.blur();
+  });
 })();
 
 // ---------------------------------------------------------------------------
