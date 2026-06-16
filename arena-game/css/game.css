@@ -341,7 +341,15 @@ body.loc-castle .loc-body.open {
   border-radius: 18px;
   backdrop-filter: blur(6px);
   box-shadow: 0 12px 36px rgba(0, 0, 0, .55), inset 0 1px 0 rgba(244, 205, 111, .08);
-  animation: screen-in .3s ease;
+  /* отдельный keyframe: сохраняет translateX(-50%), иначе панель в конце
+     анимации «прыгает» влево на половину ширины (screen-in ставит transform:none) */
+  animation: loc-panel-in .18s ease-out;
+  will-change: transform, opacity;
+}
+
+@keyframes loc-panel-in {
+  from { opacity: 0; transform: translate(-50%, 8px); }
+  to   { opacity: 1; transform: translateX(-50%); }
 }
 
 body:not(.loc-castle) .loc-scene-head { display: none; }
