@@ -768,40 +768,42 @@ $('chat-form').addEventListener('submit', (e) => {
 // Мобильная клавиатура. В Telegram WebView (особенно iOS) выехавшая клавиатура
 // ужимает ВЕСЬ вьюпорт — и vw, и vh/dvh. Если привязать размер игры к видимой
 // высоте, она масштабируется (сжимается с чёрными полями). Поэтому игру держим
-// в ПОЛНОЙ (stable) высоте и НЕ меняем её размер, а лишь сдвигаем вверх на
-// высоту клавиатуры (--kb), открывая поле ввода чата над ней.
-//   --app-h — полная высота (tg.viewportStableHeight | window.innerHeight)
-//   --kb    — высота клавиатуры (stable − видимая), на неё уходит translateY
+// в ПОЛНОЙ (stable) высоте и НЕ меняем её размер. Сам экран не двигаем: клавиатура
+// накрывает нижнее меню, а над ней поднимается только док с полем ввода чата
+// (transform на .bottom-dock в CSS, на (--kb − --menu-h)).
+//   --app-h  — полная высота (tg.viewportStableHeight | window.innerHeight)
+//   --kb     — высота клавиатуры (полная − видимая)
+//   --menu-h — высота нижнего меню «замка» (его клавиатура накрывает снизу)
 // ---------------------------------------------------------------------------
 (() => {
   const root = document.documentElement;
   const vv = window.visualViewport;
   const tgApp = window.Telegram && window.Telegram.WebApp;
 
-  // Фолбэк-база полной высоты для обычного браузера: window.innerHeight на
-  // Android/части WebView ужимается ВМЕСТЕ с клавиатурой, поэтому как «полную»
-  // высоту запоминаем максимум, виденный при текущей ширине, и сбрасываем его
-  // только при смене ширины (поворот экрана). Так клавиатура не «съедает» высоту
-  // (что приводило к резайзу всей игры), а уходит в --kb → подъём translateY.
+  // «Полную» высоту НИ ОДНОМУ сигналу доверять как абсолюту нельзя: при
+  // клавиатуре window.innerHeight ужимается на Android, а tg.viewportStableHeight
+  // «дышит» на iOS. Поэтому полная высота = МАКСИМУМ виденного при текущей ширине,
+  // и сбрасываем его только при смене ширины (поворот экрана). Клавиатура может
+  // высоту лишь уменьшить — это уменьшение игнорируем и уводим его в --kb (подъём
+  // translateY), а сам размер игры не трогаем (иначе сжатие с чёрными полями).
   let baseFull = 0;
   let baseWidth = window.innerWidth;
 
   const heights = () => {
     if (window.innerWidth !== baseWidth) { baseWidth = window.innerWidth; baseFull = 0; }
 
-    let full, seen;
-    if (tgApp && tgApp.viewportStableHeight) {
-      // Telegram сам отдаёт стабильную (не зависящую от клавиатуры) высоту.
-      full = tgApp.viewportStableHeight;
-      seen = tgApp.viewportHeight || full;
-      if (vv) seen = Math.min(seen, vv.height);
-    } else {
-      // Браузер: видимая часть — visualViewport, полная — максимум из innerHeight
-      // и видимой части, зафиксированный как наибольший виденный (см. baseFull).
-      seen = vv ? vv.height : window.innerHeight;
-      baseFull = Math.max(baseFull, window.innerHeight, seen);
-      full = baseFull;
-    }
+    // видимая часть — наименьший из доступных сигналов (ловит клавиатуру)
+    let seen = window.innerHeight;
+    if (tgApp && tgApp.viewportHeight) seen = Math.min(seen, tgApp.viewportHeight);
+    if (vv) seen = Math.min(seen, vv.height);
+
+    // полная — наибольший из доступных сигналов, зафиксированный как максимум
+    let full = window.innerHeight;
+    if (tgApp && tgApp.viewportStableHeight) full = Math.max(full, tgApp.viewportStableHeight);
+    if (vv) full = Math.max(full, vv.height);
+    baseFull = Math.max(baseFull, full, seen);
+    full = baseFull;
+
     return { full, seen: Math.min(seen, full) };
   };
 
@@ -812,6 +814,10 @@ $('chat-form').addEventListener('submit', (e) => {
     const kb = Math.max(0, Math.round(full - seen));
     root.style.setProperty('--app-h', Math.round(full) + 'px');
     root.style.setProperty('--kb', kb + 'px');
+    // высота нижнего меню — на неё клавиатура накрывает его снизу, поэтому док
+    // поднимается на (--kb − --menu-h), а не на всю высоту клавиатуры (см. CSS)
+    const menuH = castleMainMenu ? Math.round(castleMainMenu.getBoundingClientRect().height) : 0;
+    root.style.setProperty('--menu-h', menuH + 'px');
   };
   const schedule = () => { if (!raf) raf = requestAnimationFrame(apply); };
 
