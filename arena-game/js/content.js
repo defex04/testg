@@ -45,17 +45,14 @@ export const FIGHTERS = {
 //            { label, soon } — переход-заглушка (пока недоступен);
 //            { label } без флагов — действие-заглушка;
 //   npc:     жители локации (диалоги подключаются отдельным модулем).
-// id — локация в БД сервера; без id переход чисто клиентский (сервер о нём
-// не знает, чат и список игроков остаются от последней серверной локации).
-// layout: 'castle' — полноэкранный фон + меню «замка» (см. README).
+// id — локация в БД сервера.
 // ---------------------------------------------------------------------------
 
 export const LOCATIONS = {
   village: {
     id: 1,
     name: 'Город Надежды',
-    layout: 'castle',
-    image: 'assets/backgrounds/prigorod.png',
+    image: 'assets/backgrounds/prigorod.webp',
     actions: [
       { label: 'Испить живой воды' },
       { label: 'Подняться в замок', soon: true },
@@ -68,8 +65,7 @@ export const LOCATIONS = {
   derevna: {
     id: 2,
     name: 'Поселение Зеленое',
-    layout: 'castle',
-    image: 'assets/backgrounds/derevna.png',
+    image: 'assets/backgrounds/derevna.webp',
     actions: [
       { label: 'Войти в трактир' },
       { label: 'Город Надежды', goto: 'village' },

@@ -8,7 +8,7 @@
  * Два экрана главной панели:
  *  - «локация» (вне боя): фон/картинка местности + кнопки переходов;
  *  - «бой»: 3D-арена, плашки бойцов, штурвал атаки/блока, слоты скиллов.
- * На локациях layout: 'castle' нижняя панель (чат/игроки/участники/лог)
+ * На локациях нижняя панель (чат/игроки/участники/лог)
  * выдвигается иконками меню, на остальных — постоянные вкладки.
  */
 import { Arena } from './arena/Arena.js';
@@ -102,14 +102,13 @@ if (tg) {
 }
 
 // ---------------------------------------------------------------------------
-// Каркас: элементы, режимы экрана, layout «замок»
+// Каркас: элементы, режимы экрана, UI локации
 // ---------------------------------------------------------------------------
 
 const screenLocation = $('screen-location');
 const screenBattle = $('screen-battle');
 const arenaStage = $('arena-stage');
 const loadingEl = $('arena-loading');
-const locPicture = $('loc-picture');
 const locActions = $('loc-actions');
 const locBody = $('loc-body');
 const locSceneTitle = $('loc-scene-title');
@@ -126,19 +125,14 @@ let currentLoc = 'village';
 // только на время боя (setMode) — вне боя GPU не работает вхолостую.
 const arena = new Arena(arenaStage, { autostart: false });
 
-const isCastleLayout = () => LOCATIONS[currentLoc]?.layout === 'castle';
-
-// --- состояние UI первой локации ---
+// --- состояние UI локации ---
 let locPanelOpen = false;                 // всплывающая панель «Локация»
 let castleDockPane = null;                // 'members'|'battlelog'|'players'|'chat'|null
 const CASTLE_DOCK_PANES = new Set(['members', 'battlelog', 'chat', 'players']);
 const BATTLE_ONLY_PANES = new Set(['members', 'battlelog']);
 
-/** Применить layout текущей локации (замок: фон на весь экран + свои меню). */
+/** Применить фон и подписи текущей локации. */
 function applyUILayout() {
-  const castle = isCastleLayout();
-  document.body.classList.toggle('loc-castle', castle);
-  if (!castle) return;
   const loc = LOCATIONS[currentLoc];
   castleBg.style.background = loc.image
     ? `#0a0e07 url("${loc.image}") center / cover no-repeat`
@@ -158,7 +152,6 @@ function updateCastleMainMenu() {
 }
 
 function toggleLocPanel(force) {
-  if (!isCastleLayout()) return;
   locPanelOpen = force ?? !locPanelOpen;
   locBody.classList.toggle('open', locPanelOpen);
   if (locPanelOpen) closeCastleDock();
@@ -173,7 +166,6 @@ function closeLocPanel() {
 }
 
 function openCastleDock(pane) {
-  if (!isCastleLayout()) return;
   if (BATTLE_ONLY_PANES.has(pane) && mode !== 'battle') {
     showToast('Эта панель доступна только во время боя');
     return;
@@ -213,12 +205,8 @@ function setMode(next) {
     t.classList.toggle('hidden', !battle));
   // 3D-рендер работает только в бою
   if (battle) arena.start(); else arena.stop();
-  if (isCastleLayout()) {
-    closeLocPanel();
-    if (battle) openCastleDock('members'); else closeCastleDock();
-  } else {
-    activateTab(battle ? 'members' : 'chat');
-  }
+  closeLocPanel();
+  if (battle) openCastleDock('members'); else closeCastleDock();
   applyUILayout();
 }
 
@@ -226,14 +214,13 @@ function setMode(next) {
 // Локации
 // ---------------------------------------------------------------------------
 
-// локация игрока в БД сервера; клиентские локации (Замок) её не меняют
+// локация игрока в БД сервера
 let serverLocId = null;
 
 /** Переход между локациями: серверные — после подтверждения сервера. */
 async function gotoLocation(key) {
   const loc = LOCATIONS[key];
-  // оффлайн, чисто клиентская локация или возврат из клиентской в свою
-  // серверную (Замок → Город Надежды): сервер дёргать не нужно
+  // оффлайн или уже в целевой локации — без запроса к серверу
   if (!online || !loc.id || loc.id === serverLocId) {
     setLocation(key);
     return;
@@ -307,10 +294,6 @@ function renderLocationActions(loc) {
 function setLocation(key, { quiet = false } = {}) {
   currentLoc = key;
   const loc = LOCATIONS[key];
-  locPicture.style.background = loc.image
-    ? `#111 url("${loc.image}") center / cover no-repeat`
-    : loc.css;
-  $('loc-name').textContent = loc.name;
   if (!quiet) chatMessage('Система', `Вы вошли в локацию «${loc.name}».`, true);
   closeLocPanel();
   closeCastleDock();
@@ -593,10 +576,8 @@ async function playStrike(s, sides) {
 // Нижняя панель: вкладки и жест расширения
 // ---------------------------------------------------------------------------
 
-/** Переключить активную вкладку/панель (только DOM, без состояния дока). */
+/** Переключить активную панель нижнего дока. */
 function activateTab(name) {
-  document.querySelectorAll('.dock-tab').forEach((t) =>
-    t.classList.toggle('active', t.dataset.pane === name));
   document.querySelectorAll('.dock-pane').forEach((p) =>
     p.classList.toggle('active', p.id === 'pane-' + name));
   if (name === 'players') refreshPlayers();
@@ -604,20 +585,12 @@ function activateTab(name) {
   if (name === 'chat') scrollChatToBottom();
 }
 
-document.querySelectorAll('.dock-tab').forEach((t) => {
-  t.addEventListener('click', () => {
-    if (isCastleLayout()) openCastleDock(t.dataset.pane);
-    else activateTab(t.dataset.pane);
-  });
-});
-
 $('loc-scene-close')?.addEventListener('click', () => closeLocPanel());
 
-// --- расширение нижнего окна жестом: зажать ручку (или ряд вкладок) и
+// --- расширение нижнего окна жестом ---
 // повести вверх — окно растёт; вниз или тап по ручке — исходная высота ---
 
 const dockGrip = $('dock-grip');
-const dockTabs = $('dock-tabs');
 let dockExpanded = false;
 let dockDrag = null;        // активный жест: { id, y, h, base, moved }
 let dockClickGuard = false; // после перетаскивания гасим случайный клик
@@ -634,11 +607,8 @@ function dockBaseHeight() {
 }
 
 const dockMaxHeight = () => {
-  if (isCastleLayout()) {
-    const menuH = castleMainMenu?.getBoundingClientRect().height ?? 100;
-    return Math.max(140, Math.round(window.innerHeight * 0.52 - menuH));
-  }
-  return Math.round(window.innerHeight * 0.72);
+  const menuH = castleMainMenu?.getBoundingClientRect().height ?? 100;
+  return Math.max(140, Math.round(window.innerHeight * 0.52 - menuH));
 };
 
 function dockSnap(expand) {
@@ -649,7 +619,7 @@ function dockSnap(expand) {
 
 function dockPointerDown(e) {
   if (dockDrag || (e.pointerType === 'mouse' && e.button !== 0)) return;
-  if (isCastleLayout() && !dockEl.classList.contains('dock-open')) return;
+  if (!dockEl.classList.contains('dock-open')) return;
   dockDrag = {
     id: e.pointerId,
     y: e.clientY,
@@ -685,10 +655,9 @@ function dockPointerUp(e) {
 }
 
 dockGrip.addEventListener('pointerdown', dockPointerDown);
-dockTabs.addEventListener('pointerdown', dockPointerDown);
 const dockBodyEl = dockEl.querySelector('.dock-body');
 dockBodyEl?.addEventListener('pointerdown', (e) => {
-  if (!isCastleLayout() || !dockEl.classList.contains('dock-open')) return;
+  if (!dockEl.classList.contains('dock-open')) return;
   if (e.target.closest('input, button, a, .chat-input-row, .pvp-btn')) return;
   dockPointerDown(e);
 });
@@ -700,11 +669,6 @@ window.addEventListener('pointercancel', dockPointerUp);
 dockGrip.addEventListener('click', () => {
   if (!dockClickGuard) dockSnap(!dockExpanded);
 });
-
-// после жеста клик не должен переключать вкладку
-dockTabs.addEventListener('click', (e) => {
-  if (dockClickGuard) { e.stopPropagation(); e.preventDefault(); }
-}, true);
 
 // «Показать/Скрыть убитых» во вкладке участников
 const membersGrid = $('members-grid');
@@ -1538,15 +1502,6 @@ castleMainMenu?.addEventListener('click', (e) => {
   if (id === 'location') toggleLocPanel();
   else if (CASTLE_DOCK_PANES.has(id)) openCastleDock(id);
   else if (id === 'clan') showToast('Модуль «Клан» подключается отдельно — пока заглушка');
-});
-
-$('nav-bag').addEventListener('click', () => openDressing());
-$('nav-hunt').addEventListener('click', () => startBattle());
-
-document.querySelectorAll('[data-stub]').forEach((btn) => {
-  btn.addEventListener('click', () => {
-    showToast(`Модуль «${btn.dataset.stub}» подключается отдельно — пока заглушка`);
-  });
 });
 
 // ---------------------------------------------------------------------------

@@ -63,7 +63,7 @@ export class Engine {
       // постоянен между раундами, поэтому никто не бьёт дважды подряд
       tiebreak: Math.random(),
       alive: hp > 0,
-      block: null,                       // держится между раундами, пока не сменят
+      block: null,                       // стойка; null в ходе снимает блок
       opponentId: null,                  // «липкий» соперник (цель/фокус)
       lastActiveTurn: 0,                 // раунд последнего размена — для «холода»
     };
@@ -192,7 +192,7 @@ export class Engine {
       }
       if (!target) return false;
     }
-    if (move.block != null) f.block = move.block;
+    f.block = move.block ?? null;
     this._pending = { actorId: f.id, targetId: target ? target.id : null,
                       attack: move.attack, pass: !!move.pass };
     return true;

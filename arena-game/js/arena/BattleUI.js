@@ -318,7 +318,7 @@ export class BattleUI {
     this.waitEl.classList.toggle('hidden', !showWait);
   }
 
-  /** Свой ход: штурвал активен; выбранный блок сохраняется между ходами. */
+  /** Свой ход: штурвал активен; блок в UI держится между ходами, отжатие снимает стойку в ходе. */
   showControls() {
     for (const b of this._blkButtons) {
       b.classList.toggle('active', b.dataset.block === this.block);
