@@ -37,12 +37,14 @@
 
   --font-display: 'Philosopher', Georgia, 'Times New Roman', serif;
 
-  /* Высота видимой области приложения и смещение видимого вьюпорта. JS
-     привязывает их к window.visualViewport (см. блок «мобильная клавиатура»
-     в main.js): когда выезжает клавиатура телефона, --app-h уменьшается до
-     области над ней, а вёрстка не «съезжает». Фолбэк — динамический вьюпорт. */
+  /* --app-h — ПОЛНАЯ (stable) высота приложения, не зависящая от клавиатуры:
+     в Telegram это tg.viewportStableHeight, в браузере — window.innerHeight.
+     Игра всегда занимает её целиком и НЕ масштабируется при клавиатуре.
+     --kb — высота выехавшей клавиатуры; на неё игра сдвигается вверх
+     (translateY), чтобы поле ввода чата оказалось над клавиатурой. См. блок
+     «мобильная клавиатура» в main.js. Фолбэк --app-h — динамический вьюпорт. */
   --app-h: 100dvh;
-  --vv-top: 0px;
+  --kb: 0px;
 
   /* собранные тени рамок — мягкие, без жёстких контуров */
   --frame-shadow:
@@ -128,10 +130,8 @@ html, body {
    на body при резиновом скролле — фиксируем жёстко) */
 body {
   position: fixed;
-  top: var(--vv-top, 0px);
-  left: 0;
+  inset: 0;
   width: 100%;
-  height: var(--app-h, 100dvh);
 }
 
 button { font-family: inherit; }
@@ -165,13 +165,20 @@ body.loc-castle .castle-main-menu { display: flex; }
 
 body.loc-castle .game {
   position: relative;
-  /* ширина — по «полному» вьюпорту (100dvh от клавиатуры не зависит), чтобы
-     при открытой клавиатуре мир не сжимался в узкую колонку; высота же идёт
-     по --app-h и уменьшается до области над клавиатурой (см. main.js). */
-  width: min(100vw, calc(100dvh * 9 / 16));
+  /* размер — по ПОЛНОЙ высоте (--app-h, от клавиатуры не зависит): игра не
+     масштабируется при открытии клавиатуры. Вместо этого она сдвигается вверх
+     на высоту клавиатуры (--kb), открывая поле ввода чата над ней. */
+  width: min(100vw, calc(var(--app-h, 100dvh) * 9 / 16));
   height: var(--app-h, 100dvh);
   max-height: calc(100vw * 16 / 9);
   max-width: none;
+  /* подъём над клавиатурой: сдвигаем игру вверх ровно настолько, насколько её
+     низ (поле ввода чата) прячется за клавиатурой, и не больше. Видимая высота
+     = --app-h − --kb; реальная высота игры = min(--app-h, 9:16 от ширины). */
+  --game-h: min(var(--app-h, 100dvh), calc(100vw * 16 / 9));
+  --lift: max(0px, calc(var(--game-h) - var(--app-h, 100dvh) + var(--kb, 0px)));
+  transform: translateY(calc(-1 * var(--lift)));
+  transition: transform .18s ease;
   margin: 0 auto;
   padding: 0;
   gap: 0;
@@ -2475,9 +2482,9 @@ button.belt-slot { padding: 0; font: inherit; color: inherit; -webkit-tap-highli
 /* первая локация на телефоне 9:16 */
 @media (max-width: 700px) {
   body.loc-castle .game {
-    width: min(100vw, calc(100dvh * 9 / 16));
-    /* высоту ограничиваем видимой областью (--app-h) — при открытой
-       клавиатуре игра ужимается над ней, а не прячет поле ввода под неё */
+    /* размер по ПОЛНОЙ высоте (--app-h) — игра не масштабируется под
+       клавиатуру; вместо этого сдвигается вверх на --kb (см. базовое правило) */
+    width: min(100vw, calc(var(--app-h, 100dvh) * 9 / 16));
     height: min(var(--app-h, 100dvh), calc(100vw * 16 / 9));
   }
   body.loc-castle .hud-top { padding: max(4px, env(safe-area-inset-top)) 4px 0; }

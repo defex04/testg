@@ -765,36 +765,54 @@ $('chat-form').addEventListener('submit', (e) => {
 });
 
 // ---------------------------------------------------------------------------
-// Мобильная клавиатура. При фокусе на поле ввода (чат) виртуальная клавиатура
-// уменьшает видимую область экрана, но dvh/layout-вьюпорт остаются прежними —
-// поле уезжает под клавиатуру, а фикс-вёрстка «съезжает». Привязываем высоту
-// приложения (--app-h) и смещение (--vv-top) к window.visualViewport: когда
-// клавиатура открыта, .game ужимается до области над ней, и поле остаётся видимым.
+// Мобильная клавиатура. В Telegram WebView (особенно iOS) выехавшая клавиатура
+// ужимает ВЕСЬ вьюпорт — и vw, и vh/dvh. Если привязать размер игры к видимой
+// высоте, она масштабируется (сжимается с чёрными полями). Поэтому игру держим
+// в ПОЛНОЙ (stable) высоте и НЕ меняем её размер, а лишь сдвигаем вверх на
+// высоту клавиатуры (--kb), открывая поле ввода чата над ней.
+//   --app-h — полная высота (tg.viewportStableHeight | window.innerHeight)
+//   --kb    — высота клавиатуры (stable − видимая), на неё уходит translateY
 // ---------------------------------------------------------------------------
 (() => {
-  const vv = window.visualViewport;
-  if (!vv) return;                         // старые браузеры: оставляем фолбэк 100dvh
   const root = document.documentElement;
-  let raf = 0;
-  const sync = () => {
-    raf = 0;
-    root.style.setProperty('--app-h', Math.round(vv.height) + 'px');
-    root.style.setProperty('--vv-top', Math.round(vv.offsetTop) + 'px');
-  };
-  const schedule = () => { if (!raf) raf = requestAnimationFrame(sync); };
-  vv.addEventListener('resize', schedule);
-  vv.addEventListener('scroll', schedule);
-  sync();
+  const vv = window.visualViewport;
+  const tgApp = window.Telegram && window.Telegram.WebApp;
 
-  // при фокусе на поле чата дать клавиатуре раскрыться, затем показать поле и
-  // последние сообщения над ней (скролл внутри своих контейнеров, не документа)
-  document.addEventListener('focusin', (e) => {
+  const heights = () => {
+    // full — полная высота (не меняется от клавиатуры): в Telegram это стабильная
+    // высота вьюпорта, иначе layout-вьюпорт окна. seen — реально видимая часть:
+    // берём наименьший из доступных сигналов (Telegram и/или visualViewport),
+    // чтобы поймать клавиатуру, как бы её ни сообщал клиент.
+    const full = (tgApp && tgApp.viewportStableHeight) || window.innerHeight;
+    let seen = full;
+    if (tgApp && tgApp.viewportHeight) seen = Math.min(seen, tgApp.viewportHeight);
+    if (vv) seen = Math.min(seen, vv.height);
+    return { full, seen };
+  };
+
+  let raf = 0;
+  const apply = () => {
+    raf = 0;
+    const { full, seen } = heights();
+    const kb = Math.max(0, Math.round(full - seen));
+    root.style.setProperty('--app-h', Math.round(full) + 'px');
+    root.style.setProperty('--kb', kb + 'px');
+  };
+  const schedule = () => { if (!raf) raf = requestAnimationFrame(apply); };
+
+  if (tgApp && tgApp.onEvent) tgApp.onEvent('viewportChanged', schedule);
+  if (vv) { vv.addEventListener('resize', schedule); vv.addEventListener('scroll', schedule); }
+  window.addEventListener('resize', schedule);
+  apply();
+
+  // фокус/расфокус поля чата: пересчитать после анимации клавиатуры и подвести
+  // последние сообщения к низу (скролл внутри чат-лога, не документа)
+  const onChatFocus = (e, scroll) => {
     if (!e.target.closest('.chat-input-row')) return;
-    setTimeout(() => {
-      scrollChatToBottom();
-      e.target.scrollIntoView({ block: 'nearest' });
-    }, 250);
-  });
+    setTimeout(() => { schedule(); if (scroll) scrollChatToBottom(); }, 300);
+  };
+  document.addEventListener('focusin', (e) => onChatFocus(e, true));
+  document.addEventListener('focusout', (e) => onChatFocus(e, false));
 })();
 
 // ---------------------------------------------------------------------------
