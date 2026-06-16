@@ -9,13 +9,11 @@ INSERT INTO currencies (id, code, name) VALUES
     (5, 'valor',   'Доблесть');
 
 INSERT INTO locations (id, name, type, min_level) VALUES
-    (1, 'Деревня',        1, 1),
-    (2, 'Каньон',         2, 1),
-    (3, 'Ночная лощина',  2, 1);
+    (1, 'Город Надежды',     1, 1),
+    (2, 'Поселение Зеленое', 1, 1);
 
 INSERT INTO location_links (from_id, to_id) VALUES
-    (1, 2), (2, 1),          -- деревня <-> каньон («Пройти к мосту»)
-    (2, 3), (3, 2);          -- каньон <-> лощина
+    (1, 2), (2, 1);
 
 -- Экипировка из ITEMS: бронзовый доспех, слот 1 = torso
 INSERT INTO item_templates (id, name, type, slot, quality, stackable, base_stats, icon)
@@ -27,7 +25,7 @@ INSERT INTO npc_templates (id, name, level, stats, props) VALUES
      '{"hp": 2600, "damage": [140, 220], "crit": 0.1, "dodge": 0.05, "height": 1.92}',
      '{"injury_chance": 0}');
 INSERT INTO npc_spawns (id, npc_template_id, location_id) VALUES
-    (1, 1, 1), (2, 1, 2), (3, 1, 3);   -- охота доступна во всех трёх локациях
+    (1, 1, 1), (2, 1, 2);
 
 INSERT INTO game_config (key, value) VALUES
     ('battle.turn_time',     '20'),

@@ -279,13 +279,16 @@ function renderActionGroup(title, buttons) {
 
 function renderLocationActions(loc) {
   locActions.innerHTML = '';
-  const transitions = loc.actions.filter((a) => a.goto);
-  const acts = loc.actions.filter((a) => !a.goto);
+  const transitions = loc.actions.filter((a) => a.goto || a.soon);
+  const acts = loc.actions.filter((a) => !a.goto && !a.soon);
 
   renderActionGroup('Переходы', transitions.map((a) =>
     makeButton('loc-chip',
       `<span class="lc-ico">${ICON_GO}</span><span>${esc(a.label)}</span>`,
-      () => gotoLocation(a.goto))));
+      () => {
+        if (a.goto) gotoLocation(a.goto);
+        else showToast(`«${a.label}» — пока недоступно`);
+      })));
 
   renderActionGroup('Действия', acts.map((a) =>
     makeButton('loc-btn' + (a.hunt ? ' hunt' : ''),

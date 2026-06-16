@@ -42,6 +42,7 @@ export const FIGHTERS = {
 // ---------------------------------------------------------------------------
 // Локации. Запись = картинка (или css-градиент) + три группы контента:
 //   actions: { label, goto } — переход; { label, hunt } — бой;
+//            { label, soon } — переход-заглушка (пока недоступен);
 //            { label } без флагов — действие-заглушка;
 //   npc:     жители локации (диалоги подключаются отдельным модулем).
 // id — локация в БД сервера; без id переход чисто клиентский (сервер о нём
@@ -54,54 +55,27 @@ export const LOCATIONS = {
     id: 1,
     name: 'Город Надежды',
     layout: 'castle',
-    image: 'assets/backgrounds/before_the_castle.png',
+    image: 'assets/backgrounds/prigorod.png',
     actions: [
-      { label: 'Войти в замок', goto: 'castle' },
-      { label: 'Покинуть город', goto: 'canyon' },
-      { label: 'Охота на разбойника', hunt: true },
-      { label: 'Набрать воды из колодца' },
+      { label: 'Испить живой воды' },
+      { label: 'Подняться в замок', soon: true },
+      { label: 'Поселение Зеленое', goto: 'derevna' },
     ],
     npc: [
-      { name: 'Торговец Глеб' },
-      { name: 'Знахарка Мира' },
+      { name: 'Ворчливый старик' },
     ],
   },
-  castle: {
-    // клиентская локация (без id): для сервера игрок остаётся в Городе Надежды
-    name: 'Замок',
-    layout: 'castle',
-    image: 'assets/backgrounds/castle_hall.svg',
-    actions: [
-      { label: 'Выйти в город', goto: 'village' },
-      { label: 'Подняться на крепостную стену' },
-      { label: 'Осмотреть тронный зал' },
-    ],
-    npc: [
-      { name: 'Страж ворот Ансель' },
-      { name: 'Казначей Орвин' },
-    ],
-  },
-  canyon: {
+  derevna: {
     id: 2,
-    name: 'Предместье',
-    image: 'assets/backgrounds/canyon.svg',
+    name: 'Поселение Зеленое',
+    layout: 'castle',
+    image: 'assets/backgrounds/derevna.png',
     actions: [
-      { label: 'Вернуться в город', goto: 'village' },
-      { label: 'Спуститься в лощину', goto: 'night' },
-      { label: 'Охота на разбойника', hunt: true },
-      { label: 'Осмотреть обрыв' },
+      { label: 'Войти в трактир' },
+      { label: 'Город Надежды', goto: 'village' },
     ],
     npc: [
-      { name: 'Старатель Бор' },
-    ],
-  },
-  night: {
-    id: 3,
-    name: 'Ночная лощина',
-    css: 'linear-gradient(180deg,#0b1026 0%,#1b2a52 55%,#2c3e6b 78%,#15315c 100%)',
-    actions: [
-      { label: 'Подняться в предместье', goto: 'canyon' },
-      { label: 'Охота на разбойника', hunt: true },
+      { name: 'Фермер Дрю' },
     ],
   },
 };
