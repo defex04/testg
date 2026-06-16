@@ -778,16 +778,31 @@ $('chat-form').addEventListener('submit', (e) => {
   const vv = window.visualViewport;
   const tgApp = window.Telegram && window.Telegram.WebApp;
 
+  // Фолбэк-база полной высоты для обычного браузера: window.innerHeight на
+  // Android/части WebView ужимается ВМЕСТЕ с клавиатурой, поэтому как «полную»
+  // высоту запоминаем максимум, виденный при текущей ширине, и сбрасываем его
+  // только при смене ширины (поворот экрана). Так клавиатура не «съедает» высоту
+  // (что приводило к резайзу всей игры), а уходит в --kb → подъём translateY.
+  let baseFull = 0;
+  let baseWidth = window.innerWidth;
+
   const heights = () => {
-    // full — полная высота (не меняется от клавиатуры): в Telegram это стабильная
-    // высота вьюпорта, иначе layout-вьюпорт окна. seen — реально видимая часть:
-    // берём наименьший из доступных сигналов (Telegram и/или visualViewport),
-    // чтобы поймать клавиатуру, как бы её ни сообщал клиент.
-    const full = (tgApp && tgApp.viewportStableHeight) || window.innerHeight;
-    let seen = full;
-    if (tgApp && tgApp.viewportHeight) seen = Math.min(seen, tgApp.viewportHeight);
-    if (vv) seen = Math.min(seen, vv.height);
-    return { full, seen };
+    if (window.innerWidth !== baseWidth) { baseWidth = window.innerWidth; baseFull = 0; }
+
+    let full, seen;
+    if (tgApp && tgApp.viewportStableHeight) {
+      // Telegram сам отдаёт стабильную (не зависящую от клавиатуры) высоту.
+      full = tgApp.viewportStableHeight;
+      seen = tgApp.viewportHeight || full;
+      if (vv) seen = Math.min(seen, vv.height);
+    } else {
+      // Браузер: видимая часть — visualViewport, полная — максимум из innerHeight
+      // и видимой части, зафиксированный как наибольший виденный (см. baseFull).
+      seen = vv ? vv.height : window.innerHeight;
+      baseFull = Math.max(baseFull, window.innerHeight, seen);
+      full = baseFull;
+    }
+    return { full, seen: Math.min(seen, full) };
   };
 
   let raf = 0;
