@@ -23,6 +23,7 @@ const esc = (v) => String(v ?? '').replace(/[&<>"]/g,
 const MAX_LOG_ENTRIES = 250;   // журнал боя не растёт бесконечно
 
 const ASSET = 'assets/fight/';
+const IMG = (name) => `${ASSET}${name}.webp`;
 const SVGNS = 'http://www.w3.org/2000/svg';
 
 /* Сектора колеса заданы по РЕАЛЬНЫМ углам спиц wheel.png (адаптивно): спицы
@@ -82,7 +83,6 @@ export class BattleUI {
     this._blockIdByZone = {};
     for (const b of BLOCKS) this._blockIdByZone[b.zones[0]] = b.id;
     this._build(opts);
-    this.log(`<b>${esc(opts.left.name)}</b> против <b>${esc(opts.right.name)}</b> — бой начинается!`);
   }
 
   _build(opts) {
@@ -112,23 +112,25 @@ export class BattleUI {
     // --- боевое колесо по центру сцены ---
     const wheel = this._buildWheel();
 
-    // --- пилюля «ожидание противника» (внизу сцены) ---
+    // --- баннер «ожидание противника» (вверху сцены, не перекрывает бойцов) ---
     const wait = document.createElement('div');
     wait.className = 'bui-wait hidden';
+    wait.innerHTML =
+      `<img class="bui-wait-img" src="${IMG('wait')}" alt="Ожидание противника" draggable="false">`;
 
     // --- всплывающий урон + экран конца боя ---
     const popups = document.createElement('div');
     popups.className = 'bui-popups';
 
+    // итог боя — арт-баннер win/lose с нарисованной кнопкой «Выход». Кликается
+    // весь баннер (надёжно), поэтому отдельная хит-зона по кнопке не нужна.
     const end = document.createElement('div');
     end.className = 'bui-end hidden';
     end.innerHTML = `
       <div class="bui-end-card">
-        <div class="bui-end-title"></div>
-        <div class="bui-end-actions">
-          <button class="bui-end-btn bui-restart">В бой снова</button>
-          <button class="bui-end-btn secondary bui-leave">В локацию</button>
-        </div>
+        <button class="bui-end-banner bui-leave" type="button" title="Выход в локацию">
+          <img class="bui-end-img" alt="" draggable="false">
+        </button>
       </div>`;
 
     this.stageEl.appendChild(wheel);
@@ -152,8 +154,7 @@ export class BattleUI {
       status: wheel.querySelector('.sw-status'),
       popups,
       end,
-      endTitle: end.querySelector('.bui-end-title'),
-      restart: end.querySelector('.bui-restart'),
+      endImg: end.querySelector('.bui-end-img'),
       leave: end.querySelector('.bui-leave'),
     };
 
@@ -175,7 +176,7 @@ export class BattleUI {
 
     this.logEl.innerHTML = '';
     this._setLocked(true, null);
-    this.wheel.classList.add('locked');
+    this._hideWheel();   // до первого turnStart колесо скрыто (ещё не наш ход)
   }
 
   /** Колесо: слои заливок секторов, рама-png, кольцо-таймер, спрайты, хит-зоны. */
@@ -196,7 +197,7 @@ export class BattleUI {
           </radialGradient>
         </defs>
       </svg>
-      <img class="sw-frame" src="${ASSET}wheel.png" alt="" draggable="false">
+      <img class="sw-frame" src="${IMG('wheel')}" alt="" draggable="false">
       <svg class="sw-ring" viewBox="0 0 100 100" aria-hidden="true">
         <circle class="sw-timer" cx="50" cy="50" r="${TR_R}"></circle>
       </svg>
@@ -239,7 +240,7 @@ export class BattleUI {
       sp.style.setProperty('--ux', ux.toFixed(3));
       sp.style.setProperty('--uy', uy.toFixed(3));
       sp.style.setProperty('--base', `translate(-50%,-50%) rotate(${rot.toFixed(1)}deg)`);
-      sp.innerHTML = `<img src="${ASSET}${icon}.png" alt="" draggable="false">`;
+      sp.innerHTML = `<img src="${IMG(icon)}" alt="" draggable="false">`;
       sprites.appendChild(sp);
       this._sprites[id] = sp;
 
@@ -386,8 +387,15 @@ export class BattleUI {
   _setLocked(locked, statusText) {
     this._locked = locked;
     this.wheel.classList.toggle('waiting', !!statusText);
-    this.refs.status.textContent = statusText || '';
+    if (this.refs?.status) this.refs.status.textContent = statusText || '';
   }
+
+  /** Колесо ударов полностью скрыто (чужой ход / ожидание / розыгрыш). */
+  _hideWheel() { this.wheel.classList.add('gone', 'locked'); }
+  /** Колесо снова видно и активно (мой ход). */
+  _showWheel() { this.wheel.classList.remove('gone', 'locked'); }
+  /** Баннер «ожидание противника» (вверху сцены). */
+  _toggleWait(on) { this.waitEl.classList.toggle('hidden', !on); }
 
   setHP(side, cur, max) {
     const pct = Math.max(0, (cur / max) * 100);
@@ -431,71 +439,66 @@ export class BattleUI {
   }
 
   /**
-   * Колесо во время удара/ожидания не прячется (оно — центр сцены между
-   * бойцами), а только гаснет и блокируется, чтобы на нём были видны эффекты
-   * входящих ударов.
+   * Свой ход завершён (удар отправлен) — колесо скрывается, ждём розыгрыша.
+   * Баннер ожидания тут не нужен (мы не «без соперника», просто идёт ход).
    */
-  hideControls(showWait = true) {
+  hideControls() {
     this._setLocked(true, null);
-    this.wheel.classList.add('locked');
-    this.waitEl.textContent = '⏳ Ход противника…';
-    this.waitEl.classList.toggle('hidden', !showWait);
+    this._hideWheel();
+    this._toggleWait(false);
   }
 
-  /** Свой ход: колесо активно; блок держится между ходами. */
+  /** Сброс блокировки после отклонённого удара (не ваш ход / неверная цель). */
+  releasePendingStrike() {
+    this._setLocked(false, null);
+    this._showWheel();
+    this._toggleWait(false);
+    for (const id in this._sprites) this._sprites[id].classList.remove('thrust');
+  }
+
+  /** Свой ход: колесо снова видно и активно; блок держится между ходами. */
   showControls() {
     this._refreshBlocks();
     for (const id in this._sprites) this._sprites[id].classList.remove('thrust', 'hot', 'clang');
     for (const id in this._fills) this._fills[id].classList.remove('hot');
     this._setLocked(false, null);
-    this.wheel.classList.remove('locked');
-    this.waitEl.classList.add('hidden');
+    this._showWheel();
+    this._toggleWait(false);
   }
 
-  /** Чужой ход (PvP): колесо погашено, таймер в шапке тикает. */
+  /** Чужой ход (#7): колесо пропадает, БЕЗ баннера — просто ждём удара врага. */
   showWaitTimer() {
     this._setLocked(true, null);
-    this.wheel.classList.add('locked');
-    this.waitEl.classList.add('hidden');
+    this._hideWheel();
+    this._toggleWait(false);
   }
 
-  /** Ожидание соперника (NvN): погашенное колесо + плашка с текстом. */
-  showWait(text = '⏳ Ожидание соперника…') {
+  /** Напротив нет соперника (ход союзника в мультибое) — колесо скрыто + баннер. */
+  showWait() {
     this._setLocked(true, null);
-    this.wheel.classList.add('locked');
-    this.waitEl.textContent = text;
-    this.waitEl.classList.remove('hidden');
+    this._hideWheel();
+    this._toggleWait(true);
+  }
+
+  /** Розыгрыш ударов: колесо скрыто, но баннер убран — видна анимация боя. */
+  showResolving() {
+    this._setLocked(true, null);
+    this._hideWheel();
+    this._toggleWait(false);
   }
 
   /**
-   * Эффект входящего удара противника по зоне `zone`: отметка зоны на колесе
-   * (левый сектор блока) + вспышка-burst. Синий «звон» при удачном блоке,
-   * красный пробой — иначе.
+   * Входящий удар противника по зоне `zone`: запоминаем сектор на колесе
+   * (стойкая метка видна в следующий свой ход).
    */
-  showIncoming(zone, blocked) {
+  showIncoming(zone) {
     const id = 'blk-' + zone;
-    const fill = this._fills[id];
-    if (!fill) return;
-    // отметка зоны на (погашенном) колесе — куда целил противник
-    fill.style.setProperty('--rest', fill.classList.contains('on') ? '1' : '0.32');
-    fill.classList.remove('aim'); void fill.getBoundingClientRect(); fill.classList.add('aim');
-    if (blocked) {
-      const sp = this._sprites[id];
-      sp.classList.remove('clang'); void sp.offsetWidth; sp.classList.add('clang');
-    }
-    // запоминаем последнее место удара противника — стойкая красная клякса
+    if (!this._sectorPos[id]) return;
     const [sx, sy] = this._sectorPos[id];
     this._markLastHit(sx, sy);
-    // burst — в незатемняемом слое попапов поверх сцены, координаты сектора → px
-    const d = parseFloat(getComputedStyle(this.wheel).getPropertyValue('--d')) || this.wheel.clientWidth || 300;
-    const cx = parseFloat(this.wheel.style.left) || this.wheel.offsetLeft + d / 2;
-    const cy = parseFloat(this.wheel.style.top) || this.wheel.offsetTop + d / 2;
-    const x = cx - d / 2 + (sx / 100) * d;
-    const y = cy - d / 2 + (sy / 100) * d;
-    this._burst(x, y, d, blocked ? '#6aa6ff' : '#ff4733');
   }
 
-  /** Стойкая отметка последнего удара противника (красная клякса на секторе). */
+  /** Стойкая отметка последнего удара противника — только на колесе в свой ход. */
   _markLastHit(sx, sy) {
     if (!this._lastHitEl) {
       this._lastHitEl = document.createElement('div');
@@ -506,23 +509,6 @@ export class BattleUI {
     this._lastHitEl.style.top = sy + '%';
     this._lastHitEl.classList.remove('show'); void this._lastHitEl.offsetWidth;
     this._lastHitEl.classList.add('show');
-  }
-
-  _burst(x, y, d, color) {
-    const b = document.createElement('div');
-    b.className = 'sw-burst';
-    b.style.left = x + 'px';
-    b.style.top = y + 'px';
-    b.style.setProperty('--d', d + 'px');
-    b.style.setProperty('--bc', color);
-    let html = '<i class="flash"></i><i class="ring"></i>';
-    for (let i = 0; i < 6; i++) {
-      const a = i * 60 + (Math.random() * 20 - 10);
-      html += `<i class="spark" style="transform:translate(-50%,-100%) rotate(${a}deg)"></i>`;
-    }
-    b.innerHTML = html;
-    this.refs.popups.appendChild(b);
-    setTimeout(() => b.remove(), 700);
   }
 
   /** Всплывающая цифра урона в экранной точке {x, y} (координаты сцены). */
@@ -557,16 +543,9 @@ export class BattleUI {
   }
 
   showEnd(victory, handlers = {}) {
-    this.log(victory ? '🏆 <b>Победа!</b>' : '☠ <b>Поражение…</b>');
-    this.refs.endTitle.textContent = victory ? '⚔ Победа! ⚔' : 'Поражение…';
-    this.refs.endTitle.classList.toggle('defeat', !victory);
-    // без обработчика рестарта (PvP) кнопка «В бой снова» не показывается
-    this.refs.restart.classList.toggle('hidden', !handlers.onRestart);
+    this.refs.endImg.src = IMG(victory ? 'win' : 'lose');
+    this.refs.endImg.alt = victory ? 'Победа' : 'Поражение';
     this.refs.end.classList.remove('hidden');
-    this.refs.restart.onclick = () => {
-      this.refs.end.classList.add('hidden');
-      handlers.onRestart && handlers.onRestart();
-    };
     this.refs.leave.onclick = () => {
       this.refs.end.classList.add('hidden');
       handlers.onLeave && handlers.onLeave();

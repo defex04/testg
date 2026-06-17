@@ -15,6 +15,9 @@ const STATEMENTS = [
    ON CONFLICT (id) DO NOTHING`,
   `INSERT INTO game_config (key, value) VALUES ('battle.escape_elixir', '201')
    ON CONFLICT (key) DO NOTHING`,
+  `INSERT INTO game_config (key, value)
+   VALUES ('battle.intervention.default', '{"hunt": false, "pvp": true}')
+   ON CONFLICT (key) DO NOTHING`,
   // Бронзовый доспех из сида был без статов — дозаполняем один раз
   // (если админ уже задал свои base_stats, не трогаем)
   `UPDATE item_templates

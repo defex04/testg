@@ -3,7 +3,7 @@
 Исходник — лист на белом фоне: колесо (сверху, во всю ширину),
 щит (снизу слева), меч (снизу справа). Скрипт находит три объекта,
 делает фон прозрачным (мягкая альфа по светлоте) и сохраняет
-wheel.png / shield.png / sword.png рядом с исходником.
+wheel.webp / shield.webp / sword.webp рядом с исходником.
 """
 import os
 import numpy as np
@@ -51,5 +51,6 @@ for name, b in zip(names, boxes):
     own = ndimage.binary_dilation(lbl == b[7], iterations=PAD + 2)
     out = data[y0:y1, x0:x1].copy()
     out[:, :, 3] = (out[:, :, 3] * own[y0:y1, x0:x1]).astype(np.uint8)
-    Image.fromarray(out, 'RGBA').save(os.path.join(OUT, name + '.png'))
-    print(f'{name}.png  {x1 - x0}x{y1 - y0}  bbox=({x0},{y0},{x1},{y1})  area={b[4]}')
+    path = os.path.join(OUT, name + '.webp')
+    Image.fromarray(out, 'RGBA').save(path, 'WEBP', quality=88, method=6)
+    print(f'{name}.webp  {x1 - x0}x{y1 - y0}  bbox=({x0},{y0},{x1},{y1})  area={b[4]}')

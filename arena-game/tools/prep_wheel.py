@@ -1,4 +1,4 @@
-"""Подготовить wheel.png из wheel2.png: обрезать в квадрат с кругом ТОЧНО по
+"""Подготовить wheel.webp из wheel2.png: обрезать в квадрат с кругом ТОЧНО по
 центру холста. Иначе обод/таймер «уезжают» (исходник смещён по вертикали).
 
 Геометрия итогового круга (доли половины холста), на них опирается BattleUI:
@@ -12,7 +12,7 @@ import numpy as np
 from PIL import Image
 
 SRC = 'arena-game/assets/fight/wheel2.png'
-OUT = 'arena-game/assets/fight/wheel.png'
+OUT = 'arena-game/assets/fight/wheel.webp'
 MARGIN = 6
 
 im = Image.open(SRC).convert('RGBA')
@@ -24,5 +24,5 @@ ey = max(cy - ys.min(), ys.max() - cy)
 half = int(math.ceil(max(ex, ey))) + MARGIN
 
 crop = im.crop((int(cx) - half, int(cy) - half, int(cx) + half, int(cy) + half))
-crop.save(OUT)
-print(f'wheel.png {crop.size}, circle centered (src center {cx:.0f},{cy:.0f})')
+crop.save(OUT, 'WEBP', quality=88, method=6)
+print(f'wheel.webp {crop.size}, circle centered (src center {cx:.0f},{cy:.0f})')

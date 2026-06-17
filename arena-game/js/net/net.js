@@ -58,6 +58,7 @@ export const api = {
   locations: () => rest('/api/locations'),
   move:      (to) => rest('/api/locations/move', { to }),
   players:   () => rest('/api/locations/players'),
+  locationBattles: () => rest('/api/locations/battles'),
   inventory: () => rest('/api/inventory'),
   equip:     (itemId) => rest('/api/inventory/equip', { itemId }),
   unequip:   (slot) => rest('/api/inventory/unequip', { slot }),
@@ -138,8 +139,15 @@ function wireBattleHandlers() {
       { winner: m.winner, victory: m.victory, aborted: !!m.aborted,
         reason: m.reason, sides: m.sides, reward: m.reward }));
   socketHandlers.set('error', (m) => {
-    if (pendingHunt) { pendingHunt.reject(new Error(m.error)); pendingHunt = null; return; }
-    if (currentBattle) currentBattle._on('serverError', { error: m.error });
+    const wrap = () => {
+      const e = new Error(m.error || 'server_error');
+      if (m.battleId != null) e.battleId = m.battleId;
+      if (m.targetSide) e.targetSide = m.targetSide;
+      if (m.allowJoin != null) e.allowJoin = m.allowJoin;
+      return e;
+    };
+    if (pendingHunt) { pendingHunt.reject(wrap()); pendingHunt = null; return; }
+    if (currentBattle) currentBattle._on('serverError', { error: m.error, ...m });
     else console.warn('Сервер:', m.error);
   });
 }

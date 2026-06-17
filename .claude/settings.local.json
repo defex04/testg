@@ -17,7 +17,14 @@
       "Bash(cp \"/c/Users/andre/Downloads/525722abf0d6e3475cbb13b7c56dae75109dbd6ba6b18c9bd61c348697f939a1.webp\" \"/c/Users/andre/Downloads/new/arena-game/assets/backgrounds/village.webp\" && ls -la /c/Users/andre/Downloads/new/arena-game/assets/backgrounds/)",
       "PowerShell(foreach\\($c in 'python','py','npx'\\){ $g=Get-Command $c -ErrorAction SilentlyContinue; if\\($g\\){ \"$c -> $\\($g.Source\\)\" } else { \"$c -> \\(none\\)\" } })",
       "Bash(git commit -m 'Add elixir belt: power & health elixirs equippable in backpack, usable in battle *)",
-      "Bash(python arena-game/tools/prep_wheel.py)"
+      "Bash(python arena-game/tools/prep_wheel.py)",
+      "PowerShell($ErrorActionPreference='Continue'; $node=\\(Get-Command node -ErrorAction SilentlyContinue\\).Source; if\\(-not $node\\){ Write-Output 'node not found' } else { $files='arena-game/js/main.js','arena-game/js/arena/BattleUI.js','server/mmorpg-local/backend/src/battle/manager.js','server/mmorpg-local/backend/src/battle/engine.js'; foreach\\($f in $files\\){ & $node --check $f; if\\($?\\){ Write-Output \"OK: $f\" } else { Write-Output \"FAIL: $f\" } } })",
+      "PowerShell(foreach\\($c in 'python','py','python3','npx','node','php'\\){ $s=\\(Get-Command $c -ErrorAction SilentlyContinue\\).Source; if\\($s\\){ Write-Output \"$c -> $s\" } else { Write-Output \"$c -> \\(none\\)\" } })",
+      "PowerShell(& python -c \"import PIL; print\\('PIL', PIL.__version__\\)\" 2>&1; Write-Output \"exit=$LASTEXITCODE\")",
+      "Bash(mkdir -p .orig_bak)",
+      "Bash(cp wait.PNG win.PNG lose.PNG .orig_bak/)",
+      "Read(//c/c/Users/andre/Downloads/new/arena-game/assets/fight/**)",
+      "Bash(git --no-pager diff server/mmorpg-local/backend/src/battle/manager.js)"
     ]
   }
 }

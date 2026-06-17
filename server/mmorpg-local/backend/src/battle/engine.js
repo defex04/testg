@@ -92,9 +92,15 @@ export class Engine {
 
   /** Горячий вход в идущий бой (вмешательство): боец вступает со следующего раунда. */
   addFighter(side, def) {
+    const curId = this.currentActorId();
     const f = this._add(side, def);
     this._buildOrder();
-    if (this.phase !== 'idle') this.acted.add(f.id);  // в текущем раунде уже «походил»
+    if (this.phase !== 'idle') this.acted.add(f.id);
+    // пересборка order не должна сменить активного бойца на другого
+    if (curId) {
+      const ni = this.order.indexOf(curId);
+      if (ni >= 0) this.idx = ni;
+    }
     return f;
   }
 
@@ -127,7 +133,14 @@ export class Engine {
     const id = this.order[this.idx];
     return id != null && this.idx < this.order.length ? id : null;
   }
-  currentActor() { return this.fighter(this.currentActorId()); }
+  /** Активный боец sub-turn'а: жив, ещё не ходил в раунде, есть враги. */
+  _isActiveActor(f) {
+    return !!(f && f.alive && !this.acted.has(f.id) && this.enemiesOf(f.id).length);
+  }
+  currentActor() {
+    const f = this.fighter(this.currentActorId());
+    return this._isActiveActor(f) ? f : null;
+  }
 
   /** Насколько боец «холодный» (раундов без размена). */
   coldness(f) { return Math.max(0, this.turn - (f.lastActiveTurn || 0)); }
@@ -178,7 +191,7 @@ export class Engine {
   submit(actorId, move) {
     if (this.phase !== 'choose') return false;
     const f = this.fighter(actorId);
-    if (!f || !f.alive || this.currentActorId() !== f.id) return false;
+    if (!f || !this._isActiveActor(f) || this.currentActorId() !== f.id) return false;
     if (move.block != null && !ZONES.includes(move.block)) return false;
     let target = null;
     if (!move.pass) {

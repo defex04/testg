@@ -111,6 +111,8 @@ const arenaStage = $('arena-stage');
 const loadingEl = $('arena-loading');
 const locActions = $('loc-actions');
 const locBody = $('loc-body');
+const battlesBody = $('battles-body');
+const battlesList = $('battles-list');
 const locSceneTitle = $('loc-scene-title');
 const castleBg = $('castle-bg');
 const castlePerimeter = $('castle-perimeter');
@@ -127,6 +129,8 @@ const arena = new Arena(arenaStage, { autostart: false });
 
 // --- состояние UI локации ---
 let locPanelOpen = false;                 // всплывающая панель «Локация»
+let battlesPanelOpen = false;             // панель «Текущие бои»
+let battlesTimer = null;
 let castleDockPane = null;                // 'members'|'battlelog'|'players'|'chat'|null
 const CASTLE_DOCK_PANES = new Set(['members', 'battlelog', 'chat', 'players']);
 const BATTLE_ONLY_PANES = new Set(['members', 'battlelog']);
@@ -154,7 +158,7 @@ function updateCastleMainMenu() {
 function toggleLocPanel(force) {
   locPanelOpen = force ?? !locPanelOpen;
   locBody.classList.toggle('open', locPanelOpen);
-  if (locPanelOpen) closeCastleDock();
+  if (locPanelOpen) { closeBattlesPanel(); closeCastleDock(); }
   updateCastleMainMenu();
 }
 
@@ -163,6 +167,38 @@ function closeLocPanel() {
   locPanelOpen = false;
   locBody.classList.remove('open');
   updateCastleMainMenu();
+}
+
+function closeBattlesPanel() {
+  battlesPanelOpen = false;
+  battlesBody?.classList.remove('open');
+  clearInterval(battlesTimer);
+  battlesTimer = null;
+  castlePerimeter?.querySelector('[data-castle="battles"]')
+    ?.classList.remove('active');
+}
+
+async function toggleBattlesPanel(force) {
+  if (mode === 'battle') {
+    showToast('Список боёв доступен вне боя');
+    return;
+  }
+  battlesPanelOpen = force ?? !battlesPanelOpen;
+  battlesBody?.classList.toggle('open', battlesPanelOpen);
+  castlePerimeter?.querySelector('[data-castle="battles"]')
+    ?.classList.toggle('active', battlesPanelOpen);
+  if (battlesPanelOpen) {
+    closeLocPanel();
+    closeCastleDock();
+    await refreshBattles();
+    clearInterval(battlesTimer);
+    battlesTimer = setInterval(() => {
+      if (!battlesPanelOpen) { closeBattlesPanel(); return; }
+      refreshBattles();
+    }, 2000);
+  } else {
+    closeBattlesPanel();
+  }
 }
 
 function openCastleDock(pane) {
@@ -175,6 +211,7 @@ function openCastleDock(pane) {
     return;
   }
   closeLocPanel();
+  closeBattlesPanel();
   castleDockPane = pane;
   dockEl.classList.add('dock-open');
   dockEl.dataset.pane = pane;      // у чата/игроков панель выше, чем у участников
@@ -206,6 +243,7 @@ function setMode(next) {
   // 3D-рендер работает только в бою
   if (battle) arena.start(); else arena.stop();
   closeLocPanel();
+  closeBattlesPanel();
   if (battle) openCastleDock('members'); else closeCastleDock();
   applyUILayout();
 }
@@ -296,6 +334,7 @@ function setLocation(key, { quiet = false } = {}) {
   const loc = LOCATIONS[key];
   if (!quiet) chatMessage('Система', `Вы вошли в локацию «${loc.name}».`, true);
   closeLocPanel();
+  closeBattlesPanel();
   closeCastleDock();
   applyUILayout();
   renderLocationActions(loc);
@@ -324,6 +363,8 @@ const BATTLE_ERRORS = {
   battle_not_found: 'бой уже завершён',
   side_full: 'в команде нет места',
   bad_side: 'неверная сторона',
+  not_your_turn: 'сейчас не ваш ход',
+  invalid_move: 'ход невозможен',
 };
 
 /**
@@ -332,7 +373,7 @@ const BATTLE_ERRORS = {
  *  - PvP:    enterBattle({ starter: () => ServerBattle.attack(id) })
  *  - возврат после F5 / на нас напали: enterBattle({ resumed, notice })
  */
-async function enterBattle({ starter = null, resumed = null, notice = null } = {}) {
+async function enterBattle({ starter = null, resumed = null, notice = null, pvpTarget = null } = {}) {
   if (mode === 'battle' || battleLoading) {
     if (!resumed) showToast('Вы уже в бою!');
     return;
@@ -347,14 +388,15 @@ async function enterBattle({ starter = null, resumed = null, notice = null } = {
     dressing.stop();
   }
   setMode('battle');
-  arena.setBackground(LOCATIONS[currentLoc]);
+  // фон арены боя — assets/fight/background.webp (задаётся в CSS .in-battle .arena-stage);
+  // отдельная картинка локации в бою не используется
   if (notice) showToast(notice);
-  await initBattle(resumed, starter);
+  await initBattle(resumed, starter, pvpTarget);
 }
 
 const startBattle = () => enterBattle();
 const startPvp = (target) =>
-  enterBattle({ starter: () => ServerBattle.attack(target.id) });
+  enterBattle({ starter: () => ServerBattle.attack(target.id), pvpTarget: target });
 
 /** Возврат в идущий бой после F5/обрыва связи, либо на нас напали. */
 function resumeBattle(serverBattle) {
@@ -368,7 +410,7 @@ function resumeBattle(serverBattle) {
   });
 }
 
-async function initBattle(resumedBattle = null, starter = null) {
+async function initBattle(resumedBattle = null, starter = null, pvpTarget = null) {
   if (battleLoading) return;
   battleLoading = true;
   loadingEl.classList.remove('hidden');
@@ -397,7 +439,12 @@ async function initBattle(resumedBattle = null, starter = null) {
   try {
     battle = resumedBattle || await (starter || ServerBattle.hunt)();
   } catch (e) {
-    showToast('Не удалось начать бой: ' + (BATTLE_ERRORS[e.message] || e.message));
+    if (e.message === 'target_busy' && e.battleId && pvpTarget) {
+      showTargetBusyPrompt(pvpTarget, e);
+    } else {
+      showToast('Не удалось начать бой: ' + (BATTLE_ERRORS[e.message] || e.message));
+    }
+    if (battle) { battle.destroy(); battle = null; }
     setMode('location');
     return;
   }
@@ -444,7 +491,7 @@ async function initBattle(resumedBattle = null, starter = null) {
       ui.showControls();
       setBeltLive(true);
     } else if (d.waiting) {        // ходит союзник — ждём своего соперника
-      setOpponentVisible(false);   // картинка второго соперника скрывается
+      setOpponentVisible(false);
       ui.showWait();
       setBeltLive(false);
     } else {                       // ходит враг — смотрим на него
@@ -463,25 +510,28 @@ async function initBattle(resumedBattle = null, starter = null) {
   battle.addEventListener('resolve', async (e) => {
     const d = e.detail;
     setBeltLive(false);            // ход разыгрывается — пояс блокируется
-    ui.showWaitTimer();
+    ui.showResolving();            // колесо скрыто, баннер убран — видна анимация
     if (d.roster) ui.setRoster(d.roster);
     if (d.focus) applyFocus(d.focus);
-    for (const side of d.passed || []) {
-      const nm = d.sides[side] ? d.sides[side].name : '';
-      ui.log(`<b>${esc(nm)}</b> пропускает ход`);
-    }
-    for (const s of d.strikes) {
-      if (s.offscreen) {           // удар между другими бойцами — только в журнал
-        ui.log(offscreenLog(s));
-        continue;
+    // в журнал — только удары (#10): пропуски ход не логируем
+    try {
+      for (const s of d.strikes || []) {
+        if (s.offscreen) {         // удар между другими бойцами — только в журнал
+          ui.log(offscreenLog(s));
+          continue;
+        }
+        await playStrike(s, d.sides);
       }
-      await playStrike(s, d.sides);
+    } catch (err) {
+      // анимация не должна «подвесить» бой — досрочно отдаём ход дальше
+      console.error('Ошибка анимации удара:', err);
+    } finally {
+      battle.finishTurn();
     }
-    battle.finishTurn();
   });
 
   battle.addEventListener('battleEnd', (e) => {
-    ui.hideControls(false);
+    ui.hideControls();
     setBeltLive(false);
     if (e.detail.aborted) {
       showToast(e.detail.reason === 'admin'
@@ -494,15 +544,16 @@ async function initBattle(resumedBattle = null, starter = null) {
       // деньги, опыт и задания начислил сервер — просто обновляем шапку
       api.me().then(applyCharacter).catch(console.error);
     }
-    ui.showEnd(victory, {
-      // повторить можно только охоту; на дуэль соперника вызывают заново
-      onRestart: battle.kind === 'pvp' ? null : () => initBattle(),
-      onLeave: () => leaveBattle(true),
-    });
+    ui.showEnd(victory, { onLeave: () => leaveBattle(true) });
   });
 
   battle.addEventListener('serverError', (e) => {
     const code = e.detail.error;
+    if (code === 'not_your_turn' || code === 'invalid_move') {
+      ui?.releasePendingStrike();
+      showToast(BATTLE_ERRORS[code] || code);
+      return;
+    }
     showToast(code === 'no_escape_elixir'
       ? 'Покинуть бой можно только Эликсиром побега'
       : code === 'cannot_leave' ? 'Из боя нельзя просто уйти'
@@ -528,6 +579,8 @@ const ZONE_LABELS = { high: 'голову', mid: 'корпус', low: 'ноги'
 async function playStrike(s, sides) {
   const attacker = fighters[s.attacker];
   const defender = fighters[s.defender];
+  // 3D-модель не загрузилась — не валим розыгрыш, показываем удар в журнале
+  if (!attacker || !defender) { ui.log(offscreenLog(s)); return; }
 
   // Эликсир мощи усиливает удары игрока. Базовый урон считает сервер, поэтому
   // прибавку держим на клиенте: добавочный урон уходит в elixirHp защитника
@@ -554,9 +607,9 @@ async function playStrike(s, sides) {
       defender.hitReact();
       ui.popup(pos, `−${dmg}`, s.crit ? 'crit' : 'dmg');
     }
-    // бьют игрока — отмечаем зону на колесе: синий «звон» при блоке, иначе пробой
+    // бьют игрока — запоминаем зону на колесе (метка видна в следующий свой ход)
     if (s.defender === 'left' && !s.dodged) {
-      ui.showIncoming(s.zone, s.blocked && !s.crit);
+      ui.showIncoming(s.zone);
     }
     showHP(s.defender, s.defenderHp, sides[s.defender].maxHp);
     // «Урон» в шапке — общий урон, нанесённый игроком за весь бой
@@ -596,6 +649,7 @@ function activateTab(name) {
 }
 
 $('loc-scene-close')?.addEventListener('click', () => closeLocPanel());
+$('battles-close')?.addEventListener('click', () => closeBattlesPanel());
 
 // --- расширение нижнего окна жестом ---
 // повести вверх — окно растёт; вниз или тап по ручке — исходная высота ---
@@ -702,12 +756,12 @@ document.querySelectorAll('.chat-tab').forEach((t) => {
 const chatLog = $('chat-log');
 const MAX_CHAT_LINES = 150;   // история не растёт бесконечно
 
-/** Системный шум из истории — не показываем при входе (объявления боёв и т.п.). */
+/** Системный шум из истории — не показываем при входе. Объявления боёв оставляем — по ним вмешиваются. */
 function isChatJunk(sender, body) {
   const s = String(body || '').trim();
   if (!s) return true;
   if (sender !== 'Система') return false;
-  return /^⚔\s*Бой #\d+/.test(s) || /^Вы вошли в локацию/.test(s);
+  return /^Вы вошли в локацию/.test(s);
 }
 
 /** Прокрутить чат к последним сообщениям (после загрузки истории / открытия). */
@@ -893,6 +947,45 @@ async function refreshPlayers() {
   }
 }
 
+/** Список идущих боёв в локации — панель «Текущие бои». */
+async function refreshBattles() {
+  if (!online || !battlesList) return;
+  try {
+    const battles = await api.locationBattles();
+    battlesList.innerHTML = '';
+    if (!battles.length) {
+      battlesList.innerHTML = '<div class="bi-empty">В локации нет идущих боёв</div>';
+      return;
+    }
+    for (const b of battles) {
+      const row = document.createElement('div');
+      row.className = 'battle-row';
+      const label = document.createElement('span');
+      label.className = 'battle-row-label';
+      const kind = b.kind === 'pvp' ? 'дуэль' : 'охота';
+      const left = (b.teams?.left || []).join(', ') || '—';
+      const right = (b.teams?.right || []).join(', ') || '—';
+      label.innerHTML = `<b>Бой #${b.battleId}</b> <span class="m-lvl">(${kind}, ход ${b.turn})</span>`
+        + `<span class="battle-row-teams">${esc(left)} vs ${esc(right)}</span>`;
+      row.appendChild(label);
+      const info = document.createElement('button');
+      info.type = 'button';
+      info.className = 'pvp-btn';
+      info.title = b.allowJoin ? 'Вмешаться' : 'Смотреть состав';
+      info.textContent = b.allowJoin ? '⚔' : 'ℹ';
+      info.addEventListener('click', () => {
+        closeBattlesPanel();
+        openBattleInfo(b.battleId);
+      });
+      row.appendChild(info);
+      battlesList.appendChild(row);
+    }
+  } catch (e) {
+    console.error('Список боёв:', e);
+    battlesList.innerHTML = '<div class="bi-empty">Не удалось загрузить список боёв</div>';
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Окно информации о бое (открывается ссылкой «Бой #N» из чата)
 // ---------------------------------------------------------------------------
@@ -900,17 +993,64 @@ async function refreshPlayers() {
 const binfoEl = $('binfo');
 const binfoTitle = $('binfo-title');
 const binfoBody = $('binfo-body');
+const binfoCopyBtn = $('binfo-copy');
 let binfoTimer = null;   // автообновление, пока бой идёт и окно открыто
+let binfoId = null;      // id боя, открытого в окне (для «скопировать ссылку»)
 
 function closeBattleInfo() {
   binfoEl.classList.add('hidden');
   clearInterval(binfoTimer);
   binfoTimer = null;
+  binfoId = null;
 }
 $('binfo-close').addEventListener('click', closeBattleInfo);
 binfoEl.addEventListener('click', (e) => {
   if (e.target === binfoEl) closeBattleInfo();
 });
+
+/** Постоянная ссылка на бой: открывается через ?battle=N при загрузке игры. */
+function battleLink(id) {
+  return `${location.origin}${location.pathname}?battle=${id}`;
+}
+
+/** Положить текст в буфер обмена: Clipboard API → execCommand → false. */
+async function writeClipboard(text) {
+  // Clipboard API часто запрещён (Telegram WebView, iframe, http) — на отказе
+  // НЕ сдаёмся, а пробуем execCommand под тем же кликом пользователя
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch { /* падаем в execCommand ниже */ }
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.top = '-1000px';
+    ta.setAttribute('readonly', '');
+    document.body.appendChild(ta);
+    ta.select();
+    ta.setSelectionRange(0, text.length);
+    const ok = document.execCommand('copy');
+    ta.remove();
+    return ok;
+  } catch { return false; }
+}
+
+/** Скопировать ссылку на открытый бой (#9 — кнопка в окне статистики боя). */
+async function copyBattleLink() {
+  if (binfoId == null) return;
+  const link = battleLink(binfoId);
+  if (await writeClipboard(link)) {
+    showToast('Ссылка на бой скопирована');
+  } else {
+    // последний рубеж: показать ссылку, чтобы скопировать вручную
+    showToast('Скопируйте ссылку вручную');
+    window.prompt('Ссылка на бой:', link);
+  }
+}
+binfoCopyBtn?.addEventListener('click', copyBattleLink);
 
 const RESULT_LABELS = { 1: 'победа', 2: 'поражение', 3: 'ничья', 4: 'побег', 5: 'таймаут' };
 
@@ -920,7 +1060,41 @@ function intervene(id, side) {
   enterBattle({ starter: () => ServerBattle.join(id, side) });
 }
 
+/** Цель в бою: простой вопрос «Вмешаться в бой «Бой #N»?» + да/нет (#8). */
+function showTargetBusyPrompt(target, detail) {
+  const battleId = detail.battleId;
+  // вмешиваемся ПРОТИВ цели — на сторону, противоположную её стороне
+  const oppose = detail.targetSide === 'left' ? 'right' : 'left';
+  clearInterval(binfoTimer);
+  binfoTimer = null;
+  binfoId = battleId;
+  binfoTitle.textContent = 'Игрок в бою';
+  binfoBody.innerHTML = detail.allowJoin ? `
+    <div class="busy-pvp">
+      <p class="busy-pvp-q">Вмешаться в бой <a href="#" class="battle-link busy-battle-link">«Бой #${battleId}»</a>?</p>
+      <div class="bi-join">
+        <button type="button" class="bi-join-btn busy-join-yes">Да</button>
+        <button type="button" class="bi-join-btn busy-join-no">Нет</button>
+      </div>
+    </div>` : `
+    <div class="busy-pvp">
+      <p><b>${esc(target.name)}</b> уже в бою <a href="#" class="battle-link busy-battle-link">«Бой #${battleId}»</a>.</p>
+      <p class="bi-join-closed">Вмешательство в этот бой закрыто.</p>
+      <div class="bi-join"><button type="button" class="bi-join-btn busy-join-no">Закрыть</button></div>
+    </div>`;
+  binfoEl.classList.remove('hidden');
+  // ссылка «Бой #N» — открыть состав боя
+  binfoBody.querySelectorAll('.busy-battle-link').forEach((a) =>
+    a.addEventListener('click', (e) => { e.preventDefault(); renderBattleInfo(battleId); }));
+  binfoBody.querySelector('.busy-join-yes')?.addEventListener('click', () => {
+    closeBattleInfo();
+    intervene(battleId, oppose);
+  });
+  binfoBody.querySelector('.busy-join-no')?.addEventListener('click', () => closeBattleInfo());
+}
+
 async function openBattleInfo(id) {
+  binfoId = id;
   binfoTitle.textContent = `Бой #${id}`;
   binfoBody.innerHTML = '<div class="bi-empty">Загрузка…</div>';
   binfoEl.classList.remove('hidden');
@@ -930,6 +1104,7 @@ async function openBattleInfo(id) {
 }
 
 async function renderBattleInfo(id) {
+  binfoId = id;
   if (!online) { binfoBody.innerHTML = '<div class="bi-empty">Нет связи с сервером</div>'; return; }
   let d;
   try {
@@ -960,7 +1135,11 @@ async function renderBattleInfo(id) {
         <span>Вмешаться:</span>
         <button class="bi-join-btn" data-side="left">за 1ю команду</button>
         <button class="bi-join-btn" data-side="right">за 2ю команду</button>
-      </div>` : '';
+      </div>` : (d.status === 'active' && !d.allowJoin
+      ? '<div class="bi-join-closed">Вмешательство в этот бой закрыто (охота или настройка сервера).</div>'
+      : (mode === 'battle'
+        ? '<div class="bi-join-closed">Выйдите из текущего боя, чтобы вмешаться.</div>'
+        : ''));
     binfoBody.innerHTML = `
       <div class="bi-teams">
         <div class="bi-team"><div class="bi-team-title">1я команда</div>
@@ -1164,6 +1343,12 @@ function applyFocus(focus) {
   if (focus.id == null || focus.id !== currentFocusId) {
     currentFocusId = focus.id ?? null;
     ui.setOpponent(focus);
+    // NvN: фокус перешёл на нового живого врага — поднимаем правую модель,
+    // если она лежит после гибели прошлого соперника (#6: чёткость мультибоя)
+    const live = focus.alive !== false && (focus.hp == null || focus.hp > 0);
+    if (live && fighters.right && fighters.right.alive === false) {
+      fighters.right.revive();
+    }
   }
   if (focus.maxHp) showHP('right', focus.hp, focus.maxHp);
   setOpponentVisible(true);
@@ -1499,7 +1684,7 @@ castlePerimeter?.addEventListener('click', (e) => {
   if (!btn) return;
   const id = btn.dataset.castle;
   if (id === 'bag') openDressing();
-  else if (id === 'hunt') startBattle();
+  else if (id === 'battles') toggleBattlesPanel();
   else if (CASTLE_STUBS[id]) {
     showToast(`Модуль «${CASTLE_STUBS[id]}» подключается отдельно — пока заглушка`);
   }
@@ -1570,6 +1755,10 @@ function showTelegramGate() {
     serverLocId = ch.location_id;
     setLocation(LOC_BY_ID[ch.location_id] || 'village', { quiet: true });
     refreshPlayers();
+
+    // ссылка вида ?battle=N (скопированная из окна боя) — открываем статистику боя
+    const deepBattle = new URLSearchParams(location.search).get('battle');
+    if (deepBattle && /^\d+$/.test(deepBattle)) openBattleInfo(Number(deepBattle));
   } catch (e) {
     if (e.message === 'dev_auth_disabled') {
       document.querySelector('.game')?.classList.add('hidden');

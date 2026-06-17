@@ -172,8 +172,10 @@ export class Arena {
     const distW = halfWidth / (Math.tan(halfFov) * this.camera.aspect);
     const distH = halfHeight / Math.tan(halfFov);
     const dist = Math.max(distW, distH, 3);
-    this.camera.position.set(0, 1.5, dist + 0.5);
-    this.camera.lookAt(0, 0.92, 0);
+    // смотрим чуть ниже груди — бойцы поднимаются выше в кадре, под ними
+    // открывается пол арены (так они «стоят» на фоне гармоничнее)
+    this.camera.position.set(0, 1.42, dist + 0.5);
+    this.camera.lookAt(0, 0.74, 0);
     this.camera.updateProjectionMatrix();
 
     if (this.onResize) this.onResize();

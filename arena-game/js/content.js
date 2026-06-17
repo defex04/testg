@@ -54,6 +54,7 @@ export const LOCATIONS = {
     name: 'Город Надежды',
     image: 'assets/backgrounds/prigorod.webp',
     actions: [
+      { label: 'Охота на разбойника', hunt: true },
       { label: 'Испить живой воды' },
       { label: 'Подняться в замок', soon: true },
       { label: 'Поселение Зеленое', goto: 'derevna' },
@@ -67,6 +68,7 @@ export const LOCATIONS = {
     name: 'Поселение Зеленое',
     image: 'assets/backgrounds/derevna.webp',
     actions: [
+      { label: 'Охота на разбойника', hunt: true },
       { label: 'Войти в трактир' },
       { label: 'Город Надежды', goto: 'village' },
     ],

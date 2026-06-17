@@ -1,4 +1,5 @@
 import { game, redis } from './db.js';
+import { activeBattlesInLocation } from './battle/manager.js';
 
 /** Присутствие — только Redis: hash loc:{id}:players, как в архитектуре. */
 const key = (locId) => `loc:${locId}:players`;
@@ -52,6 +53,12 @@ export function locationRoutes(app, authed, hub) {
     const { rows } = await game.query(
       `SELECT location_id FROM characters WHERE id = $1`, [req.session.character_id]);
     res.json(await playersIn(rows[0].location_id));
+  });
+
+  app.get('/api/locations/battles', authed, async (req, res) => {
+    const { rows } = await game.query(
+      `SELECT location_id FROM characters WHERE id = $1`, [req.session.character_id]);
+    res.json(activeBattlesInLocation(rows[0].location_id));
   });
 
   app.post('/api/locations/move', authed, async (req, res) => {

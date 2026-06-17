@@ -111,9 +111,9 @@
           <img src="assets/menu/tm-auction.webp" alt="" draggable="false">
           <span class="mi-label">Аукцион</span>
         </button>
-        <button type="button" class="menu-icon" data-castle="hunt" title="Охота на разбойника">
+        <button type="button" class="menu-icon" data-castle="battles" title="Идущие бои в локации — вмешаться или посмотреть">
           <img src="assets/menu/tm-battle.webp" alt="" draggable="false">
-          <span class="mi-label">Охота</span>
+          <span class="mi-label">Текущие бои</span>
         </button>
       </div>
     </nav>
@@ -131,6 +131,13 @@
               <button type="button" class="loc-scene-close" id="loc-scene-close" title="Закрыть">✕</button>
             </div>
             <div class="loc-actions" id="loc-actions"></div>
+          </div>
+          <div class="loc-body battles-body" id="battles-body">
+            <div class="loc-scene-head">
+              <span class="loc-scene-title">Текущие бои</span>
+              <button type="button" class="loc-scene-close" id="battles-close" title="Закрыть">✕</button>
+            </div>
+            <div class="battles-list" id="battles-list"></div>
           </div>
         </section>
 
@@ -269,6 +276,10 @@
       <div class="dressing-head">
         <span class="dressing-title" id="binfo-title">Бой</span>
         <span style="flex:1"></span>
+        <button class="binfo-copy" id="binfo-copy" type="button" title="Скопировать ссылку на бой">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 9h10a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1V10a1 1 0 0 1 1-1Z"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></svg>
+          <span>Ссылка</span>
+        </button>
         <button class="dressing-close" id="binfo-close">✕</button>
       </div>
       <div class="binfo-body" id="binfo-body"></div>

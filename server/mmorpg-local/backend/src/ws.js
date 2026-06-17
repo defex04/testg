@@ -79,7 +79,11 @@ export function createHub(server) {
           }
         }
       } catch (e) {
-        send({ type: 'error', error: e.message });
+        const payload = { type: 'error', error: e.message };
+        for (const k of ['battleId', 'targetSide', 'allowJoin']) {
+          if (e[k] != null) payload[k] = e[k];
+        }
+        send(payload);
       }
     });
 

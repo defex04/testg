@@ -27,7 +27,7 @@ const noop = () => {};
 const cid = (v) => String(v);
 
 const snapKey = (id) => `battle:${id}:state`;
-const err = (msg, status) => Object.assign(new Error(msg), { status });
+const err = (msg, status, extra = {}) => Object.assign(new Error(msg), { status }, extra);
 const other = (s) => (s === 'left' ? 'right' : 'left');
 
 // --- сетевой слой игрока поверх бойца движка ---
@@ -136,16 +136,24 @@ async function targetCfg() {
   };
 }
 
-/** Инициатива PvP: ловкость персонажа (agi), иначе уровень. */
+/**
+ * Инициатива (кто ходит первым) — определяется ОДИН РАЗ при входе в бой и не
+ * зависит от роли: напал ты, напали на тебя или ты вмешался (#3). База — ловкость
+ * (agi), иначе уровень; сверху случайный бросок (0..1), который решает порядок
+ * при равной ловкости. Значение фиксируется в бойце движка и больше не меняется,
+ * поэтому очередь раундов стабильна (см. engine._buildOrder).
+ */
 async function initiativeFor(charId, level) {
   const row = (await game.query(
     `SELECT agi FROM character_stats WHERE character_id = $1`, [charId])).rows[0];
-  return Number(row?.agi) || Number(level) || 0;
+  const base = Number(row?.agi) || Number(level) || 0;
+  return base + Math.random();
 }
 
 /** Политика вмешательства/выхода: приоритет локация → глобальный дефолт по виду боя. */
 async function resolvePolicy(kind, locationId) {
-  const def = (await gameConfig('battle.intervention.default')) || {};
+  const def = (await gameConfig('battle.intervention.default'))
+    || { hunt: false, pvp: true };
   const maxPerSide = Number(await gameConfig('battle.max_per_side')) || 10;
   const loc = (await game.query(
     `SELECT flags FROM locations WHERE id = $1`, [locationId])).rows[0];
@@ -221,7 +229,7 @@ export async function startHunt(ch, send) {
   const engine = new Engine({
     left:  [{ id: ch.id, charId: ch.id, name: ch.name, level: ch.level,
               isAI: false, ...(await combatProfileFor(ch.id, start)) }],
-    right: [{ name: npc.name, level: npc.level, isAI: true, ...npc.stats }],
+    right: [{ id: `npc-${npc.id}`, name: npc.name, level: npc.level, isAI: true, ...npc.stats }],
   }, { turnTime, target: await targetCfg() });
 
   const b = makeBattle(battleId, 'hunt', ch.location_id, policy, engine);
@@ -239,11 +247,27 @@ export async function startHunt(ch, send) {
   return battleId;
 }
 
+/** Контекст идущего боя персонажа (для target_busy и клиента). */
+export function battleContextForChar(charId) {
+  const battleId = byChar.get(cid(charId));
+  if (!battleId) return {};
+  const b = live.get(battleId);
+  if (!b || b.engine.phase === 'ended') return {};
+  const f = b.engine.fighter(cid(charId));
+  return {
+    battleId,
+    targetSide: f ? f.side : null,
+    allowJoin: b.policy.intervention === 'open',
+  };
+}
+
 /** Дуэль PvP: нападение на игрока из списка игроков локации. */
 export async function startDuel(att, def, sendAtt, sendDef) {
   if (cid(att.id) === cid(def.id)) throw err('cannot_attack_self', 400);
   if (byChar.has(cid(att.id))) throw err('already_in_battle', 409);
-  if (byChar.has(cid(def.id))) throw err('target_busy', 409);
+  if (byChar.has(cid(def.id))) {
+    throw err('target_busy', 409, battleContextForChar(def.id));
+  }
   if (att.location_id !== def.location_id) throw err('not_same_location', 400);
 
   const start = await gameConfig('character.start');
@@ -306,6 +330,9 @@ export async function joinBattle(charId, battleId, side, send) {
   b.engine.addFighter(side, { id: ch.id, charId: ch.id, name: ch.name, level: ch.level,
     isAI: false, initiative, ...(await combatProfileFor(ch.id, start)) });
   const p = addPlayer(b, ch.id, send, side);
+  // если вмешались прямо во время розыгрыша — этот sub-turn новичок не видел,
+  // поэтому не ждём от него turnDone (иначе он зря держит ход до страховки)
+  if (b.engine.phase === 'resolving') p.turnDone = true;
   byChar.set(cid(ch.id), battleId);
   await game.query(
     `INSERT INTO battle_participants (battle_id, character_id, side, status, joined_round)
@@ -318,6 +345,8 @@ export async function joinBattle(charId, battleId, side, send) {
     `⚔ Бой #${b.id}: ${ch.name} вмешивается в бой!`).catch(console.error);
 
   p.send({ type: 'battleStart', battleId: b.id, kind: b.kind, ...startView(b, p) });
+  // сразу синхронизируем ход — иначе UI вмешавшегося «зависает» до следующего turnStart
+  if (b.engine.phase === 'choose') p.send(turnStartFor(b, p));
   // остальным — обновлённый состав; активный ход не трогаем
   for (const q of b.players.values()) {
     if (q !== p) q.send({ type: 'rosterUpdate',
@@ -398,11 +427,18 @@ function startTurnTimer(b) {
 
 function onTurnTimeout(b) {
   if (b.engine.phase !== 'choose') return;
-  const af = b.engine.currentActor();
-  if (!af) return;
-  b.engine.submit(af.id, af.isAI
+  let af = b.engine.currentActor();
+  if (!af) {
+    const next = b.engine.advance();
+    if (next) return enterActor(b);
+    return beginRound(b);
+  }
+  const move = af.isAI
     ? b.engine.aiMove(af.id)
-    : { attack: null, block: null, pass: true });
+    : { attack: null, block: null, pass: true };
+  if (!b.engine.submit(af.id, move) && af.isAI) {
+    b.engine.submit(af.id, { attack: null, block: null, pass: true });
+  }
   resolveCurrent(b);
 }
 
@@ -411,7 +447,17 @@ function enterActor(b) {
   const step = b.step;
   for (const p of b.players.values()) p.turnDone = false;
   b.turnEndsAt = Date.now() + b.engine.turnTime * 1000;
-  const af = b.engine.currentActor();
+  // если idx указывает на уже походившего/мёртвого — сдвигаем к следующему
+  let af = b.engine.currentActor();
+  if (!af) {
+    const next = b.engine.advance();
+    if (!next) {
+      if (b.engine.finished()) return void endBattle(b).catch(console.error);
+      return beginRound(b);
+    }
+    af = b.engine.currentActor();
+  }
+  if (!af) return;
   // живому игроку заранее закрепляем «липкого» соперника — фокус не прыгает,
   // и удар без явной цели придётся ровно по тому, кого показали (см. submit)
   if (af && !af.isAI) b.engine.chooseOpponent(af.id);
@@ -421,7 +467,10 @@ function enterActor(b) {
     setTimeout(() => {
       if (b.step !== step) return;   // ход уже сменился — не дублируем
       if (b.engine.phase === 'choose' && b.engine.currentActorId() === af.id) {
-        b.engine.submit(af.id, b.engine.aiMove(af.id));
+        if (!b.engine.submit(af.id, b.engine.aiMove(af.id))) {
+          console.warn(`Бой ${b.id}: ИИ ${af.name} (${af.id}) — пропуск хода`);
+          b.engine.submit(af.id, { attack: null, block: null, pass: true });
+        }
         resolveCurrent(b);
       }
     }, 400 + Math.random() * 900);
@@ -440,11 +489,20 @@ function beginRound(b) {
 export function submitMove(charId, move) {
   const b = live.get(byChar.get(cid(charId)));
   if (!b) return false;
-  if (!b.engine.fighter(cid(charId))) return false;
-  const ok = b.engine.submit(cid(charId), {
+  const me = b.engine.fighter(cid(charId));
+  if (!me) return false;
+  const p = b.players.get(cid(charId));
+  if (b.engine.currentActorId() !== me.id) {
+    p?.send({ type: 'error', error: 'not_your_turn' });
+    return false;
+  }
+  const ok = b.engine.submit(me.id, {
     attack: move.attack, block: move.block ?? null,
     target: move.target ?? null, pass: !!move.pass });
-  if (!ok) return false;
+  if (!ok) {
+    p?.send({ type: 'error', error: 'invalid_move' });
+    return false;
+  }
   resolveCurrent(b);
   return true;
 }
@@ -467,7 +525,7 @@ async function resolveCurrent(b) {
   const anyAttached = attachedList(b).length > 0;
   const step = b.step;
   b.finishTimer = setTimeout(() => { if (b.step === step) advance(b); },
-    anyAttached ? 20000 : 1500);
+    anyAttached ? 6000 : 1500);
 }
 
 export async function finishTurn(charId) {
@@ -621,6 +679,24 @@ async function escapeFighter(b, charId) {
     for (const q of b.players.values())
       q.send({ type: 'rosterUpdate', roster: rosterFor(b, b.engine.fighter(q.charId).side) });
   }
+}
+
+/** Идущие бои в локации (для списка «вмешаться» на клиенте). */
+export function activeBattlesInLocation(locId) {
+  const out = [];
+  for (const b of live.values()) {
+    if (b.locationId !== locId || b.engine.phase === 'ended') continue;
+    const left = b.engine.aliveOf('left').map((f) => f.name);
+    const right = b.engine.aliveOf('right').map((f) => f.name);
+    out.push({
+      battleId: b.id,
+      kind: b.kind,
+      turn: b.engine.turn,
+      allowJoin: b.policy.intervention === 'open',
+      teams: { left, right },
+    });
+  }
+  return out.sort((a, b) => a.battleId - b.battleId);
 }
 
 /** Кнопка «Прервать бой» в админке. */

@@ -535,7 +535,16 @@ body.loc-castle.in-battle .battle-head {
 body.loc-castle.in-battle .arena-stage {
   flex: 1 1 0%;
   min-height: 0;
-  background: linear-gradient(180deg, #0d120a 0%, #1a2210 45%, #0d120a 100%) !important;
+  /* арена-бэкграунд: каменный пол арены внизу кадра (бойцы стоят на нём),
+     ворота и башни — позади. center bottom держит пол видимым на любом экране. */
+  background: #0d120a url('../assets/fight/background.webp') center bottom / cover no-repeat !important;
+}
+
+/* в бою НЕ затемняем верх сцены (#4: иначе арена «обрезана чёрным сверху»);
+   оставляем лишь мягкое затемнение у нижней кромки — переход к панели */
+body.loc-castle.in-battle .arena-stage::after {
+  background: linear-gradient(0deg, rgba(13, 18, 10, .5), transparent 16%);
+  box-shadow: none;
 }
 
 body.loc-castle.in-battle .skill-bar {
@@ -545,9 +554,6 @@ body.loc-castle.in-battle .skill-bar {
 
 /* боевое колесо позиционируется и масштабируется из JS (placeWheel) —
    ровно между бойцами, поэтому в бою спец-оверрайды не нужны */
-body.loc-castle.in-battle .bui-wait {
-  bottom: 8px;
-}
 
 body.loc-castle.in-battle .elixir-belt {
   top: 38%;
@@ -895,6 +901,50 @@ body.loc-castle.in-battle .sprite-main .sm-ico {
   will-change: transform, opacity;
 }
 
+.battles-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 4px;
+  font-size: clamp(11.5px, 3.4vw, 13.5px);
+}
+
+.battle-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(138, 111, 60, .35);
+  background: rgba(0, 0, 0, .28);
+}
+
+.battle-row-label {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  color: #ffd9b0;
+  line-height: 1.35;
+}
+
+.battle-row-teams {
+  font-size: 11px;
+  color: #b8a888;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.menu-icon.active {
+  filter: drop-shadow(0 0 8px rgba(244, 205, 111, .55));
+}
+.menu-icon.active .mi-label { color: var(--gold-bright); }
+
 @keyframes loc-panel-in {
   from { opacity: 0; transform: translate(-50%, 8px); }
   to   { opacity: 1; transform: translateX(-50%); }
@@ -1206,6 +1256,9 @@ body.loc-castle.in-battle .sprite-main .sm-ico {
 .strike-wheel.locked .sw-hit-area { pointer-events: none; }
 .strike-wheel.locked .sw-skip { opacity: 0; pointer-events: none; }
 .strike-wheel.locked .sw-sprite { opacity: .5; }
+/* колесо ПОЛНОСТЬЮ пропадает в чужой ход и при ожидании соперника (#7, #8);
+   остаётся в потоке (нулевая прозрачность) — placeWheel сохраняет координаты */
+.strike-wheel.gone { opacity: 0 !important; pointer-events: none; }
 
 /* слои колеса */
 .sw-fills, .sw-ring, .sw-hit {
@@ -1276,24 +1329,14 @@ body.loc-castle.in-battle .sprite-main .sm-ico {
 }
 .sw-sprite.clang { animation: swClang .4s ease-out; }
 
-/* эффект попадания (burst) на секторе */
-.sw-burst { position: absolute; width: 0; height: 0; transform: translate(-50%, -50%); z-index: 6; pointer-events: none; }
-.sw-burst i { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); border-radius: 50%; }
-.sw-burst .ring { width: calc(var(--d) * .30); height: calc(var(--d) * .30); border: 3px solid var(--bc); opacity: .9; animation: swBurstRing .55s ease-out forwards; }
-.sw-burst .flash { width: calc(var(--d) * .18); height: calc(var(--d) * .18); background: radial-gradient(circle, var(--bc) 0%, transparent 70%); animation: swBurstFlash .5s ease-out forwards; }
-.sw-burst .spark { width: calc(var(--d) * .012); height: calc(var(--d) * .13); background: linear-gradient(var(--bc), transparent); transform-origin: 50% 100%; animation: swBurstSpark .5s ease-out forwards; }
-@keyframes swBurstRing { from { transform: translate(-50%, -50%) scale(.2); opacity: .95; } to { transform: translate(-50%, -50%) scale(1.25); opacity: 0; } }
-@keyframes swBurstFlash { 0% { opacity: 0; transform: translate(-50%, -50%) scale(.3); } 25% { opacity: 1; } 100% { opacity: 0; transform: translate(-50%, -50%) scale(1.1); } }
-@keyframes swBurstSpark { 0% { opacity: 0; } 20% { opacity: 1; } 100% { opacity: 0; height: calc(var(--d) * .05); } }
-
-/* стойкая отметка последнего удара противника — красная клякса на секторе */
+/* стойкая отметка последнего удара противника — только на видимом колесе */
 .sw-lasthit {
   position: absolute;
   width: calc(var(--d) * .2);
   height: calc(var(--d) * .2);
   border-radius: 50%;
   transform: translate(-50%, -50%) scale(.5);
-  z-index: 6;                 /* поверх щита — стойкая метка зоны последнего удара */
+  z-index: 6;
   pointer-events: none;
   opacity: 0;
   background: radial-gradient(circle, rgba(255, 60, 45, .8) 0%, rgba(190, 28, 18, .35) 50%, transparent 72%);
@@ -1301,29 +1344,29 @@ body.loc-castle.in-battle .sprite-main .sm-ico {
   transition: opacity .35s ease, transform .35s cubic-bezier(.3, 1.3, .5, 1);
 }
 .sw-lasthit.show { opacity: .85; transform: translate(-50%, -50%) scale(1); }
-/* клякса видна только в МОЙ ход (когда колесо активно), а не в ход противника */
-.strike-wheel.locked .sw-lasthit { opacity: 0; }
+/* метка только когда колесо на экране (свой ход), не «висит» без круга */
+.strike-wheel.gone .sw-lasthit,
+.strike-wheel.locked .sw-lasthit { opacity: 0 !important; }
 
-/* пилюля «ход противника» — у нижнего края сцены */
+/* баннер «Ожидание противника» — арт вверху сцены, НЕ перекрывает бойцов (#1).
+   Бойцы стоят в нижней части кадра, баннер сидит у верхней кромки. */
 .bui-wait {
   position: absolute;
   left: 50%;
-  bottom: 16px;
+  top: max(8px, env(safe-area-inset-top));
   transform: translateX(-50%);
   z-index: 13;
-  padding: 8px 18px;
-  font-family: var(--font-display);
-  font-size: 13px;
-  color: var(--gold-bright);
-  text-shadow: 0 1px 2px #000;
-  background: rgba(10, 13, 6, .78);
-  border: 1px solid rgba(216, 169, 63, .4);
-  border-radius: 999px;
-  backdrop-filter: blur(3px);
-  box-shadow: 0 6px 18px rgba(0, 0, 0, .45);
-  animation: statpulse 1.1s infinite alternate;
+  width: clamp(220px, 62%, 440px);
   pointer-events: none;
+  animation: waitfloat 1.8s ease-in-out infinite alternate;
 }
+.bui-wait-img {
+  display: block;
+  width: 100%;
+  height: auto;
+  filter: drop-shadow(0 6px 16px rgba(0, 0, 0, .55));
+}
+@keyframes waitfloat { from { transform: translate(-50%, 0); } to { transform: translate(-50%, 4px); } }
 
 /* пропуск хода: удара нет, выбранный блок остаётся защищать */
 .sw-skip {
@@ -1412,6 +1455,40 @@ body.loc-castle.in-battle .sprite-main .sm-ico {
   box-shadow: 0 0 10px rgba(216, 120, 63, .3);
 }
 
+.busy-pvp { font-size: 13px; line-height: 1.5; color: #e8dcc0; }
+.busy-pvp p { margin: 0 0 10px; }
+.busy-pvp-q { margin-top: 14px !important; text-align: center; color: #cdbd8d; }
+
+.bi-join-closed {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line-dim);
+  font-size: 12px;
+  color: #b8a888;
+  text-align: center;
+  line-height: 1.45;
+}
+
+/* кнопка «Скопировать ссылку на бой» в шапке окна боя (#9) */
+.binfo-copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: 8px;
+  padding: 5px 11px;
+  font-family: var(--font-display);
+  font-size: 12px;
+  color: #ffd9b0;
+  background: rgba(216, 120, 63, .12);
+  border: 1px solid rgba(255, 150, 90, .5);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background .15s, box-shadow .15s;
+}
+.binfo-copy svg { width: 15px; height: 15px; }
+.binfo-copy:hover { background: rgba(216, 120, 63, .25); box-shadow: 0 0 10px rgba(216, 120, 63, .3); }
+@media (max-width: 380px) { .binfo-copy span { display: none; } }
+
 /* ---------- всплывающий урон ---------- */
 
 .bui-popups { position: absolute; inset: 0; overflow: hidden; pointer-events: none; z-index: 15; }
@@ -1455,50 +1532,34 @@ body.loc-castle.in-battle .sprite-main .sm-ico {
 
 .bui-end-card {
   text-align: center;
-  padding: 30px 46px;
-  background: linear-gradient(180deg, var(--panel-hi), var(--panel-lo));
-  border: 1px solid var(--line-soft);
-  border-radius: 22px;
-  box-shadow:
-    0 0 60px rgba(0, 0, 0, .8),
-    0 0 30px rgba(216, 169, 63, .14),
-    inset 0 1px 0 rgba(244, 205, 111, .1);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
 }
-.bui-end-title {
-  font-family: var(--font-display);
-  font-size: 30px;
-  font-weight: 700;
-  color: var(--gold-bright);
-  text-shadow: 0 0 18px rgba(216, 169, 63, .5), 0 2px 4px #000;
-  margin-bottom: 20px;
-}
-.bui-end-title.defeat { color: #b9b3a0; text-shadow: 0 2px 4px #000; }
 
-.bui-end-actions { display: flex; gap: 12px; justify-content: center; }
-
-.bui-end-btn {
-  padding: 11px 24px;
-  font-family: var(--font-display);
-  font-size: 15px;
-  font-weight: 700;
-  background: linear-gradient(180deg, #f1c469 0%, #cf9a35 55%, #9c6f1f 100%);
-  color: #2c1f08;
-  text-shadow: 0 1px 0 rgba(255, 240, 190, .5);
-  border: 1px solid #6e5426;
-  border-radius: 12px;
+/* арт-баннер итога (win/lose) с нарисованной кнопкой «Выход» — кликается
+   целиком (#7): надёжнее, чем точечная хит-зона. Размер уменьшен в ~1.5× (#6). */
+.bui-end-banner {
+  display: block;
+  width: clamp(190px, 56vw, 370px);
+  padding: 0;
+  border: 0;
+  background: none;
   cursor: pointer;
-  transition: box-shadow .15s, transform .12s, filter .15s;
-  box-shadow: inset 0 1px 0 rgba(255, 240, 190, .6), 0 4px 10px rgba(0, 0, 0, .5);
+  -webkit-tap-highlight-color: transparent;
+  animation: endpop .4s cubic-bezier(.2, 1.5, .4, 1);
+  transition: transform .12s, filter .15s;
 }
-.bui-end-btn.secondary {
-  background: linear-gradient(180deg, var(--panel-2), var(--panel-lo));
-  color: var(--text);
-  text-shadow: 0 1px 2px #000;
-  border-color: var(--line-dim);
-  box-shadow: inset 0 1px 0 rgba(244, 205, 111, .1), 0 4px 10px rgba(0, 0, 0, .5);
+@keyframes endpop { from { opacity: 0; transform: scale(.7); } to { opacity: 1; transform: scale(1); } }
+.bui-end-img {
+  display: block;
+  width: 100%;
+  height: auto;
+  filter: drop-shadow(0 12px 30px rgba(0, 0, 0, .7));
+  pointer-events: none;
 }
-.bui-end-btn:hover { box-shadow: 0 0 14px rgba(216, 169, 63, .5), 0 4px 10px rgba(0, 0, 0, .5); transform: translateY(-1px); }
-.bui-end-btn:active { transform: translateY(0) scale(.98); }
+.bui-end-banner:hover { transform: translateY(-2px); filter: brightness(1.06) drop-shadow(0 0 14px rgba(255, 215, 130, .35)); }
+.bui-end-banner:active { transform: translateY(0) scale(.985); }
 
 /* ---------- нижняя панель ---------- */
 
@@ -1590,10 +1651,15 @@ body.loc-castle.in-battle .sprite-main .sm-ico {
   padding: 3px 8px;
   margin: 4px 0;
   border: 1px solid transparent;
+  border-left-width: 3px;
   border-radius: 8px;
   transition: border-color .15s, background .15s, box-shadow .15s;
 }
-.member.targetable:hover { border-color: rgba(244, 205, 111, .5); background: rgba(255, 255, 255, .04); }
+/* постоянная отметка стороны для ВСЕХ участников (#3): союзники — зелёным,
+   враги — красным, даже без выбора цели */
+.member.targetable[data-side="left"]  { border-left-color: rgba(120, 220, 120, .6); background: rgba(80, 200, 100, .06); }
+.member.targetable[data-side="right"] { border-left-color: rgba(255, 150, 90, .6);  background: rgba(216, 120, 63, .07); }
+.member.targetable:hover { border-color: rgba(244, 205, 111, .6); background: rgba(255, 255, 255, .05); }
 /* враги (2я команда) — красно-бордовая отметка */
 .member.targeted[data-side="right"] {
   border-color: rgba(255, 150, 90, .85);
@@ -2369,7 +2435,7 @@ button.belt-slot { padding: 0; font: inherit; color: inherit; -webkit-tap-highli
 
   .sw-skip { padding: 5px 11px; font-size: 11px; }
   .sw-status { font-size: 11px; margin-top: 34px; }
-  .bui-wait { bottom: 10px; padding: 6px 14px; font-size: 11.5px; }
+  .bui-wait { width: clamp(180px, 72%, 360px); }
 
   .belt-slot { width: 36px; height: 36px; border-radius: 9px; }
   .belt-slot svg { width: 16px; height: 16px; }
@@ -2381,9 +2447,6 @@ button.belt-slot { padding: 0; font: inherit; color: inherit; -webkit-tap-highli
 
   .bui-popup { font-size: 21px; }
   .bui-popup.crit { font-size: 28px; }
-  .bui-end-card { padding: 22px 26px; border-radius: 18px; }
-  .bui-end-title { font-size: 24px; }
-  .bui-end-btn { padding: 9px 16px; font-size: 13px; }
 
   .dock-body { border-radius: 14px; padding: 10px 14px; }
   .team-title { font-size: 12px; margin-bottom: 8px; }
