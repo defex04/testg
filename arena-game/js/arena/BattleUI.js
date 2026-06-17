@@ -77,6 +77,7 @@ export class BattleUI {
     this.onStrike = opts.onStrike || (() => {});
     this.block = null;    // выбранный блок (BLOCKS id или null)
     this.target = null;
+    this._targetManual = false; // цель выбрана игроком вручную (не авто-фокус)
     this._locked = true;  // до первого turnStart управление неактивно
     this._blockIdByZone = {};
     for (const b of BLOCKS) this._blockIdByZone[b.zones[0]] = b.id;
@@ -307,10 +308,17 @@ export class BattleUI {
    * во вкладке «Участники боя» (см. setRoster).
    */
   setTargets(list = [], focusId = null) {
+    // ручной выбор игрока сохраняется, пока выбранный участник есть в составе
+    const all = this._rosterEls && this._rosterEls.all;
+    if (this._targetManual && this.target != null && all && all[this.target]) {
+      this._refreshTargetMark();
+      return;
+    }
     const targets = list.filter((t) => t && t.alive !== false);
     const ids = new Set(targets.map((t) => t.id));
     this.target = (focusId != null && ids.has(focusId))
       ? focusId : (targets[0] ? targets[0].id : null);
+    this._targetManual = false;
     this._refreshTargetMark();
   }
 
@@ -322,6 +330,7 @@ export class BattleUI {
   _pickTarget(id) {
     if (this._locked) return;
     this.target = String(this.target) === String(id) ? null : id;
+    this._targetManual = this.target != null;   // запомнить ручной выбор
     this._refreshTargetMark();
   }
 
