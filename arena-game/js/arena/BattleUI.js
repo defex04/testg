@@ -1,16 +1,18 @@
 /**
- * Боевой интерфейс арены (под дизайн-макет «чёрная панель с белыми контурами»).
+ * Боевой интерфейс арены.
  *
  * Рендерит:
  *  - шапку боя в `head`: плашки бойцов (уровень, имя, HP/MP), «Урон: N», таймер;
- *  - «штурвал» атаки/блока по центру сцены `stage` + всплывающий урон + экран
- *    конца боя;
+ *  - «боевое колесо» атаки/блока по центру сцены `stage` (ровно между бойцами)
+ *    + всплывающий урон + экран конца боя;
  *  - журнал боя в `log` (вкладка «Лог боя» нижней панели);
  *  - составы команд в `teams.left / teams.right` (вкладка «Участники боя»).
  *
- * Схема боя: 3 удара × 3 блока (вверх / центр / вниз).
- * Блок — переключатель; удар наносится сразу по нажатию зоны атаки,
- * даже если блок не выбран.
+ * Боевое колесо: круг из 6 секторов. Левая половина — блок (щит, 3 зоны),
+ * правая — атака (меч, 3 зоны: верх=голова, центр=корпус, низ=ноги).
+ * Блок — переключатель (выбранная зона горит синим); удар наносится сразу
+ * по нажатию сектора атаки (меч делает выпад), даже если блок не выбран.
+ * Колесо позиционируется и масштабируется относительно бойцов (placeWheel).
  */
 import { ZONES, BLOCKS } from './BattleSystem.js';
 
@@ -20,30 +22,40 @@ const esc = (v) => String(v ?? '').replace(/[&<>"]/g,
 
 const MAX_LOG_ENTRIES = 250;   // журнал боя не растёт бесконечно
 
-/* Пиктограммы зон: шлем / кираса / понож (inline-SVG, цвет — currentColor). */
-const ZONE_ICONS = {
-  high: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-    <path d="M12 3.4c-4.1 0-6.6 2.9-6.6 6.9v9.5l3.3-1.9 3.3 1.9 3.3-1.9 3.3 1.9v-9.5c0-4-2.5-6.9-6.6-6.9Z"/>
-    <path d="M7.9 11.2h8.2"/>
-  </svg>`,
-  mid: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-    <path d="M7.1 3.9C8.6 5 10.2 5.6 12 5.6s3.4-.6 4.9-1.7l2.9 3.3-1.8 2.1v8.6c-1.9 1.1-3.9 1.6-6 1.6s-4.1-.5-6-1.6V9.3L4.2 7.2l2.9-3.3Z"/>
-    <path d="M12 5.8v13.7"/>
-  </svg>`,
-  low: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-    <path d="M8.6 3.6h5.2v8.6l4.3 5.1c.7.9.1 2.2-1 2.2H8.6c-.6 0-1.1-.5-1.1-1.1V4.7c0-.6.5-1.1 1.1-1.1Z"/>
-    <path d="M8.6 12.2h5.2"/>
-  </svg>`,
-};
+const ASSET = 'assets/fight/';
+const SVGNS = 'http://www.w3.org/2000/svg';
 
-/* Иконки рядов штурвала (эмодзи в UI рендерятся нестабильно). */
-const SWORD_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-  <path d="M19 5 9.2 14.8M19 5l-.2 3.2M19 5l-3.2.2"/>
-  <path d="M6.8 12.4l4.8 4.8M9.2 17.8 6.2 20.8M5.2 15.8l3 3"/>
-</svg>`;
-const SHIELD_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-  <path d="M12 3.4 19 6v5.4c0 4.5-2.9 7.7-7 9.2-4.1-1.5-7-4.7-7-9.2V6l7-2.6Z"/>
-</svg>`;
+/* Сектора колеса: k — вид (атака/блок), zone — зона тела, deg — угол центра
+   сектора (математический, 0° = вправо, против часовой). Вертикальные спицы
+   рамы (90°/270°) делят колесо на правую (атака) и левую (блок) половины. */
+const SECTORS = [
+  { k: 'atk', zone: 'high', deg: 60 },
+  { k: 'atk', zone: 'mid',  deg: 0 },
+  { k: 'atk', zone: 'low',  deg: -60 },
+  { k: 'blk', zone: 'high', deg: 120 },
+  { k: 'blk', zone: 'mid',  deg: 180 },
+  { k: 'blk', zone: 'low',  deg: 240 },
+];
+
+/* Радиусы выверены по wheel.png (ступица ~r74, внутр. край обода ~r198 из 265):
+   заливка идёт от-под-ступицы до-под-обод, без зазоров — обод/спицы рамы
+   (рисуются поверх) дают чистые границы секторов. */
+const RO = 39;        // под внутренний край обода (viewBox 0..100)
+const RI = 12;        // под край ступицы
+const FILL_PAD = 0;   // без зазора у спиц — рама перекрывает швы
+const TR_R = 40;      // радиус кольца-таймера (по ободу)
+
+const polar = (r, deg) => {
+  const a = (deg * Math.PI) / 180;
+  return [50 + r * Math.cos(a), 50 - r * Math.sin(a)];
+};
+/* Сектор-кольцо ломаной (без хлопот с дугами SVG — на этом масштабе незаметно). */
+function wedgePath(a0, a1, ri, ro) {
+  const N = 18, pts = [];
+  for (let i = 0; i <= N; i++) pts.push(polar(ro, a0 + ((a1 - a0) * i) / N));
+  for (let i = N; i >= 0; i--) pts.push(polar(ri, a0 + ((a1 - a0) * i) / N));
+  return 'M' + pts.map((p) => p[0].toFixed(2) + ' ' + p[1].toFixed(2)).join(' L') + ' Z';
+}
 
 export class BattleUI {
   /**
@@ -60,8 +72,11 @@ export class BattleUI {
     this.logEl = opts.log;
     this.teamEls = opts.teams;
     this.onStrike = opts.onStrike || (() => {});
-    this.block = null;    // выбранный блок (id или null)
-    this._locked = true;  // до первого turnStart кнопки неактивны
+    this.block = null;    // выбранный блок (BLOCKS id или null)
+    this.target = null;
+    this._locked = true;  // до первого turnStart управление неактивно
+    this._blockIdByZone = {};
+    for (const b of BLOCKS) this._blockIdByZone[b.zones[0]] = b.id;
     this._build(opts);
     this.log(`<b>${esc(opts.left.name)}</b> против <b>${esc(opts.right.name)}</b> — бой начинается!`);
   }
@@ -90,17 +105,10 @@ export class BattleUI {
       <div class="bh-damage">Урон: 0</div>
       <div class="bh-timer">—:——</div>`;
 
-    // --- штурвал атаки/блока по центру сцены ---
-    const wheel = document.createElement('div');
-    wheel.className = 'strike-wheel';
-    wheel.innerHTML = `
-      <div class="sw-targets hidden" title="Выбрать цель"></div>
-      <div class="sw-row sw-attack"><span class="sw-tag" title="Удар">${SWORD_ICON}</span><div class="sw-btns"></div></div>
-      <div class="sw-row sw-block"><span class="sw-tag" title="Блок">${SHIELD_ICON}</span><div class="sw-btns"></div></div>
-      <button class="sw-skip" type="button" title="Не бить в этот ход (выбранный блок остаётся)">Пропустить ход</button>
-      <div class="sw-status"></div>`;
+    // --- боевое колесо по центру сцены ---
+    const wheel = this._buildWheel();
 
-    // --- пилюля «ожидание противника» (штурвал на это время скрыт) ---
+    // --- пилюля «ожидание противника» (внизу сцены) ---
     const wait = document.createElement('div');
     wait.className = 'bui-wait hidden';
 
@@ -145,42 +153,11 @@ export class BattleUI {
       leave: end.querySelector('.bui-leave'),
     };
 
-    // зоны атаки: нажатие = немедленный удар (с текущим блоком или без него)
-    this._atkButtons = [];
-    const atkRow = wheel.querySelector('.sw-attack .sw-btns');
-    for (const z of ZONES) {
-      const b = document.createElement('button');
-      b.type = 'button';
-      b.className = 'swb';
-      b.title = `Удар: ${z.hint}`;
-      b.innerHTML = ZONE_ICONS[z.id];
-      b.addEventListener('click', () => this._strike(z.id, b));
-      atkRow.appendChild(b);
-      this._atkButtons.push(b);
-    }
-
-    // зоны блока: переключатель, можно вовсе не выбирать
-    this._blkButtons = [];
-    const blkRow = wheel.querySelector('.sw-block .sw-btns');
-    for (const blk of BLOCKS) {
-      const b = document.createElement('button');
-      b.type = 'button';
-      b.className = 'swb';
-      b.dataset.block = blk.id;
-      b.title = `Блок: ${blk.hint}`;
-      b.innerHTML = ZONE_ICONS[blk.zones[0]];
-      b.addEventListener('click', () => this._selectBlock(blk.id));
-      blkRow.appendChild(b);
-      this._blkButtons.push(b);
-    }
-
-    // пропуск хода: удара нет, выбранный блок продолжает защищать
+    // пропуск хода (цель в NvN выбирается в списке участников — см. setRoster)
+    this._validTargets = null;
+    this._rosterEls = { left: {}, right: {} };
     this._skipBtn = wheel.querySelector('.sw-skip');
     this._skipBtn.addEventListener('click', () => this._skip());
-
-    // выбор цели (NvN): по умолчанию — текущий сфокусированный соперник
-    this._targetRow = wheel.querySelector('.sw-targets');
-    this.target = null;
 
     // --- вкладка «Участники боя»: составы команд ---
     this._members = {};
@@ -195,13 +172,107 @@ export class BattleUI {
 
     this.logEl.innerHTML = '';
     this._setLocked(true, null);
+    this.wheel.classList.add('locked');
   }
 
-  _strike(zoneId, btn) {
+  /** Колесо: слои заливок секторов, рама-png, кольцо-таймер, спрайты, хит-зоны. */
+  _buildWheel() {
+    const wheel = document.createElement('div');
+    wheel.className = 'strike-wheel locked';
+    wheel.innerHTML = `
+      <svg class="sw-fills" viewBox="0 0 100 100" aria-hidden="true">
+        <defs>
+          <radialGradient id="swAtk" cx="50%" cy="50%" r="62%">
+            <stop offset="18%" stop-color="#7a2417"/><stop offset="100%" stop-color="#bd3e2c"/>
+          </radialGradient>
+          <radialGradient id="swBlk" cx="50%" cy="50%" r="62%">
+            <stop offset="0%" stop-color="#1b3a5e"/><stop offset="100%" stop-color="#2f7fe0"/>
+          </radialGradient>
+          <radialGradient id="swBlkOn" cx="50%" cy="50%" r="62%">
+            <stop offset="0%" stop-color="#2766b8"/><stop offset="100%" stop-color="#57a6ff"/>
+          </radialGradient>
+        </defs>
+      </svg>
+      <img class="sw-frame" src="${ASSET}wheel.png" alt="" draggable="false">
+      <svg class="sw-ring" viewBox="0 0 100 100" aria-hidden="true">
+        <circle class="sw-timer" cx="50" cy="50" r="${TR_R}"></circle>
+      </svg>
+      <div class="sw-sprites"></div>
+      <svg class="sw-hit" viewBox="0 0 100 100"></svg>
+      <button class="sw-skip" type="button" title="Не бить в этот ход (выбранный блок остаётся)">Пропустить ход</button>
+      <div class="sw-status"></div>`;
+
+    const fills = wheel.querySelector('.sw-fills');
+    const hit = wheel.querySelector('.sw-hit');
+    const sprites = wheel.querySelector('.sw-sprites');
+    this._fills = {};
+    this._sprites = {};
+    this._sectorPos = {};
+
+    for (const s of SECTORS) {
+      const id = s.k + '-' + s.zone;
+      const icon = s.k === 'atk' ? 'sword' : 'shield';
+
+      const fill = document.createElementNS(SVGNS, 'path');
+      fill.setAttribute('d', wedgePath(s.deg - 30 + FILL_PAD, s.deg + 30 - FILL_PAD, RI, RO));
+      fill.setAttribute('class', 'swedge ' + s.k);
+      fills.appendChild(fill);
+      this._fills[id] = fill;
+
+      const rs = s.k === 'atk' ? 25 : 26;
+      const [sx, sy] = polar(rs, s.deg);
+      this._sectorPos[id] = [sx, sy];
+      const ux = Math.cos((s.deg * Math.PI) / 180);
+      const uy = -Math.sin((s.deg * Math.PI) / 180);
+      // меч: остриём наружу по сектору (к врагу); щит — строго вертикально
+      const rot = s.k === 'atk' ? 270 - s.deg : 0;
+      const sp = document.createElement('div');
+      sp.className = 'sw-sprite ' + icon;
+      sp.style.left = sx + '%';
+      sp.style.top = sy + '%';
+      sp.style.setProperty('--ux', ux.toFixed(3));
+      sp.style.setProperty('--uy', uy.toFixed(3));
+      sp.style.setProperty('--base', `translate(-50%,-50%) rotate(${rot}deg)`);
+      sp.innerHTML = `<img src="${ASSET}${icon}.png" alt="" draggable="false">`;
+      sprites.appendChild(sp);
+      this._sprites[id] = sp;
+
+      const h = document.createElementNS(SVGNS, 'path');
+      h.setAttribute('d', wedgePath(s.deg - 30, s.deg + 30, RI, RO + 6));
+      h.setAttribute('class', 'sw-hit-area ' + s.k);
+      const hint = ZONES.find((z) => z.id === s.zone)?.hint ?? '';
+      const title = document.createElementNS(SVGNS, 'title');
+      title.textContent = (s.k === 'atk' ? 'Удар: ' : 'Блок: ') + hint;
+      h.appendChild(title);
+      h.addEventListener('pointerenter', () => this._hover(id, true));
+      h.addEventListener('pointerleave', () => this._hover(id, false));
+      h.addEventListener('click', () => {
+        if (this._locked) return;
+        if (s.k === 'atk') this._strike(s.zone);
+        else this._selectBlock(s.zone);
+      });
+      hit.appendChild(h);
+    }
+
+    this._timerRing = wheel.querySelector('.sw-timer');
+    this._timerC = 2 * Math.PI * TR_R;
+    this._timerRing.style.strokeDasharray = this._timerC;
+    this._turnMax = 0;
+    return wheel;
+  }
+
+  _hover(id, on) {
+    if (on && this._locked) return;
+    this._fills[id].classList.toggle('hot', on);
+    this._sprites[id].classList.toggle('hot', on);
+  }
+
+  _strike(zone) {
     if (this._locked) return;
     this._locked = true; // защита от двойного клика до hideControls()
-    btn.classList.add('chosen');
-    this.onStrike({ attack: zoneId, block: this.block, target: this.target });
+    const sp = this._sprites['atk-' + zone];
+    sp.classList.remove('thrust'); void sp.offsetWidth; sp.classList.add('thrust');
+    this.onStrike({ attack: zone, block: this.block, target: this.target });
   }
 
   _skip() {
@@ -210,31 +281,49 @@ export class BattleUI {
     this.onStrike({ attack: null, block: this.block, pass: true, target: this.target });
   }
 
+  _selectBlock(zone) {
+    if (this._locked) return;
+    const id = this._blockIdByZone[zone];
+    this.block = this.block === id ? null : id;
+    this._refreshBlocks();
+  }
+
+  /** Подсветить выбранный блок на всех левых секторах. */
+  _refreshBlocks() {
+    for (const z of ['high', 'mid', 'low']) {
+      const on = this.block === this._blockIdByZone[z];
+      this._fills['blk-' + z].classList.toggle('on', on);
+      this._sprites['blk-' + z].classList.toggle('on', on);
+    }
+  }
+
   /**
-   * Список живых врагов для выбора цели. До 1 цели — строка скрыта,
-   * цель всё равно проставляется (для NvN на сервере).
+   * Живые враги, по которым можно бить (NvN). Сам выбор цели — кликом по врагу
+   * во вкладке «Участники боя» (см. setRoster); здесь только список допустимых
+   * целей и цель по умолчанию.
    */
   setTargets(list = [], focusId = null) {
     const targets = list.filter((t) => t && t.alive !== false);
-    this.target = (focusId != null && targets.some((t) => t.id === focusId))
+    this._validTargets = new Set(targets.map((t) => t.id));
+    this.target = (focusId != null && this._validTargets.has(focusId))
       ? focusId : (targets[0] ? targets[0].id : null);
-    this._targetRow.innerHTML = '';
-    this._targetRow.classList.toggle('hidden', targets.length <= 1);
-    if (targets.length <= 1) return;
-    for (const t of targets) {
-      const b = document.createElement('button');
-      b.type = 'button';
-      b.className = 'swt';
-      b.dataset.id = t.id;
-      b.textContent = `${esc(t.name)} [${t.level ?? '?'}]`;
-      b.classList.toggle('active', t.id === this.target);
-      b.addEventListener('click', () => {
-        if (this._locked) return;
-        this.target = t.id;
-        for (const x of this._targetRow.children)
-          x.classList.toggle('active', x.dataset.id === String(t.id));
-      });
-      this._targetRow.appendChild(b);
+    this._refreshTargetMark();
+  }
+
+  /** Выбрать цель кликом по врагу в списке участников. */
+  _pickTarget(id) {
+    if (this._locked) return;
+    if (this._validTargets && !this._validTargets.has(id)) return;
+    this.target = id;
+    this._refreshTargetMark();
+  }
+
+  /** Подсветить текущую цель в списке участников. */
+  _refreshTargetMark() {
+    const right = this._rosterEls && this._rosterEls.right;
+    if (!right) return;
+    for (const id in right) {
+      right[id].classList.toggle('targeted', String(this.target) === id);
     }
   }
 
@@ -247,38 +336,42 @@ export class BattleUI {
     plate.querySelector('.bh-level').textContent = info.level ?? '';
   }
 
-  /** Составы команд во вкладке «Участники боя» с полосками HP. */
+  /**
+   * Составы команд во вкладке «Участники боя» с полосками HP. Живые враги
+   * (правая команда) кликабельны — это и есть выбор цели в NvN.
+   */
   setRoster(roster) {
     if (!roster) return;
+    this._rosterEls = { left: {}, right: {} };
     for (const side of ['left', 'right']) {
       const host = this.teamEls[side];
       host.innerHTML = '';
       for (const f of roster[side] || []) {
         const pct = f.maxHp ? Math.max(0, (f.hp / f.maxHp) * 100) : 0;
+        const dead = f.alive === false || f.hp <= 0;
         const m = document.createElement('div');
-        m.className = 'member' + (f.alive === false || f.hp <= 0 ? ' dead' : '');
+        m.className = 'member' + (dead ? ' dead' : '');
         m.innerHTML = `<div class="m-line">${esc(f.name)} <span class="m-lvl">[${f.level ?? '?'}]</span></div>
           <div class="m-bar"><div class="m-fill" style="width:${pct}%"></div></div>`;
+        // правая команда = враги: живых можно выбирать целью
+        if (side === 'right' && f.id != null) {
+          m.dataset.id = f.id;
+          this._rosterEls.right[f.id] = m;
+          if (!dead) {
+            m.classList.add('targetable');
+            m.addEventListener('click', () => this._pickTarget(f.id));
+          }
+        }
         host.appendChild(m);
       }
     }
-  }
-
-  _selectBlock(id) {
-    if (this._locked) return;
-    this.block = this.block === id ? null : id;
-    for (const b of this._blkButtons) {
-      b.classList.toggle('active', b.dataset.block === this.block);
-    }
+    this._refreshTargetMark();
   }
 
   _setLocked(locked, statusText) {
     this._locked = locked;
     this.wheel.classList.toggle('waiting', !!statusText);
     this.refs.status.textContent = statusText || '';
-    for (const b of this._atkButtons) b.disabled = locked;
-    for (const b of this._blkButtons) b.disabled = locked;
-    this._skipBtn.disabled = locked;
   }
 
   setHP(side, cur, max) {
@@ -305,43 +398,116 @@ export class BattleUI {
     const s = Math.max(0, sec);
     this.refs.timer.textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
     this.refs.timer.classList.toggle('urgent', s <= 5);
+    // кольцо-таймер на колесе: за «полный» ход берём наибольшее виденное время
+    if (s > this._turnMax) this._turnMax = s;
+    if (this._timerRing && this._turnMax) {
+      const frac = Math.max(0, Math.min(1, s / this._turnMax));
+      this._timerRing.style.strokeDashoffset = (this._timerC * (1 - frac)).toFixed(1);
+      this._timerRing.classList.toggle('low', s <= 5);
+    }
+  }
+
+  /** Поставить колесо ровно между бойцами и задать его диаметр (px). */
+  placeWheel(layout) {
+    if (!layout || !this.wheel) return;
+    this.wheel.style.left = layout.x + 'px';
+    this.wheel.style.top = layout.y + 'px';
+    this.wheel.style.setProperty('--d', Math.round(layout.diameter) + 'px');
   }
 
   /**
-   * Штурвал плавно исчезает на время удара; пока ждём выбор противника,
-   * вместо него видна пилюля статуса.
+   * Колесо во время удара/ожидания не прячется (оно — центр сцены между
+   * бойцами), а только гаснет и блокируется, чтобы на нём были видны эффекты
+   * входящих ударов.
    */
   hideControls(showWait = true) {
     this._setLocked(true, null);
-    this.wheel.classList.add('off');
+    this.wheel.classList.add('locked');
     this.waitEl.textContent = '⏳ Ход противника…';
     this.waitEl.classList.toggle('hidden', !showWait);
   }
 
-  /** Свой ход: штурвал активен; блок в UI держится между ходами, отжатие снимает стойку в ходе. */
+  /** Свой ход: колесо активно; блок держится между ходами. */
   showControls() {
-    for (const b of this._blkButtons) {
-      b.classList.toggle('active', b.dataset.block === this.block);
-    }
-    for (const b of this._atkButtons) b.classList.remove('chosen');
+    this._refreshBlocks();
+    for (const id in this._sprites) this._sprites[id].classList.remove('thrust', 'hot', 'clang');
+    for (const id in this._fills) this._fills[id].classList.remove('hot');
     this._setLocked(false, null);
-    this.wheel.classList.remove('off');
+    this.wheel.classList.remove('locked');
     this.waitEl.classList.add('hidden');
   }
 
-  /** Чужой ход (PvP): только таймер в шапке, панель ударов скрыта. */
+  /** Чужой ход (PvP): колесо погашено, таймер в шапке тикает. */
   showWaitTimer() {
     this._setLocked(true, null);
-    this.wheel.classList.add('off');
+    this.wheel.classList.add('locked');
     this.waitEl.classList.add('hidden');
   }
 
-  /** Ожидание соперника (NvN): плашка с текстом, штурвал скрыт. */
+  /** Ожидание соперника (NvN): погашенное колесо + плашка с текстом. */
   showWait(text = '⏳ Ожидание соперника…') {
     this._setLocked(true, null);
-    this.wheel.classList.add('off');
+    this.wheel.classList.add('locked');
     this.waitEl.textContent = text;
     this.waitEl.classList.remove('hidden');
+  }
+
+  /**
+   * Эффект входящего удара противника по зоне `zone`: отметка зоны на колесе
+   * (левый сектор блока) + вспышка-burst. Синий «звон» при удачном блоке,
+   * красный пробой — иначе.
+   */
+  showIncoming(zone, blocked) {
+    const id = 'blk-' + zone;
+    const fill = this._fills[id];
+    if (!fill) return;
+    // отметка зоны на (погашенном) колесе — куда целил противник
+    fill.style.setProperty('--rest', fill.classList.contains('on') ? '1' : '0.32');
+    fill.classList.remove('aim'); void fill.getBoundingClientRect(); fill.classList.add('aim');
+    if (blocked) {
+      const sp = this._sprites[id];
+      sp.classList.remove('clang'); void sp.offsetWidth; sp.classList.add('clang');
+    }
+    // запоминаем последнее место удара противника — стойкая красная клякса
+    const [sx, sy] = this._sectorPos[id];
+    this._markLastHit(sx, sy);
+    // burst — в незатемняемом слое попапов поверх сцены, координаты сектора → px
+    const d = parseFloat(getComputedStyle(this.wheel).getPropertyValue('--d')) || this.wheel.clientWidth || 300;
+    const cx = parseFloat(this.wheel.style.left) || this.wheel.offsetLeft + d / 2;
+    const cy = parseFloat(this.wheel.style.top) || this.wheel.offsetTop + d / 2;
+    const x = cx - d / 2 + (sx / 100) * d;
+    const y = cy - d / 2 + (sy / 100) * d;
+    this._burst(x, y, d, blocked ? '#6aa6ff' : '#ff4733');
+  }
+
+  /** Стойкая отметка последнего удара противника (красная клякса на секторе). */
+  _markLastHit(sx, sy) {
+    if (!this._lastHitEl) {
+      this._lastHitEl = document.createElement('div');
+      this._lastHitEl.className = 'sw-lasthit';
+      this.wheel.appendChild(this._lastHitEl);
+    }
+    this._lastHitEl.style.left = sx + '%';
+    this._lastHitEl.style.top = sy + '%';
+    this._lastHitEl.classList.remove('show'); void this._lastHitEl.offsetWidth;
+    this._lastHitEl.classList.add('show');
+  }
+
+  _burst(x, y, d, color) {
+    const b = document.createElement('div');
+    b.className = 'sw-burst';
+    b.style.left = x + 'px';
+    b.style.top = y + 'px';
+    b.style.setProperty('--d', d + 'px');
+    b.style.setProperty('--bc', color);
+    let html = '<i class="flash"></i><i class="ring"></i>';
+    for (let i = 0; i < 6; i++) {
+      const a = i * 60 + (Math.random() * 20 - 10);
+      html += `<i class="spark" style="transform:translate(-50%,-100%) rotate(${a}deg)"></i>`;
+    }
+    b.innerHTML = html;
+    this.refs.popups.appendChild(b);
+    setTimeout(() => b.remove(), 700);
   }
 
   /** Всплывающая цифра урона в экранной точке {x, y} (координаты сцены). */

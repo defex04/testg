@@ -427,6 +427,12 @@ async function initBattle(resumedBattle = null, starter = null) {
   totalDamage = 0;
   ui.setDamage(0);
 
+  // колесо ставим ровно между бойцами и пересчитываем при каждом ресайзе сцены
+  const layoutWheel = () => { if (ui) ui.placeWheel(arena.wheelLayout()); };
+  arena.onResize = layoutWheel;
+  layoutWheel();
+  requestAnimationFrame(layoutWheel);
+
   battle.addEventListener('turnStart', (e) => {
     const d = e.detail;
     if (d.turn !== lastTurnShown) { ui.setTurn(d.turn); lastTurnShown = d.turn; }
@@ -547,6 +553,10 @@ async function playStrike(s, sides) {
     } else {
       defender.hitReact();
       ui.popup(pos, `−${dmg}`, s.crit ? 'crit' : 'dmg');
+    }
+    // бьют игрока — отмечаем зону на колесе: синий «звон» при блоке, иначе пробой
+    if (s.defender === 'left' && !s.dodged) {
+      ui.showIncoming(s.zone, s.blocked && !s.crit);
     }
     showHP(s.defender, s.defenderHp, sides[s.defender].maxHp);
     // «Урон» в шапке — общий урон, нанесённый игроком за весь бой

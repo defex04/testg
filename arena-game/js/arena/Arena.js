@@ -175,6 +175,29 @@ export class Arena {
     this.camera.position.set(0, 1.5, dist + 0.5);
     this.camera.lookAt(0, 0.92, 0);
     this.camera.updateProjectionMatrix();
+
+    if (this.onResize) this.onResize();
+  }
+
+  /**
+   * Экранная раскладка боевого колеса: центр — ровно между бойцами (на высоте
+   * груди), диаметр — доля проекции дистанции между ними, чтобы колесо влезало
+   * в зазор и не перекрывало модели. Возвращает null, пока сцена без размера.
+   */
+  wheelLayout(scale = 0.6) {
+    const w = this.container.clientWidth;
+    const h = this.container.clientHeight;
+    if (!w || !h) return null;
+    const yc = 1.06;                       // высота груди бойца, м
+    const half = this.spacing / 2;
+    const a = this.worldToScreen(new THREE.Vector3(-half, yc, 0));
+    const b = this.worldToScreen(new THREE.Vector3(half, yc, 0));
+    const gap = Math.abs(b.x - a.x);
+    return {
+      x: (a.x + b.x) / 2,
+      y: (a.y + b.y) / 2,
+      diameter: Math.max(120, gap * scale),
+    };
   }
 
   _tick() {
