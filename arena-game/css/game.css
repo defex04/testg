@@ -1252,19 +1252,23 @@ body.loc-castle.in-battle .sprite-main .sm-ico {
   filter: drop-shadow(0 3px 5px rgba(0, 0, 0, .6));
 }
 .sw-sprite img { display: block; width: 100%; height: auto; }
-.sw-sprite.sword { width: calc(var(--d) * .25); }
-.sw-sprite.shield { width: calc(var(--d) * .17); }
+.sw-sprite.sword { width: calc(var(--d) * .12); }
+.sw-sprite.shield { width: calc(var(--d) * .145); }
 .sw-sprite.hot { filter: drop-shadow(0 0 7px var(--glow)) drop-shadow(0 3px 5px rgba(0, 0, 0, .6)); }
 .sw-sprite.sword.hot { --glow: rgba(255, 120, 80, .9); transform: var(--base) scale(1.07); }
 .sw-sprite.shield.on { --glow: rgba(110, 170, 255, 1); transform: var(--base) scale(1.06); }
 .sw-sprite.shield.hot { --glow: rgba(110, 170, 255, .7); }
 
+/* выпад: замах назад, затем рывок остриём по направлению удара и возврат.
+   Смещение задаём ДО var(--base) — в экранных координатах (не в повёрнутой
+   системе меча), поэтому корпус идёт вбок, голова — вверх, ноги — вниз. */
 @keyframes swThrust {
   0%   { transform: var(--base); }
-  32%  { transform: var(--base) translate(calc(var(--ux) * 16px), calc(var(--uy) * 16px)) scale(1.14); }
+  20%  { transform: translate(calc(var(--ux) * var(--d) * -0.025), calc(var(--uy) * var(--d) * -0.025)) var(--base); }
+  52%  { transform: translate(calc(var(--ux) * var(--d) * 0.1), calc(var(--uy) * var(--d) * 0.1)) var(--base); }
   100% { transform: var(--base); }
 }
-.sw-sprite.thrust { animation: swThrust .42s cubic-bezier(.25, .8, .3, 1); }
+.sw-sprite.thrust { animation: swThrust .4s cubic-bezier(.3, .85, .35, 1); }
 @keyframes swClang {
   0%, 100% { transform: var(--base) scale(1.06); }
   20% { transform: var(--base) translate(calc(var(--ux) * -5px), calc(var(--uy) * -5px)) rotate(-7deg) scale(1.06); }
@@ -1297,6 +1301,8 @@ body.loc-castle.in-battle .sprite-main .sm-ico {
   transition: opacity .35s ease, transform .35s cubic-bezier(.3, 1.3, .5, 1);
 }
 .sw-lasthit.show { opacity: .85; transform: translate(-50%, -50%) scale(1); }
+/* клякса видна только в МОЙ ход (когда колесо активно), а не в ход противника */
+.strike-wheel.locked .sw-lasthit { opacity: 0; }
 
 /* пилюля «ход противника» — у нижнего края сцены */
 .bui-wait {
@@ -1577,7 +1583,8 @@ body.loc-castle.in-battle .sprite-main .sm-ico {
 .members-grid.hide-dead .member.dead { display: none; }
 .members-center { padding-top: 2px; }
 
-/* выбор цели (NvN): живые враги в списке участников кликабельны */
+/* выбор цели: участники в списке кликабельны (враг — удар, союзник — лечение,
+   мёртвый — воскрешение) */
 .member.targetable {
   cursor: pointer;
   padding: 3px 8px;
@@ -1587,12 +1594,18 @@ body.loc-castle.in-battle .sprite-main .sm-ico {
   transition: border-color .15s, background .15s, box-shadow .15s;
 }
 .member.targetable:hover { border-color: rgba(244, 205, 111, .5); background: rgba(255, 255, 255, .04); }
-.member.targeted {
+/* враги (2я команда) — красно-бордовая отметка */
+.member.targeted[data-side="right"] {
   border-color: rgba(255, 150, 90, .85);
   background: rgba(216, 120, 63, .14);
   box-shadow: 0 0 10px rgba(216, 120, 63, .3);
 }
-.member.targeted .m-line::after { content: ' ⚔'; color: #ffb077; }
+/* союзники (1я команда) — зелёная отметка */
+.member.targeted[data-side="left"] {
+  border-color: rgba(120, 220, 120, .9);
+  background: rgba(80, 200, 100, .14);
+  box-shadow: 0 0 10px rgba(80, 200, 100, .35);
+}
 
 .ghost-btn {
   padding: 7px clamp(6px, 2vw, 14px);

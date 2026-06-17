@@ -25,25 +25,28 @@ const MAX_LOG_ENTRIES = 250;   // журнал боя не растёт беск
 const ASSET = 'assets/fight/';
 const SVGNS = 'http://www.w3.org/2000/svg';
 
-/* Сектора колеса: k — вид (атака/блок), zone — зона тела, deg — угол центра
-   сектора (математический, 0° = вправо, против часовой). Вертикальные спицы
-   рамы (90°/270°) делят колесо на правую (атака) и левую (блок) половины. */
+/* Сектора колеса заданы по РЕАЛЬНЫМ углам спиц wheel.png (адаптивно): спицы
+   стоят неравномерно, поэтому границы секторов берём из замера, а не из
+   «ровных» 60°. Так заливка ложится точно по спицам. a0..a1 — границы сектора
+   (углы математические: 0° = вправо, против часовой; рост по сектору).
+   Вертикальные спицы 90°/270° делят колесо на правую (атака) и левую (блок). */
 const SECTORS = [
-  { k: 'atk', zone: 'high', deg: 60 },
-  { k: 'atk', zone: 'mid',  deg: 0 },
-  { k: 'atk', zone: 'low',  deg: -60 },
-  { k: 'blk', zone: 'high', deg: 120 },
-  { k: 'blk', zone: 'mid',  deg: 180 },
-  { k: 'blk', zone: 'low',  deg: 240 },
+  { k: 'atk', zone: 'mid',  a0: 326,   a1: 392.5 }, // правый сектор (через 0°)
+  { k: 'atk', zone: 'high', a0: 32.5,  a1: 90 },
+  { k: 'atk', zone: 'low',  a0: 269.8, a1: 326 },
+  { k: 'blk', zone: 'high', a0: 90,    a1: 147.2 },
+  { k: 'blk', zone: 'mid',  a0: 147.2, a1: 214 },
+  { k: 'blk', zone: 'low',  a0: 214,   a1: 269.8 },
 ];
 
-/* Радиусы выверены по wheel.png (ступица ~r74, внутр. край обода ~r198 из 265):
-   заливка идёт от-под-ступицы до-под-обод, без зазоров — обод/спицы рамы
-   (рисуются поверх) дают чистые границы секторов. */
-const RO = 39;        // под внутренний край обода (viewBox 0..100)
-const RI = 12;        // под край ступицы
-const FILL_PAD = 0;   // без зазора у спиц — рама перекрывает швы
-const TR_R = 40;      // радиус кольца-таймера (по ободу)
+/* Радиусы выверены по wheel.png (квадрат, круг по центру): ступица r≈14,
+   внутр. край обода r≈37, внешний ≈44 (viewBox 0..100). */
+const RO = 37;          // под внутренний край обода
+const RI = 14;          // под край ступицы
+const FILL_PAD = 1.4;   // лёгкий отступ заливки от спиц
+const TR_R = 40;        // кольцо-таймера — в полосе обода
+const SHIELD_R = 25;    // радиус центра щита (в середине сектора)
+const SWORD_R = 33;     // радиус центра меча — рукоять в зоне, остриё за ободом
 
 const polar = (r, deg) => {
   const a = (deg * Math.PI) / 180;
@@ -153,9 +156,8 @@ export class BattleUI {
       leave: end.querySelector('.bui-leave'),
     };
 
-    // пропуск хода (цель в NvN выбирается в списке участников — см. setRoster)
-    this._validTargets = null;
-    this._rosterEls = { left: {}, right: {} };
+    // пропуск хода (цель выбирается в списке участников — см. setRoster)
+    this._rosterEls = { all: {} };
     this._skipBtn = wheel.querySelector('.sw-skip');
     this._skipBtn.addEventListener('click', () => this._skip());
 
@@ -212,33 +214,36 @@ export class BattleUI {
     for (const s of SECTORS) {
       const id = s.k + '-' + s.zone;
       const icon = s.k === 'atk' ? 'sword' : 'shield';
+      const c = (s.a0 + s.a1) / 2;           // центр сектора (угол)
 
       const fill = document.createElementNS(SVGNS, 'path');
-      fill.setAttribute('d', wedgePath(s.deg - 30 + FILL_PAD, s.deg + 30 - FILL_PAD, RI, RO));
+      fill.setAttribute('d', wedgePath(s.a0 + FILL_PAD, s.a1 - FILL_PAD, RI, RO));
       fill.setAttribute('class', 'swedge ' + s.k);
       fills.appendChild(fill);
       this._fills[id] = fill;
 
-      const rs = s.k === 'atk' ? 25 : 26;
-      const [sx, sy] = polar(rs, s.deg);
-      this._sectorPos[id] = [sx, sy];
-      const ux = Math.cos((s.deg * Math.PI) / 180);
-      const uy = -Math.sin((s.deg * Math.PI) / 180);
-      // меч: остриём наружу по сектору (к врагу); щит — строго вертикально
-      const rot = s.k === 'atk' ? 270 - s.deg : 0;
+      // щит — по центру сектора; меч — рукоять в зоне, остриё за ободом
+      const rs = s.k === 'atk' ? SWORD_R : SHIELD_R;
+      const [sx, sy] = polar(rs, c);
+      // клякса/burst ставим в зоне блока (на радиусе щита)
+      this._sectorPos[id] = polar(SHIELD_R, c);
+      const ux = Math.cos((c * Math.PI) / 180);
+      const uy = -Math.sin((c * Math.PI) / 180);
+      // меч: остриём наружу по своему сектору (к врагу); щит — строго вертикально
+      const rot = s.k === 'atk' ? 270 - c : 0;
       const sp = document.createElement('div');
       sp.className = 'sw-sprite ' + icon;
       sp.style.left = sx + '%';
       sp.style.top = sy + '%';
       sp.style.setProperty('--ux', ux.toFixed(3));
       sp.style.setProperty('--uy', uy.toFixed(3));
-      sp.style.setProperty('--base', `translate(-50%,-50%) rotate(${rot}deg)`);
+      sp.style.setProperty('--base', `translate(-50%,-50%) rotate(${rot.toFixed(1)}deg)`);
       sp.innerHTML = `<img src="${ASSET}${icon}.png" alt="" draggable="false">`;
       sprites.appendChild(sp);
       this._sprites[id] = sp;
 
       const h = document.createElementNS(SVGNS, 'path');
-      h.setAttribute('d', wedgePath(s.deg - 30, s.deg + 30, RI, RO + 6));
+      h.setAttribute('d', wedgePath(s.a0, s.a1, RI, RO + 7));
       h.setAttribute('class', 'sw-hit-area ' + s.k);
       const hint = ZONES.find((z) => z.id === s.zone)?.hint ?? '';
       const title = document.createElementNS(SVGNS, 'title');
@@ -298,32 +303,34 @@ export class BattleUI {
   }
 
   /**
-   * Живые враги, по которым можно бить (NvN). Сам выбор цели — кликом по врагу
-   * во вкладке «Участники боя» (см. setRoster); здесь только список допустимых
-   * целей и цель по умолчанию.
+   * Цель по умолчанию (сфокусированный враг). Сам выбор — кликом по участнику
+   * во вкладке «Участники боя» (см. setRoster).
    */
   setTargets(list = [], focusId = null) {
     const targets = list.filter((t) => t && t.alive !== false);
-    this._validTargets = new Set(targets.map((t) => t.id));
-    this.target = (focusId != null && this._validTargets.has(focusId))
+    const ids = new Set(targets.map((t) => t.id));
+    this.target = (focusId != null && ids.has(focusId))
       ? focusId : (targets[0] ? targets[0].id : null);
     this._refreshTargetMark();
   }
 
-  /** Выбрать цель кликом по врагу в списке участников. */
+  /**
+   * Выбрать цель кликом по участнику (повторный клик по выбранному — снять
+   * выделение). Можно выбирать кого угодно — врага (удар), союзника (лечение),
+   * мёртвого (свиток воскрешения); что допустимо для действия, решает сервер.
+   */
   _pickTarget(id) {
     if (this._locked) return;
-    if (this._validTargets && !this._validTargets.has(id)) return;
-    this.target = id;
+    this.target = String(this.target) === String(id) ? null : id;
     this._refreshTargetMark();
   }
 
   /** Подсветить текущую цель в списке участников. */
   _refreshTargetMark() {
-    const right = this._rosterEls && this._rosterEls.right;
-    if (!right) return;
-    for (const id in right) {
-      right[id].classList.toggle('targeted', String(this.target) === id);
+    const els = this._rosterEls && this._rosterEls.all;
+    if (!els) return;
+    for (const id in els) {
+      els[id].classList.toggle('targeted', String(this.target) === id);
     }
   }
 
@@ -337,12 +344,13 @@ export class BattleUI {
   }
 
   /**
-   * Составы команд во вкладке «Участники боя» с полосками HP. Живые враги
-   * (правая команда) кликабельны — это и есть выбор цели в NvN.
+   * Составы команд во вкладке «Участники боя» с полосками HP. Любой участник
+   * кликабелен — это выбор цели: враг (удар), союзник (лечение) или мёртвый
+   * (воскрешение). Допустимость цели для действия проверяет сервер.
    */
   setRoster(roster) {
     if (!roster) return;
-    this._rosterEls = { left: {}, right: {} };
+    this._rosterEls = { all: {} };
     for (const side of ['left', 'right']) {
       const host = this.teamEls[side];
       host.innerHTML = '';
@@ -353,14 +361,12 @@ export class BattleUI {
         m.className = 'member' + (dead ? ' dead' : '');
         m.innerHTML = `<div class="m-line">${esc(f.name)} <span class="m-lvl">[${f.level ?? '?'}]</span></div>
           <div class="m-bar"><div class="m-fill" style="width:${pct}%"></div></div>`;
-        // правая команда = враги: живых можно выбирать целью
-        if (side === 'right' && f.id != null) {
+        if (f.id != null) {
           m.dataset.id = f.id;
-          this._rosterEls.right[f.id] = m;
-          if (!dead) {
-            m.classList.add('targetable');
-            m.addEventListener('click', () => this._pickTarget(f.id));
-          }
+          m.dataset.side = side;
+          m.classList.add('targetable');
+          this._rosterEls.all[f.id] = m;
+          m.addEventListener('click', () => this._pickTarget(f.id));
         }
         host.appendChild(m);
       }
