@@ -51,7 +51,8 @@ function broadcast(b, payloadFor) {
 
 // --- зеркалирование: команда зрителя как left ---
 const pub = (f) => f && ({ id: f.id, name: f.name, level: f.level,
-  hp: Math.round(f.hp), maxHp: f.maxHp, alive: f.alive });
+  hp: Math.round(f.hp), maxHp: f.maxHp, alive: f.alive,
+  buffTurns: f.buffTurns || 0 });
 const rosterFor = (b, vSide) => ({
   left:  b.engine.teams[vSide].map((id) => pub(b.engine.fighter(id))),
   right: b.engine.teams[other(vSide)].map((id) => pub(b.engine.fighter(id))),
@@ -504,6 +505,49 @@ export function submitMove(charId, move) {
     return false;
   }
   resolveCurrent(b);
+  return true;
+}
+
+const clampNum = (v, lo, hi, d) => {
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : d;
+};
+
+/**
+ * Использовать боевой эликсир (здоровья/мощи) в свой ход. Сервер применяет
+ * эффект к движку (реальное лечение / усиление урона на N ударов) и рассылает
+ * результат: пьющему — для шапки/всплывашки, всем — обновлённый ростер.
+ * Значения зажимаются (анти-чит): heal ≤ 60% макс. HP, мощь ≤ +100% на ≤5 ударов.
+ */
+export function useElixir(charId, msg = {}) {
+  const b = live.get(byChar.get(cid(charId)));
+  if (!b || b.engine.phase === 'ended') return false;
+  const me = b.engine.fighter(cid(charId));
+  const p = b.players.get(cid(charId));
+  if (!me || !me.alive) return false;
+  // только в свой ход выбора (как пояс на клиенте: beltLive=true лишь на своём ходу)
+  if (b.engine.phase !== 'choose' || b.engine.currentActorId() !== me.id) {
+    p?.send({ type: 'error', error: 'not_your_turn' });
+    return false;
+  }
+  const kind = msg.kind === 'power' ? 'power' : 'health';
+  let healed = 0, mult = 1, turns = 0;
+  if (kind === 'health') {
+    healed = b.engine.heal(me.id, me.maxHp * clampNum(msg.potency, 0.05, 0.6, 0.3));
+  } else {
+    mult = 1 + clampNum(msg.potency, 0.05, 1, 0.3);
+    turns = clampNum(msg.turns, 1, 5, 3);
+    b.engine.addBuff(me.id, mult, turns);
+  }
+  snapshot(b.id, b).catch(console.error);
+  broadcast(b, (q) => {
+    const isUser = cid(q.charId) === cid(charId);
+    const qme = b.engine.fighter(q.charId);
+    return { type: 'elixir', side: isUser ? 'left' : null,
+      kind, heal: healed, mult, turns, buffTurns: me.buffTurns,
+      hp: Math.round(me.hp), maxHp: me.maxHp,
+      roster: rosterFor(b, qme.side) };
+  });
   return true;
 }
 

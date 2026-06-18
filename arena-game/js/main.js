@@ -138,9 +138,15 @@ const BATTLE_ONLY_PANES = new Set(['members', 'battlelog']);
 /** Применить фон и подписи текущей локации. */
 function applyUILayout() {
   const loc = LOCATIONS[currentLoc];
-  castleBg.style.background = loc.image
-    ? `#0a0e07 url("${loc.image}") center / cover no-repeat`
-    : (loc.css || '#0a0e07');
+  // в бою фон — общая 9:16 арена (back_arena): её центральный круг приходится
+  // на бойцов, нижняя часть — под окна (участники/лог/чат). Вне боя — фон локации.
+  // `auto 108% bottom`: низ (камень/колонны) прижат к низу, картинка чуть
+  // увеличена и поднята — круг встаёт под ноги бойцов (крутить % высоты тут).
+  castleBg.style.background = mode === 'battle'
+    ? '#0a0e07 url("assets/fight/back_arena.jpg") center bottom / auto 108% no-repeat'
+    : (loc.image
+        ? `#0a0e07 url("${loc.image}") center / cover no-repeat`
+        : (loc.css || '#0a0e07'));
   locSceneTitle.textContent = loc.name;
   updateCastleMainMenu();
 }
@@ -219,6 +225,18 @@ function openCastleDock(pane) {
   dockExpanded = false;
   activateTab(pane);
   updateCastleMainMenu();
+  // запоминаем выбранное окно боя — чтобы восстановить его после F5/реконнекта
+  if (mode === 'battle') saveBattlePane(pane);
+}
+
+/** Сохранить последнее выбранное окно боя (переживает перезагрузку страницы). */
+function saveBattlePane(pane) {
+  try { localStorage.setItem('arena.battlePane', pane); } catch {}
+}
+function loadBattlePane() {
+  let pane = 'members';
+  try { pane = localStorage.getItem('arena.battlePane') || 'members'; } catch {}
+  return CASTLE_DOCK_PANES.has(pane) ? pane : 'members';
 }
 
 function closeCastleDock() {
@@ -229,6 +247,10 @@ function closeCastleDock() {
   dockExpanded = false;
   updateCastleMainMenu();
 }
+
+// какое окно открыть при входе в бой: свежий бой — всегда «Участники»;
+// возврат в идущий бой (F5/реконнект) — последнее выбранное окно (см. enterBattle)
+let battleEntryPane = 'members';
 
 /** Переключение «локация» ⇄ «бой». */
 function setMode(next) {
@@ -244,7 +266,9 @@ function setMode(next) {
   if (battle) arena.start(); else arena.stop();
   closeLocPanel();
   closeBattlesPanel();
-  if (battle) openCastleDock('members'); else closeCastleDock();
+  if (battle) openCastleDock(BATTLE_ONLY_PANES.has(battleEntryPane)
+    || CASTLE_DOCK_PANES.has(battleEntryPane) ? battleEntryPane : 'members');
+  else closeCastleDock();
   applyUILayout();
 }
 
@@ -387,6 +411,9 @@ async function enterBattle({ starter = null, resumed = null, notice = null, pvpT
     dressingEl.classList.add('hidden');
     dressing.stop();
   }
+  // свежий бой всегда открывает «Участники»; возврат в идущий бой (F5/реконнект) —
+  // последнее выбранное окно (точки 6 и 7 ТЗ)
+  battleEntryPane = resumed ? loadBattlePane() : 'members';
   setMode('battle');
   // фон арены боя — assets/fight/background.webp (задаётся в CSS .in-battle .arena-stage);
   // отдельная картинка локации в бою не используется
@@ -463,6 +490,8 @@ async function initBattle(resumedBattle = null, starter = null, pvpTarget = null
       setBeltLive(false);          // удар завершает ввод хода — пояс блокируется
       battle.submitMove('left', move);
     },
+    onInfo: (side) => showFighterInfo(side),
+    onMemberInfo: (id) => showMemberInfo(id),
   });
   resetElixirBattle();             // новый бой — заряды пояса и эффекты с нуля
   lastTurnShown = 0;
@@ -473,6 +502,11 @@ async function initBattle(resumedBattle = null, starter = null, pvpTarget = null
   ui.setOpponent(battle.focus);
   totalDamage = 0;
   ui.setDamage(0);
+  ui.setEffects('left', []);
+  ui.setEffects('right', []);
+  // энергия пока без серверной механики — показываем пустые полосы
+  ui.setEnergy('left', 0, 0);
+  ui.setEnergy('right', 0, 0);
 
   // колесо ставим ровно между бойцами и пересчитываем при каждом ресайзе сцены
   const layoutWheel = () => { if (ui) ui.placeWheel(arena.wheelLayout()); };
@@ -526,8 +560,35 @@ async function initBattle(resumedBattle = null, starter = null, pvpTarget = null
       // анимация не должна «подвесить» бой — досрочно отдаём ход дальше
       console.error('Ошибка анимации удара:', err);
     } finally {
+      // серверный счётчик «Эликсира мощи» убывает с каждым ударом — синхронизируем чип
+      if (d.sides && d.sides.left && d.sides.left.buffTurns != null) {
+        selfBuffTurns = d.sides.left.buffTurns;
+        refreshSelfEffects();
+      }
       battle.finishTurn();
     }
+  });
+
+  // Эликсир применил СЕРВЕР: обновляем HP/всплывашку/эффект игрока и ростер.
+  battle.addEventListener('elixir', (e) => {
+    const d = e.detail;
+    if (d.roster) ui.setRoster(d.roster);
+    if (d.side !== 'left') return;          // эффект союзника/врага — только ростер
+    showHP('left', d.hp, d.maxHp);
+    const pos = fighters.left
+      ? arena.worldToScreen(fighters.left.headPoint()) : { x: 70, y: 90 };
+    const name = esc(battle.sides.left.name);
+    if (d.kind === 'health' && d.heal > 0) {
+      ui.popup(pos, `+${d.heal}`, 'heal');
+      ui.log(`<b>${name}</b> восстанавливает ${d.heal} HP`);
+    } else if (d.kind === 'power') {
+      const pct = Math.round((d.mult - 1) * 100);
+      selfBuffPct = pct;
+      ui.popup(pos, `Мощь +${pct}%`, 'crit');
+      ui.log(`<b>${name}</b> усиливает удары на +${pct}% (${d.turns} х.)`);
+    }
+    selfBuffTurns = d.buffTurns || 0;
+    refreshSelfEffects();
   });
 
   battle.addEventListener('battleEnd', (e) => {
@@ -582,19 +643,8 @@ async function playStrike(s, sides) {
   // 3D-модель не загрузилась — не валим розыгрыш, показываем удар в журнале
   if (!attacker || !defender) { ui.log(offscreenLog(s)); return; }
 
-  // Эликсир мощи усиливает удары игрока. Базовый урон считает сервер, поэтому
-  // прибавку держим на клиенте: добавочный урон уходит в elixirHp защитника
-  // (отрицательный бонус), и серверные пересчёты HP его не стирают.
-  let dmg = s.damage;
-  if (s.attacker === 'left' && !s.dodged && powerBuff && powerBuff.turns > 0) {
-    dmg = Math.round(s.damage * powerBuff.mult);
-    elixirHp[s.defender] -= (dmg - s.damage);
-    powerBuff.turns -= 1;
-    if (powerBuff.turns <= 0) {
-      powerBuff = null;
-      ui.log('Действие «Эликсира мощи» закончилось.');
-    }
-  }
+  // Урон (в т.ч. усиление «Эликсиром мощи») считает СЕРВЕР — s.damage уже итоговый.
+  const dmg = s.damage;
 
   await attacker.strike(defender, () => {
     const pos = arena.worldToScreen(defender.headPoint());
@@ -734,13 +784,46 @@ dockGrip.addEventListener('click', () => {
   if (!dockClickGuard) dockSnap(!dockExpanded);
 });
 
-// «Показать/Скрыть убитых» во вкладке участников
+// тап ВНЕ окна (по сцене/слотам) возвращает развёрнутое окно в исходную высоту —
+// окна не «залипают» раскрытыми (улучшенное поведение расширения, см. ТЗ).
+document.addEventListener('pointerdown', (e) => {
+  if (mode !== 'battle' || !dockExpanded) return;
+  if (!dockEl.classList.contains('dock-open')) return;
+  if (e.target.closest('#bottom-dock') || e.target.closest('.castle-main-menu')) return;
+  dockSnap(false);
+}, true);
+
+// Инструменты вкладки «Участники»: показать убитых, сортировка, поиск по нику
 const membersGrid = $('members-grid');
-$('show-dead').addEventListener('click', () => {
+const showDeadBtn = $('show-dead');
+showDeadBtn.addEventListener('click', () => {
   membersGrid.classList.toggle('hide-dead');
-  $('show-dead').textContent =
-    membersGrid.classList.contains('hide-dead') ? 'Показать убитых' : 'Скрыть убитых';
+  const showing = !membersGrid.classList.contains('hide-dead');
+  showDeadBtn.classList.toggle('active', showing);
+  showDeadBtn.title = showing ? 'Скрыть убитых' : 'Показать убитых';
 });
+
+const membersSearch = $('members-search');
+membersSearch?.addEventListener('input', () => {
+  if (ui) ui.setRosterFilter({ search: membersSearch.value });
+});
+
+// сортировка по HP/энергии: повторный тап по той же кнопке меняет направление
+let memberSort = { key: null, dir: 1 };
+function applyMemberSort(key) {
+  if (memberSort.key === key) memberSort.dir = -memberSort.dir;
+  else { memberSort.key = key; memberSort.dir = 1; }
+  if (ui) ui.setRosterFilter({ sortKey: memberSort.key, sortDir: memberSort.dir });
+  for (const [id, k] of [['sort-hp', 'hp'], ['sort-en', 'en']]) {
+    const b = $(id);
+    if (!b) continue;
+    b.classList.toggle('active', memberSort.key === k);
+    const dir = b.querySelector('.mtool-dir');
+    if (dir) dir.textContent = memberSort.key === k ? (memberSort.dir < 0 ? '▼' : '▲') : '';
+  }
+}
+$('sort-hp')?.addEventListener('click', () => applyMemberSort('hp'));
+$('sort-en')?.addEventListener('click', () => applyMemberSort('en'));
 
 // подвкладки чата — заглушка
 document.querySelectorAll('.chat-tab').forEach((t) => {
@@ -1097,6 +1180,7 @@ async function openBattleInfo(id) {
   binfoId = id;
   binfoTitle.textContent = `Бой #${id}`;
   binfoBody.innerHTML = '<div class="bi-empty">Загрузка…</div>';
+  if (binfoCopyBtn) binfoCopyBtn.style.display = '';   // вернуть «скопировать ссылку»
   binfoEl.classList.remove('hidden');
   clearInterval(binfoTimer);
   binfoTimer = null;
@@ -1305,10 +1389,8 @@ async function syncServerEquip(slotName, itemKey, prevKey = null) {
 // ---------------------------------------------------------------------------
 // Эликсиры: боевой пояс из ELIXIR_SLOTS ячеек. Надеваются в гардеробе,
 // используются в бою; число доступных за бой = вместимость пояса (по заряду
-// на ячейку). Бой ведёт сервер и об эликсирах не знает, поэтому эффект держим
-// на клиенте поверх серверного HP: elixirHp — бонус «эффективного HP» по
-// сторонам, переживающий серверные пересчёты. Когда сервер начнёт принимать
-// действие «эликсир», эту клиентскую надстройку можно будет убрать.
+// на ячейку). Использование отправляется на СЕРВЕР (ServerBattle.useElixir):
+// сервер реально лечит/усиливает бойца в движке и присылает событие 'elixir'.
 // ---------------------------------------------------------------------------
 
 // иконка-призрак пустой ячейки пояса (как в исходном боевом оверлее)
@@ -1316,18 +1398,16 @@ const FLASK_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" st
 
 const elixirBelt = new Array(ELIXIR_SLOTS).fill(null);  // ячейка -> ключ ITEMS | null
 const elixirSpent = new Set();         // индексы ячеек, использованных в этом бою
-const elixirHp = { left: 0, right: 0 };// клиентский бонус эффективного HP
-let powerBuff = null;                  // { mult, turns } — активный эликсир мощи
+let selfBuffTurns = 0;                 // оставшиеся усиленные удары (с сервера)
+let selfBuffPct = 0;                   // прибавка урона «Эликсира мощи», %
 let beltLive = false;                  // можно ли использовать пояс прямо сейчас
 
 const battleBeltEl = $('elixir-belt');
 const dressingBeltEl = $('dressing-belt');
 
-/** Показать HP стороны с учётом клиентского эликсир-бонуса (heal/мощь).
- *  Сервер решает смерть: при baseHp<=0 показываем 0, иначе не ниже 1. */
+/** Показать HP стороны (HP считает сервер; при baseHp<=0 — 0, иначе не ниже 1). */
 function showHP(side, baseHp, maxHp) {
-  const hp = baseHp <= 0 ? 0
-    : Math.min(maxHp, Math.max(1, baseHp + elixirHp[side]));
+  const hp = baseHp <= 0 ? 0 : Math.min(maxHp, Math.max(1, baseHp));
   ui.setHP(side, hp, maxHp);
 }
 
@@ -1354,6 +1434,41 @@ function applyFocus(focus) {
   setOpponentVisible(true);
 }
 
+/** Карточка «информация об игроке» (модалка боя): имя, уровень, HP, сторона. */
+function fighterCard(name, level, hp, maxHp, teamLabel) {
+  const rows = [`<div class="finfo-row"><span>Уровень</span><b>${esc(String(level ?? '?'))}</b></div>`];
+  if (maxHp) rows.push(
+    `<div class="finfo-row"><span>Здоровье</span><b>${Math.max(0, Math.round(hp))} / ${maxHp}</b></div>`);
+  if (teamLabel) rows.push(`<div class="finfo-row"><span>Сторона</span><b>${teamLabel}</b></div>`);
+  binfoTitle.textContent = name || '—';
+  binfoBody.innerHTML = `<div class="finfo">${rows.join('')}</div>`;
+  if (binfoCopyBtn) binfoCopyBtn.style.display = 'none';   // не бой — ссылку не копируем
+  clearInterval(binfoTimer); binfoTimer = null; binfoId = null;
+  binfoEl.classList.remove('hidden');
+}
+
+/** «Инфо» у ника в шапке боя (своя плашка / сфокусированный соперник). */
+function showFighterInfo(side) {
+  if (!battle || !battle.sides) return;
+  const base = battle.sides[side] || {};
+  const info = side === 'right' && battle.focus ? battle.focus : base;
+  fighterCard(info.name ?? base.name, info.level ?? base.level,
+    info.hp != null ? info.hp : base.hp, info.maxHp ?? base.maxHp,
+    side === 'left' ? '1я команда' : '2я команда');
+}
+
+/** «Инфо» у участника в окне «Участники боя» — ищем бойца в ростере по id. */
+function showMemberInfo(id) {
+  if (!battle || !battle.roster) return;
+  for (const side of ['left', 'right']) {
+    const f = (battle.roster[side] || []).find((x) => String(x.id) === String(id));
+    if (f) {
+      fighterCard(f.name, f.level, f.hp, f.maxHp, side === 'left' ? '1я команда' : '2я команда');
+      return;
+    }
+  }
+}
+
 const offscreenLog = (s) => {
   const a = `<b>${esc(s.attackerName)}</b>`, t = `<b>${esc(s.defenderName)}</b>`;
   if (s.dodged) return `${t} уворачивается от удара ${a}`;
@@ -1364,11 +1479,22 @@ const offscreenLog = (s) => {
 /** Сбросить эликсир-эффекты и заряды к началу боя. */
 function resetElixirBattle() {
   elixirSpent.clear();
-  elixirHp.left = 0;
-  elixirHp.right = 0;
-  powerBuff = null;
+  selfBuffTurns = 0;
+  selfBuffPct = 0;
   beltLive = false;
   renderBattleBelt();
+  refreshSelfEffects();
+}
+
+/** Показать активные эффекты игрока иконками с таймером в шапке боя. */
+function refreshSelfEffects() {
+  if (!ui) return;
+  const list = [];
+  if (selfBuffTurns > 0) {
+    list.push({ icon: '💪', time: selfBuffTurns, kind: 'buff',
+                label: `Эликсир мощи: урон +${selfBuffPct}%` });
+  }
+  ui.setEffects('left', list);
 }
 
 function setBeltLive(v) {
@@ -1376,21 +1502,27 @@ function setBeltLive(v) {
   renderBattleBelt();
 }
 
-/** Боевой пояс: показываем только заполненные ячейки, клик — использовать. */
+/** Боевой пояс эликсиров под кругом: ВСЕ ячейки видны (пустые — заглушки),
+ *  заполненные кликабельны в свой ход. */
 function renderBattleBelt() {
   if (!battleBeltEl) return;
-  const filled = elixirBelt.some((k) => k);
-  battleBeltEl.classList.toggle('hidden', !filled || mode !== 'battle');
+  battleBeltEl.classList.toggle('hidden', mode !== 'battle');
   battleBeltEl.innerHTML = '';
-  if (!filled) return;
+  if (mode !== 'battle') return;
   for (let i = 0; i < ELIXIR_SLOTS; i++) {
     const key = elixirBelt[i];
-    if (!key) continue;
+    if (!key) {
+      const empty = document.createElement('div');
+      empty.className = 'combat-slot elixir empty';
+      empty.title = 'Пустая ячейка эликсира';
+      battleBeltEl.appendChild(empty);
+      continue;
+    }
     const el = ITEMS[key];
     const spent = elixirSpent.has(i);
     const slot = document.createElement('button');
     slot.type = 'button';
-    slot.className = `belt-slot elixir filled kind-${el.kind === 'health' ? 'health' : 'power'}`
+    slot.className = `combat-slot elixir filled kind-${el.kind === 'health' ? 'health' : 'power'}`
       + (spent ? ' spent' : '');
     slot.disabled = spent || !beltLive;
     slot.title = spent ? `${el.name} — использован` : `${el.name} — использовать`;
@@ -1400,29 +1532,20 @@ function renderBattleBelt() {
   }
 }
 
-/** Использовать эликсир из ячейки i (только в свой ход, по разу на ячейку). */
+/** Использовать эликсир из ячейки i (только в свой ход, по разу на ячейку).
+ *  Эффект применяет СЕРВЕР (battle.useElixir) и присылает событие 'elixir'. */
 function useElixir(i) {
   if (mode !== 'battle' || !battle || battle.phase === 'ended' || !beltLive) return;
   const key = elixirBelt[i];
   if (!key || elixirSpent.has(i)) return;
   const el = ITEMS[key];
-  const s = battle.sides.left;
-  const pos = fighters.left
-    ? arena.worldToScreen(fighters.left.headPoint())
-    : { x: 70, y: 90 };
-
-  if (el.kind === 'health') {
-    const heal = Math.round(s.maxHp * (el.potency ?? 0.3));
-    elixirHp.left += heal;
-    showHP('left', s.hp, s.maxHp);
-    ui.popup(pos, `+${heal}`, 'heal');
-    ui.log(`<b>${esc(s.name)}</b> выпивает «${esc(el.name)}»: +${heal} HP`);
-  } else {
-    const pct = Math.round((el.potency ?? 0.3) * 100);
-    powerBuff = { mult: 1 + (el.potency ?? 0.3), turns: el.turns ?? 3 };
-    ui.popup(pos, `Мощь +${pct}%`, 'crit');
-    ui.log(`<b>${esc(s.name)}</b> выпивает «${esc(el.name)}»: урон +${pct}% на ${powerBuff.turns} х.`);
-  }
+  const name = esc(el.name);
+  battle.useElixir({
+    kind: el.kind === 'health' ? 'health' : 'power',
+    potency: el.potency ?? 0.3,
+    turns: el.turns ?? 3,
+  });
+  ui.log(`<b>${esc(battle.sides.left.name)}</b> выпивает «${name}»…`);
   elixirSpent.add(i);
   renderBattleBelt();
 }

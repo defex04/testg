@@ -33,7 +33,8 @@ export const FIGHTERS = {
     name: 'ИгрокБ',
     level: 15,
     model: 'assets/models/fighter.fbx',
-    height: 1.92,
+    // бойцы на арене одного роста (одинаковый размер моделей у обоих сторон)
+    height: 1.85,
     stats: { hp: 2600, damage: [140, 220], crit: 0.1, dodge: 0.05 },
     animations: BRAWLER_ANIMS,
   },

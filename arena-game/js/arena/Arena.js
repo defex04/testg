@@ -21,6 +21,13 @@ export class Arena {
   constructor(container, opts = {}) {
     this.container = container;
     this.spacing = opts.spacing ?? 2.7;       // дистанция между бойцами, м
+    // КАДР боя (подгоняется под фон-картинку: бойцы должны стоять на круге).
+    // frameMargin — запас по бокам сверх полу-дистанции (меньше → бойцы крупнее);
+    // lookAtY/camHeight — выше точка взгляда → ноги ниже в кадре (садятся на круг).
+    this.frameMargin = opts.frameMargin ?? 0.9;   // было 1.05 — бойцы чуть крупнее
+    this.frameHalfH = opts.frameHalfH ?? 1.28;
+    this.lookAtY = opts.lookAtY ?? 1.05;           // было 0.74 — ноги ниже в кадре
+    this.camHeight = opts.camHeight ?? 1.6;        // было 1.42
     this.fighters = { left: null, right: null };
 
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
@@ -167,15 +174,15 @@ export class Arena {
     // камера отъезжает ровно настолько, чтобы оба бойца попали в кадр
     // и по ширине, и по высоте — на любом экране
     const halfFov = THREE.MathUtils.degToRad(this.camera.fov) / 2;
-    const halfWidth = this.spacing / 2 + 1.05;
-    const halfHeight = 1.3;
+    const halfWidth = this.spacing / 2 + this.frameMargin;
+    const halfHeight = this.frameHalfH;
     const distW = halfWidth / (Math.tan(halfFov) * this.camera.aspect);
     const distH = halfHeight / Math.tan(halfFov);
     const dist = Math.max(distW, distH, 3);
-    // смотрим чуть ниже груди — бойцы поднимаются выше в кадре, под ними
-    // открывается пол арены (так они «стоят» на фоне гармоничнее)
-    this.camera.position.set(0, 1.42, dist + 0.5);
-    this.camera.lookAt(0, 0.74, 0);
+    // смотрим выше — ноги опускаются ближе к нижней кромке сцены, которая на
+    // фоне совпадает с кругом арены (бойцы «стоят» на круге)
+    this.camera.position.set(0, this.camHeight, dist + 0.5);
+    this.camera.lookAt(0, this.lookAtY, 0);
     this.camera.updateProjectionMatrix();
 
     if (this.onResize) this.onResize();
@@ -186,7 +193,7 @@ export class Arena {
    * груди), диаметр — доля проекции дистанции между ними, чтобы колесо влезало
    * в зазор и не перекрывало модели. Возвращает null, пока сцена без размера.
    */
-  wheelLayout(scale = 0.6) {
+  wheelLayout(scale = 0.72) {
     const w = this.container.clientWidth;
     const h = this.container.clientHeight;
     if (!w || !h) return null;
@@ -195,11 +202,18 @@ export class Arena {
     const a = this.worldToScreen(new THREE.Vector3(-half, yc, 0));
     const b = this.worldToScreen(new THREE.Vector3(half, yc, 0));
     const gap = Math.abs(b.x - a.x);
-    return {
-      x: (a.x + b.x) / 2,
-      y: (a.y + b.y) / 2,
-      diameter: Math.max(120, gap * scale),
-    };
+    const cx = (a.x + b.x) / 2;
+    // крупное колесо, но с тремя ограничителями, чтобы не лезть на другой UI:
+    //  - зазор между бойцами (не накрывает модели),
+    //  - высота сцены (не упирается в шапку/слоты),
+    //  - ширина сцены (на узких экранах).
+    let d = Math.min(gap * scale, h * 0.6, w * 0.72);
+    d = Math.max(150, d);
+    // держим круг целиком в сцене: сверху запас под «Пропустить ход» (она НАД
+    // колесом — .sw-skip), снизу — под ряд слотов заклинаний (.combat-bar внизу сцены).
+    let cy = (a.y + b.y) / 2;
+    cy = Math.min(Math.max(cy, d / 2 + 40), h - (d / 2 + 58));
+    return { x: cx, y: cy, diameter: d };
   }
 
   _tick() {

@@ -66,6 +66,8 @@ export class Engine {
       block: null,                       // стойка; null в ходе снимает блок
       opponentId: null,                  // «липкий» соперник (цель/фокус)
       lastActiveTurn: 0,                 // раунд последнего размена — для «холода»
+      buffMult: 1,                       // множитель урона от «Эликсира мощи»
+      buffTurns: 0,                      // на сколько своих ударов он действует
     };
     this.fighters.set(id, f);
     this.teams[side].push(id);
@@ -224,6 +226,8 @@ export class Engine {
       if (crit && blocked) damage *= 0.85;
       else if (crit) damage *= 1.8;
       else if (blocked) damage *= 0.12;
+      // «Эликсир мощи»: усиливает удары N раз; заряд тратится на удар
+      if (attacker.buffTurns > 0) { damage *= attacker.buffMult; attacker.buffTurns -= 1; }
       damage = Math.max(1, Math.round(damage));
       defender.hp = Math.max(0, defender.hp - damage);
       if (defender.hp <= 0) defender.alive = false;
@@ -251,6 +255,24 @@ export class Engine {
       if (actor.alive && target && target.alive) strikes.push(this._strike(actor, target, p.attack));
     }
     return { turn: this.turn, strikes, passed };
+  }
+
+  /** Лечение бойца (Эликсир здоровья). Возвращает фактически восстановленное HP. */
+  heal(id, amount) {
+    const f = this.fighter(id);
+    if (!f || !f.alive) return 0;
+    const before = f.hp;
+    f.hp = Math.min(f.maxHp, f.hp + Math.max(0, Math.round(amount)));
+    return f.hp - before;
+  }
+
+  /** Наложить усиление урона (Эликсир мощи) на N своих ударов. */
+  addBuff(id, mult, turns) {
+    const f = this.fighter(id);
+    if (!f || !f.alive) return false;
+    f.buffMult = mult;
+    f.buffTurns = Math.max(0, Math.round(turns));
+    return true;
   }
 
   finished() { return !this.aliveOf('left').length || !this.aliveOf('right').length; }

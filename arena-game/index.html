@@ -141,28 +141,34 @@
           </div>
         </section>
 
-        <!-- экран боя -->
+        <!-- экран боя: фиксированные прямоугольники (шапка · сцена · слоты ·
+             нижняя зона) — не сдвигаются при открытии окон, масштабируются
+             только под размер экрана -->
         <section class="screen screen-battle hidden" id="screen-battle">
           <div class="battle-head" id="battle-head"></div>
+
+          <!-- сцена: 3D-бойцы стоят на круге фона + боевой круг по центру -->
           <div class="arena-stage" id="arena-stage">
-            <!-- пояс эликсиров: оверлей у левого края сцены, только в бою.
-                 Заполняется из пояса гардероба (renderBattleBelt в main.js). -->
-            <div class="elixir-belt hidden" id="elixir-belt"></div>
             <div class="arena-loading hidden" id="arena-loading">
               <div class="arena-loading-spinner"></div>
               Загрузка бойцов…
             </div>
-          </div>
-          <!-- слоты скиллов: компактная плашка по центру, без подписи -->
-          <div class="skill-bar">
-            <div class="skill-plate">
-              <div class="belt-slot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true"><path d="M12 4l1.8 5.4L19 12l-5.2 2.6L12 20l-1.8-5.4L5 12l5.2-2.6L12 4Z"/></svg></div>
-              <div class="belt-slot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true"><path d="M12 4l1.8 5.4L19 12l-5.2 2.6L12 20l-1.8-5.4L5 12l5.2-2.6L12 4Z"/></svg></div>
-              <div class="belt-slot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true"><path d="M12 4l1.8 5.4L19 12l-5.2 2.6L12 20l-1.8-5.4L5 12l5.2-2.6L12 4Z"/></svg></div>
-              <div class="belt-slot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true"><path d="M12 4l1.8 5.4L19 12l-5.2 2.6L12 20l-1.8-5.4L5 12l5.2-2.6L12 4Z"/></svg></div>
-              <div class="belt-slot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true"><path d="M12 4l1.8 5.4L19 12l-5.2 2.6L12 20l-1.8-5.4L5 12l5.2-2.6L12 4Z"/></svg></div>
+            <!-- эликсиры: вертикальный пояс СЛЕВА у края сцены (фиксирован) -->
+            <div class="elixir-belt" id="elixir-belt" role="group" aria-label="Эликсиры"></div>
+            <!-- заклинания: 4 крупных слота под кругом, у нижней кромки сцены
+                 (ближе к бойцам — больше места снизу под окна) -->
+            <div class="combat-bar" id="combat-bar">
+              <div class="slot-group spells" id="spell-bar" role="group" aria-label="Заклинания">
+                <div class="combat-slot spell"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true"><path d="M12 4l1.8 5.4L19 12l-5.2 2.6L12 20l-1.8-5.4L5 12l5.2-2.6L12 4Z"/></svg></div>
+                <div class="combat-slot spell"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true"><path d="M12 4l1.8 5.4L19 12l-5.2 2.6L12 20l-1.8-5.4L5 12l5.2-2.6L12 4Z"/></svg></div>
+                <div class="combat-slot spell"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true"><path d="M12 4l1.8 5.4L19 12l-5.2 2.6L12 20l-1.8-5.4L5 12l5.2-2.6L12 4Z"/></svg></div>
+                <div class="combat-slot spell"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true"><path d="M12 4l1.8 5.4L19 12l-5.2 2.6L12 20l-1.8-5.4L5 12l5.2-2.6L12 4Z"/></svg></div>
+              </div>
             </div>
           </div>
+
+          <!-- нижний прямоугольник: над ним всплывают окна (участники/лог/чат) -->
+          <div class="battle-foreground" id="battle-foreground" aria-hidden="true"></div>
         </section>
 
       </main>
@@ -176,18 +182,29 @@
         <div class="dock-body">
 
           <div class="dock-pane" id="pane-members">
+            <!-- составы команд — сверху (основная область) -->
             <div class="members-grid hide-dead" id="members-grid">
               <div class="team">
                 <div class="team-title">1я команда</div>
                 <div class="team-list" id="team-left"></div>
               </div>
-              <div class="members-center">
-                <button class="ghost-btn" id="show-dead">Показать убитых</button>
-              </div>
               <div class="team">
                 <div class="team-title">2я команда</div>
                 <div class="team-list" id="team-right"></div>
               </div>
+            </div>
+            <!-- инструменты — снизу: поиск по нику, сортировка по HP/энергии, показ
+                 убитых. Кнопки/инпут не запускают перетаскивание окна. -->
+            <div class="members-tools">
+              <input class="members-search" id="members-search" type="text"
+                     placeholder="Поиск по нику…" autocomplete="off" maxlength="24">
+              <button class="mtool-btn" id="sort-hp" type="button" title="Сортировать по здоровью">
+                <span class="mtool-ico hp">♥</span><span class="mtool-dir" aria-hidden="true"></span>
+              </button>
+              <button class="mtool-btn" id="sort-en" type="button" title="Сортировать по энергии">
+                <span class="mtool-ico en">⚡</span><span class="mtool-dir" aria-hidden="true"></span>
+              </button>
+              <button class="mtool-btn" id="show-dead" type="button" title="Показать убитых">☠</button>
             </div>
           </div>
 

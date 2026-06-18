@@ -26,6 +26,14 @@ const ASSET = 'assets/fight/';
 const IMG = (name) => `${ASSET}${name}.webp`;
 const SVGNS = 'http://www.w3.org/2000/svg';
 
+/* Иконки в плашке бойца (инлайн-SVG — без зависимости от шрифта иконок). */
+const HEART_SVG =
+  '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-7.4-4.6-9.9-9.1C.7 9 1.8 5.6 4.9 4.9 7.1 4.4 9 5.6 12 8.3c3-2.7 4.9-3.9 7.1-3.4 3.1.7 4.2 4.1 2.8 6.6C19.4 16.4 12 21 12 21Z"/></svg>';
+const BOLT_SVG =
+  '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2 4 13.2h6l-1 8.8 9-12.4h-6.3L13 2Z"/></svg>';
+const INFO_SVG =
+  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v5.2" stroke-linecap="round"/><circle cx="12" cy="7.7" r="0.4" fill="currentColor" stroke="none"/></svg>';
+
 /* Сектора колеса заданы по РЕАЛЬНЫМ углам спиц wheel.png (адаптивно): спицы
    стоят неравномерно, поэтому границы секторов берём из замера, а не из
    «ровных» 60°. Так заливка ложится точно по спицам. a0..a1 — границы сектора
@@ -76,6 +84,8 @@ export class BattleUI {
     this.logEl = opts.log;
     this.teamEls = opts.teams;
     this.onStrike = opts.onStrike || (() => {});
+    this.onInfo = opts.onInfo || (() => {});         // «инфо» у ника в шапке (side)
+    this.onMemberInfo = opts.onMemberInfo || (() => {}); // «инфо» у участника (id)
     this.block = null;    // выбранный блок (BLOCKS id или null)
     this.target = null;
     this._targetManual = false; // цель выбрана игроком вручную (не авто-фокус)
@@ -86,28 +96,46 @@ export class BattleUI {
   }
 
   _build(opts) {
-    // --- шапка: плашки бойцов + урон + таймер ---
+    // --- шапка: плашки бойцов (ник+уровень, полоса HP) + урон + эффекты + таймер
+    // (раскладка по прототипу test.html: колонка бойца слева/справа зеркально) ---
+    const fighterCol = (side, info) => `
+      <div class="fighter-col ${side}">
+        <div class="fighter-head">
+          <span class="lvl-badge" title="Уровень">${info.level ?? '?'}</span>
+          <span class="nick">${esc(info.name)}</span>
+          <button class="info-btn" type="button" data-side="${side}"
+                  title="Информация об игроке" aria-label="Информация об игроке">${INFO_SVG}</button>
+        </div>
+        <div class="bar-group bar-hp">
+          <span class="bar-icon hp" aria-hidden="true">${HEART_SVG}</span>
+          <div class="bar-track">
+            <div class="bar-dmg"></div>
+            <div class="bar-fill hp"></div>
+            <span class="bar-val">—</span>
+          </div>
+        </div>
+        <div class="bar-group bar-en">
+          <span class="bar-icon en" aria-hidden="true">${BOLT_SVG}</span>
+          <div class="bar-track">
+            <div class="bar-fill en" style="width:0%"></div>
+            <span class="bar-val">—</span>
+          </div>
+        </div>
+      </div>`;
+
     this.headEl.innerHTML = `
-      <div class="bh-plates">
-        <div class="bh-plate bh-left">
-          <div class="bh-level">${opts.left.level ?? ''}</div>
-          <div class="bh-info">
-            <div class="bh-name">${esc(opts.left.name)}</div>
-            <div class="bh-bar bh-hp"><div class="bh-fill"></div><span class="bh-text"></span></div>
-            <div class="bh-bar bh-mp"><div class="bh-fill"></div></div>
-          </div>
-        </div>
-        <div class="bh-plate bh-right">
-          <div class="bh-level">${opts.right.level ?? ''}</div>
-          <div class="bh-info">
-            <div class="bh-name">${esc(opts.right.name)}</div>
-            <div class="bh-bar bh-hp"><div class="bh-fill"></div><span class="bh-text"></span></div>
-            <div class="bh-bar bh-mp"><div class="bh-fill"></div></div>
-          </div>
-        </div>
+      <div class="bh-fighters">
+        ${fighterCol('left', opts.left)}
+        ${fighterCol('right', opts.right)}
       </div>
-      <div class="bh-damage">Урон: 0</div>
-      <div class="bh-timer">—:——</div>`;
+      <div class="bh-damage-row">
+        <span class="bh-damage">Нанесено урона: <b>0</b></span>
+      </div>
+      <div class="bh-lower">
+        <div class="bh-effects bh-effects-left"></div>
+        <div class="bh-timer">—:——</div>
+        <div class="bh-effects bh-effects-right"></div>
+      </div>`;
 
     // --- боевое колесо по центру сцены ---
     const wheel = this._buildWheel();
@@ -140,16 +168,23 @@ export class BattleUI {
     this.wheel = wheel;
     this.waitEl = wait;
 
+    const q = (sel) => ({
+      left: this.headEl.querySelector('.fighter-col.left ' + sel),
+      right: this.headEl.querySelector('.fighter-col.right ' + sel),
+    });
     this.refs = {
-      hpFill: {
-        left: this.headEl.querySelector('.bh-left .bh-hp .bh-fill'),
-        right: this.headEl.querySelector('.bh-right .bh-hp .bh-fill'),
+      hpFill: q('.bar-hp .bar-fill'),
+      hpDmg: q('.bar-hp .bar-dmg'),
+      hpText: q('.bar-hp .bar-val'),
+      enFill: q('.bar-en .bar-fill'),
+      enText: q('.bar-en .bar-val'),
+      name: q('.nick'),
+      lvl: q('.lvl-badge'),
+      effects: {
+        left: this.headEl.querySelector('.bh-effects-left'),
+        right: this.headEl.querySelector('.bh-effects-right'),
       },
-      hpText: {
-        left: this.headEl.querySelector('.bh-left .bh-text'),
-        right: this.headEl.querySelector('.bh-right .bh-text'),
-      },
-      damage: this.headEl.querySelector('.bh-damage'),
+      damage: this.headEl.querySelector('.bh-damage b'),
       timer: this.headEl.querySelector('.bh-timer'),
       status: wheel.querySelector('.sw-status'),
       popups,
@@ -157,6 +192,10 @@ export class BattleUI {
       endImg: end.querySelector('.bui-end-img'),
       leave: end.querySelector('.bui-leave'),
     };
+
+    // значок «инфо» у ника → информация об игроке (обрабатывает main.js)
+    this.headEl.querySelectorAll('.info-btn').forEach((btn) =>
+      btn.addEventListener('click', () => this.onInfo(btn.dataset.side)));
 
     // пропуск хода (цель выбирается в списке участников — см. setRoster)
     this._rosterEls = { all: {} };
@@ -344,13 +383,40 @@ export class BattleUI {
     }
   }
 
-  /** Обновить «правую» плашку шапки под текущего сфокусированного соперника. */
+  /** Обновить «правую» колонку шапки под текущего сфокусированного соперника. */
   setOpponent(info) {
     if (!info) return;
-    const plate = this.headEl.querySelector('.bh-right');
-    if (!plate) return;
-    plate.querySelector('.bh-name').textContent = info.name ?? '';
-    plate.querySelector('.bh-level').textContent = info.level ?? '';
+    if (this.refs.name.right) this.refs.name.right.textContent = info.name ?? '';
+    if (this.refs.lvl.right)
+      this.refs.lvl.right.textContent = info.level != null ? info.level : '?';
+  }
+
+  /**
+   * Чипы активных эффектов в шапке боя — иконка с тикающим временем внутри.
+   * list = [{ icon, time, kind: 'buff'|'debuff', label }]. icon — emoji/символ
+   * или путь к картинке; time — оставшиеся ходы/секунды. Пустой список очищает.
+   */
+  setEffects(side, list = []) {
+    const host = this.refs.effects[side];
+    if (!host) return;
+    host.innerHTML = '';
+    for (const e of list) {
+      const chip = document.createElement('span');
+      chip.className = 'effect-chip ' + (e.kind === 'debuff' ? 'debuff' : 'buff');
+      if (e.label) chip.title = e.label;
+      const ico = document.createElement('span');
+      ico.className = 'effect-ico';
+      if (e.icon && /[./]/.test(e.icon)) ico.innerHTML = `<img src="${e.icon}" alt="">`;
+      else ico.textContent = e.icon || '✦';
+      chip.appendChild(ico);
+      if (e.time != null && e.time !== '') {
+        const t = document.createElement('span');
+        t.className = 'effect-time';
+        t.textContent = e.time;
+        chip.appendChild(t);
+      }
+      host.appendChild(chip);
+    }
   }
 
   /**
@@ -360,23 +426,58 @@ export class BattleUI {
    */
   setRoster(roster) {
     if (!roster) return;
+    this._roster = roster;
+    this._renderRoster();
+  }
+
+  /** Поиск/сортировка списка участников (тулбар окна «Участники»). */
+  setRosterFilter(opts = {}) {
+    this._rosterFilter = { ...(this._rosterFilter || {}), ...opts };
+    if (this._roster) this._renderRoster();
+  }
+
+  _renderRoster() {
+    const roster = this._roster;
+    if (!roster) return;
+    const f0 = this._rosterFilter || {};
+    const q = String(f0.search || '').trim().toLowerCase();
+    const sortKey = f0.sortKey || null;       // 'hp' | 'en' | null
+    const sortDir = f0.sortDir ?? 1;          // 1 — по возрастанию доли
+    const frac = (f) => sortKey === 'en'
+      ? (f.maxEn ? f.en / f.maxEn : 0)
+      : (f.maxHp ? f.hp / f.maxHp : 0);
+
     this._rosterEls = { all: {} };
     for (const side of ['left', 'right']) {
       const host = this.teamEls[side];
       host.innerHTML = '';
-      for (const f of roster[side] || []) {
+      let list = (roster[side] || []).slice();
+      if (q) list = list.filter((f) => String(f.name || '').toLowerCase().includes(q));
+      if (sortKey) list.sort((a, b) => (frac(a) - frac(b)) * sortDir);
+      for (const f of list) {
         const pct = f.maxHp ? Math.max(0, (f.hp / f.maxHp) * 100) : 0;
+        const enPct = f.maxEn ? Math.max(0, (f.en / f.maxEn) * 100) : 0;
         const dead = f.alive === false || f.hp <= 0;
         const m = document.createElement('div');
         m.className = 'member' + (dead ? ' dead' : '');
-        m.innerHTML = `<div class="m-line">${esc(f.name)} <span class="m-lvl">[${f.level ?? '?'}]</span></div>
-          <div class="m-bar"><div class="m-fill" style="width:${pct}%"></div></div>`;
+        const infoBtn = f.id != null
+          ? `<button class="info-btn m-info" type="button" title="Информация об игроке">${INFO_SVG}</button>`
+          : '';
+        // полоса жизни — красная, энергии — синяя (показываем даже пустую)
+        m.innerHTML = `<div class="m-line"><span class="m-name">${esc(f.name)} <span class="m-lvl">[${f.level ?? '?'}]</span></span>${infoBtn}</div>
+          <div class="m-bar m-hp"><div class="m-fill" style="width:${pct}%"></div></div>
+          <div class="m-bar m-en"><div class="m-fill" style="width:${enPct}%"></div></div>`;
         if (f.id != null) {
           m.dataset.id = f.id;
           m.dataset.side = side;
           m.classList.add('targetable');
           this._rosterEls.all[f.id] = m;
           m.addEventListener('click', () => this._pickTarget(f.id));
+          // «инфо» открывает карточку игрока, НЕ выбирая его целью
+          m.querySelector('.m-info')?.addEventListener('click', (ev) => {
+            ev.stopPropagation();
+            this.onMemberInfo(f.id);
+          });
         }
         host.appendChild(m);
       }
@@ -398,16 +499,47 @@ export class BattleUI {
   _toggleWait(on) { this.waitEl.classList.toggle('hidden', !on); }
 
   setHP(side, cur, max) {
-    const pct = Math.max(0, (cur / max) * 100);
-    this.refs.hpFill[side].style.width = pct + '%';
-    this.refs.hpFill[side].classList.toggle('low', pct < 30);
-    this.refs.hpText[side].textContent = `${Math.round(cur)} / ${max}`;
-    this._members[side].classList.toggle('dead', cur <= 0);
+    const pct = Math.max(0, Math.min(100, (cur / max) * 100));
+    const fill = this.refs.hpFill[side];
+    const dmg = this.refs.hpDmg[side];
+    // «след урона»: при потере HP белая полоса остаётся на прежней ширине
+    // и плавно догоняет новую — видно, сколько только что сняли (как в прототипе)
+    if (dmg) {
+      const prev = parseFloat(fill.style.width) || pct;
+      if (pct < prev) {
+        dmg.style.width = prev + '%';
+        requestAnimationFrame(() => setTimeout(() => { dmg.style.width = pct + '%'; }, 60));
+      } else {
+        dmg.style.width = pct + '%';
+      }
+    }
+    fill.style.width = pct + '%';
+    fill.classList.toggle('low', pct < 25);
+    this.refs.hpText[side].textContent = `${Math.round(cur)}/${max}`;
+    if (this._members[side]) this._members[side].classList.toggle('dead', cur <= 0);
   }
 
-  /** Строка «Урон: N» в шапке боя. */
+  /**
+   * Полоса энергии (синяя) в плашке бойца. Показываем всегда, даже если данных
+   * нет (тогда пустая) — энергетическая механика появится позже.
+   */
+  setEnergy(side, cur, max) {
+    const fill = this.refs.enFill[side];
+    const text = this.refs.enText[side];
+    if (!fill) return;
+    if (max == null || max <= 0) {
+      fill.style.width = '0%';
+      if (text) text.textContent = '—';
+      return;
+    }
+    const pct = Math.max(0, Math.min(100, (cur / max) * 100));
+    fill.style.width = pct + '%';
+    if (text) text.textContent = `${Math.round(cur)}/${max}`;
+  }
+
+  /** Счётчик «Нанесено урона» в шапке боя. */
   setDamage(value) {
-    this.refs.damage.textContent = `Урон: ${value}`;
+    this.refs.damage.textContent = value;
   }
 
   setTurn(n) {

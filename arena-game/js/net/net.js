@@ -132,6 +132,10 @@ function wireBattleHandlers() {
         focus: m.focus, roster: m.roster }));
   socketHandlers.set('rosterUpdate', (m) =>
     currentBattle && currentBattle._on('rosterUpdate', { roster: m.roster }));
+  socketHandlers.set('elixir', (m) =>
+    currentBattle && currentBattle._on('elixir',
+      { side: m.side, kind: m.kind, heal: m.heal, mult: m.mult, turns: m.turns,
+        buffTurns: m.buffTurns, hp: m.hp, maxHp: m.maxHp, roster: m.roster }));
   socketHandlers.set('policy', (m) =>
     currentBattle && currentBattle._on('policy', { intervention: m.intervention }));
   socketHandlers.set('battleEnd', (m) =>
@@ -193,7 +197,10 @@ export class ServerBattle extends EventTarget {
 
   _applySides(s) {
     if (!s) return;
-    if (s.left)  this.sides.left.hp = s.left.hp;
+    if (s.left) {
+      this.sides.left.hp = s.left.hp;
+      if (s.left.buffTurns != null) this.sides.left.buffTurns = s.left.buffTurns;
+    }
     if (s.right) this.sides.right = { ...s.right };
   }
   _applyFocus(focus) {
@@ -214,6 +221,10 @@ export class ServerBattle extends EventTarget {
       if ('focus' in detail) this._applyFocus(detail.focus);
       this._applySides(detail.sides);
       detail.sides = this.sides;
+    }
+    if (type === 'elixir' && detail.side === 'left') {
+      this.sides.left.hp = detail.hp;
+      if (detail.maxHp != null) this.sides.left.maxHp = detail.maxHp;
     }
     if (type === 'battleEnd') {
       this.phase = 'ended';
@@ -241,6 +252,8 @@ export class ServerBattle extends EventTarget {
         pass: !!move.pass, target: move.target ?? null }));
     return true;
   }
+  /** Использовать боевой эликсир: { kind:'health'|'power', potency, turns }. */
+  useElixir(payload) { socket.send(JSON.stringify({ type: 'elixir', ...payload })); }
   finishTurn()    { socket.send(JSON.stringify({ type: 'turnDone' })); }
   /** Покинуть бой: сервер сам спишет Эликсир побега или откажет. */
   requestEscape() { socket.send(JSON.stringify({ type: 'escape' })); }
