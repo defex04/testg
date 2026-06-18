@@ -151,17 +151,18 @@
               <div class="arena-loading-spinner"></div>
               Загрузка бойцов…
             </div>
-          </div>
-
-          <div class="combat-bar hidden" id="combat-bar">
-            <div class="combat-strip spells-strip" aria-label="Заклинания">
-              <div class="combat-slots" id="spell-slots" role="group"></div>
-            </div>
-            <div class="combat-divider" aria-hidden="true"></div>
-            <div class="combat-strip elixirs-strip" aria-label="Эликсиры">
-              <button type="button" class="combat-page prev" id="elixir-prev" aria-label="Предыдущие эликсиры">‹</button>
-              <div class="combat-slots" id="elixir-slots" role="group"></div>
-              <button type="button" class="combat-page next" id="elixir-next" aria-label="Следующие эликсиры">›</button>
+            <!-- нижняя боевая панель: 3 заклинания + 6 эликсиров. Эликсиры
+                 листаются стрелками, если не помещаются по ширине экрана. -->
+            <div class="combat-bar hidden" id="combat-bar">
+              <div class="combat-slots cb-spells" id="spell-slots" role="group" aria-label="Заклинания"></div>
+              <div class="combat-divider" aria-hidden="true"></div>
+              <div class="cb-elixirs" role="group" aria-label="Эликсиры">
+                <button type="button" class="combat-page cb-arrow cb-prev" id="elixir-prev" aria-label="Предыдущие эликсиры">‹</button>
+                <div class="cb-elixirs-view">
+                  <div class="combat-slots cb-track" id="elixir-slots"></div>
+                </div>
+                <button type="button" class="combat-page cb-arrow cb-next" id="elixir-next" aria-label="Следующие эликсиры">›</button>
+              </div>
             </div>
           </div>
 

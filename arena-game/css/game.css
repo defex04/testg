@@ -554,12 +554,15 @@ body.loc-castle.in-battle .arena-stage::after {
 /* нижний прямоугольник (камень фона) — зона всплывающих окон, ниже слотов. */
 body.loc-castle.in-battle .battle-foreground { flex: 1.55 1 0%; min-height: 0; }
 
-/* панель слотов — только внутри #screen-battle, не в castle-bottom */
+/* нижняя боевая панель — по центру у низа сцены, под боевым кругом.
+   Теперь занимает всю доступную ширину (левого пояса эликсиров больше нет). */
 body.loc-castle.in-battle .screen-battle .combat-bar {
-  flex: 0 0 auto;
-  align-self: center;
-  margin: -8px auto 14px;
-  transform: translateY(-14px);
+  position: absolute;
+  left: 50%;
+  bottom: 6px;
+  transform: translateX(-50%);
+  z-index: 12;
+  margin: 0;
   width: max-content;
   max-width: calc(100% - 12px);
 }
@@ -846,7 +849,11 @@ body.loc-castle.in-battle .sprite-main .sm-ico {
   box-shadow: var(--slot-shadow), 0 0 10px rgba(216, 169, 63, .22);
 }
 
-/* ---------- нижний ряд боя: 3 заклинания + 3 эликсира (стрелки только у эликсиров) ---------- */
+/* ---------- нижняя боевая панель: 3 заклинания + 6 эликсиров ----------
+   Единая адаптивная панель у низа сцены. Слева — заклинания (всегда видны),
+   справа — эликсиры в «окошке» фиксированной ширины: если все не помещаются,
+   включаются стрелки листания (.combat-bar.paged). Раскладку под текущую
+   ширину считает layoutCombatBar() в main.js — слоты не «съезжают» при ресайзе. */
 
 .combat-bar {
   position: relative;
@@ -854,44 +861,58 @@ body.loc-castle.in-battle .sprite-main .sm-ico {
   flex-wrap: nowrap;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  padding: 5px 7px;
-  background: rgba(8, 11, 5, .42);
-  border: 1px solid rgba(138, 111, 60, .32);
-  border-radius: 12px;
-  backdrop-filter: blur(3px);
-  box-shadow: 0 4px 14px rgba(0, 0, 0, .4), inset 0 1px 0 rgba(244, 205, 111, .06);
-}
-
-.combat-strip {
-  display: flex;
-  flex: 0 0 auto;
-  flex-wrap: nowrap;
-  align-items: center;
-  gap: 4px;
+  gap: 7px;
+  padding: 5px 8px;
+  background: linear-gradient(180deg, rgba(14, 18, 9, .58), rgba(7, 10, 4, .5));
+  border: 1px solid rgba(138, 111, 60, .4);
+  border-radius: 14px;
+  backdrop-filter: blur(4px);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, .45), inset 0 1px 0 rgba(244, 205, 111, .08);
 }
 
 .combat-slots {
   display: flex;
   flex: 0 0 auto;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
+}
+
+/* эликсиры: стрелка ‹ — окно просмотра — стрелка › */
+.cb-elixirs {
+  display: flex;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+/* окно фиксированной ширины (под целое число слотов); прячет лишние слоты */
+.cb-elixirs-view {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+}
+/* «лента» из всех 6 слотов — сдвигается на страницу при листании */
+.cb-track {
+  flex: 0 0 auto;
+  transition: transform .26s cubic-bezier(.25, .46, .45, .94);
+  will-change: transform;
 }
 
 .combat-divider {
   flex: 0 0 1px;
   align-self: stretch;
-  margin: 3px 0;
-  background: linear-gradient(180deg, transparent, rgba(138, 111, 60, .45), transparent);
+  margin: 4px 1px;
+  background: linear-gradient(180deg, transparent, rgba(138, 111, 60, .5), transparent);
 }
 
+/* стрелки листания эликсиров: видны только когда панель в режиме страниц */
 .combat-page {
   flex: 0 0 auto;
   width: 28px;
   height: 28px;
   padding: 0;
   border: 1px solid rgba(138, 111, 60, .38);
-  border-radius: 8px;
+  border-radius: 9px;
   background: linear-gradient(180deg, rgba(22, 28, 14, .9), rgba(11, 15, 7, .92));
   color: rgba(244, 205, 111, .82);
   font-size: 18px;
@@ -910,6 +931,9 @@ body.loc-castle.in-battle .sprite-main .sm-ico {
   opacity: .28;
   cursor: default;
 }
+/* стрелки появляются только если эликсиры не влезли (класс ставит layoutCombatBar) */
+.cb-arrow { display: none; }
+.combat-bar.paged .cb-arrow { display: inline-flex; align-items: center; justify-content: center; }
 
 /* единая ячейка слота (заклинание/эликсир) — тёмная плитка с золотой рамкой */
 .combat-slot {
@@ -935,15 +959,15 @@ body.loc-castle.in-battle .sprite-main .sm-ico {
 .combat-slot svg { width: 19px; height: 19px; color: rgba(244, 205, 111, .3); }
 .combat-slot .bs-ico { font-size: 20px; line-height: 1; filter: drop-shadow(0 1px 2px rgba(0, 0, 0, .6)); }
 
-/* магия и эликсиры в нижнем ряду */
+/* слоты нижней панели — единый размер для заклинаний и эликсиров (#5) */
 .combat-bar .combat-slot {
-  width: 42px;
-  height: 42px;
-  border-radius: 11px;
+  width: 48px;
+  height: 48px;
+  border-radius: 13px;
   touch-action: manipulation;
 }
-.combat-bar .combat-slot svg { width: 22px; height: 22px; }
-.combat-bar .combat-slot .bs-ico { font-size: 24px; }
+.combat-bar .combat-slot svg { width: 23px; height: 23px; }
+.combat-bar .combat-slot .bs-ico { font-size: 25px; }
 
 /* заклинания — холодный акцент рамки, отличает их от эликсиров */
 .combat-slot.spell { border-color: rgba(120, 160, 220, .42); }
@@ -1500,12 +1524,30 @@ body.loc-castle.in-battle .sprite-main .sm-ico {
   align-items: center;
   justify-content: center;
   gap: 14px;
-  background: rgba(8, 10, 5, .74);
+  background: rgba(8, 10, 5, .92);
   font-family: var(--font-display);
   font-size: 16px;
   color: var(--gold-bright);
   text-shadow: 0 1px 3px #000;
+  transition: opacity .32s ease;
 }
+.arena-loading.fade-out { opacity: 0; }
+
+/* подготовка боя (#3): пока грузятся бойцы и собирается UI, прячем все боевые
+   элементы и показываем только заставку — пользователь не видит, как плашки,
+   панель и колесо встают по местам. По готовности всё плавно проявляется. */
+body.battle-prep .battle-head,
+body.battle-prep .battle-foreground,
+body.battle-prep .combat-bar,
+body.battle-prep .strike-wheel,
+body.battle-prep .bottom-dock,
+body.battle-prep .castle-main-menu { opacity: 0 !important; }
+
+body.in-battle .battle-head,
+body.in-battle .battle-foreground,
+body.in-battle .combat-bar,
+body.in-battle .bottom-dock,
+body.in-battle .castle-main-menu { transition: opacity .34s ease; }
 
 .arena-loading-spinner {
   width: 42px; height: 42px;
@@ -1712,15 +1754,32 @@ body.loc-castle.in-battle .sprite-main .sm-ico {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.member .m-bar {
-  height: 6px;
+/* строка статуса: значок (как в шапке боя) + полоса (#6) */
+.member .m-stat {
+  display: flex;
+  align-items: center;
+  gap: 5px;
   margin-top: 3px;
+}
+.member .m-ico {
+  flex: 0 0 auto;
+  width: 13px;
+  height: 13px;
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, .65));
+}
+.member .m-ico.hp { color: #e8665a; }
+.member .m-ico.en { color: #5cb8f0; }
+.member .m-ico svg { display: block; width: 100%; height: 100%; fill: currentColor; }
+.member .m-bar {
+  flex: 1 1 auto;
+  height: 7px;
   border: 1px solid var(--line-dim);
   border-radius: 4px;
   background: rgba(0, 0, 0, .45);
   overflow: hidden;
 }
-.member .m-bar.m-en { height: 4px; margin-top: 2px; }
+.member .m-stat:last-child { margin-top: 2px; }
+.member .m-bar.m-en { height: 5px; }
 .member .m-fill { height: 100%; transition: width .4s; }
 /* жизни — красные, энергия — синяя */
 .member .m-hp .m-fill { background: linear-gradient(180deg, #ff7a64, #b5241a); }
@@ -1807,7 +1866,8 @@ body.loc-castle.in-battle .sprite-main .sm-ico {
 
 /* ---------- всплывающий урон ---------- */
 
-.bui-popups { position: absolute; inset: 0; overflow: hidden; pointer-events: none; z-index: 15; }
+/* overflow:visible — цифра урона не обрезается о край слоя при подъёме (#7) */
+.bui-popups { position: absolute; inset: 0; overflow: visible; pointer-events: none; z-index: 15; }
 
 .bui-popup {
   position: absolute;
@@ -1816,7 +1876,7 @@ body.loc-castle.in-battle .sprite-main .sm-ico {
   font-weight: bold;
   color: #ff5252;
   text-shadow: 0 2px 4px #000, 0 0 12px rgba(255, 60, 40, .6);
-  animation: popup-rise 1.35s ease-out forwards;
+  animation: popup-rise 1.5s cubic-bezier(.22, .7, .3, 1) forwards;
   white-space: nowrap;
 }
 .bui-popup.crit { font-size: 36px; color: #ffab40; }
@@ -1827,23 +1887,29 @@ body.loc-castle.in-battle .sprite-main .sm-ico {
   color: #8be28b;
   text-shadow: 0 2px 4px #000, 0 0 12px rgba(120, 230, 120, .65);
 }
+/* всплытие урона: быстрый «pop», затем плавный подъём с мягким угасанием —
+   цифра уходит постепенно, без резкого исчезновения (#7) */
 @keyframes popup-rise {
-  0%   { opacity: 0; margin-top: 0; transform: translate(-50%, -50%) scale(.4); }
-  12%  { opacity: 1; transform: translate(-50%, -50%) scale(1.15); }
-  25%  { transform: translate(-50%, -50%) scale(1); }
-  100% { opacity: 0; margin-top: -84px; transform: translate(-50%, -50%) scale(1); }
+  0%   { opacity: 0; transform: translate(-50%, -50%) scale(.4); }
+  12%  { opacity: 1; transform: translate(-50%, -64%) scale(1.15); }
+  26%  { opacity: 1; transform: translate(-50%, -78%) scale(1); }
+  68%  { opacity: .8; transform: translate(-50%, -120%) scale(1); }
+  100% { opacity: 0; transform: translate(-50%, -156%) scale(.95); }
 }
 
 /* ---------- конец боя ---------- */
 
-/* экран итога боя затемняет ВЕСЬ экран (не только сцену) — fixed на весь вьюпорт */
+/* экран итога боя — по центру ОКНА БОЯ (сцены), а не всего вьюпорта (#1):
+   .bui-end лежит внутри .arena-stage, поэтому absolute центрирует баннер ровно
+   над ареной, выше нижних окон. */
 .bui-end {
-  position: fixed;
+  position: absolute;
   inset: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(5, 7, 3, .82);
+  padding: 10px;
+  background: radial-gradient(ellipse at center, rgba(5, 7, 3, .72), rgba(5, 7, 3, .88));
   backdrop-filter: blur(2px);
   z-index: 60;
 }
@@ -1853,13 +1919,21 @@ body.loc-castle.in-battle .sprite-main .sm-ico {
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
 }
 
 /* арт-баннер итога (win/lose) с нарисованной кнопкой «Выход» — кликается
-   целиком (#7): надёжнее, чем точечная хит-зона. Размер уменьшен в ~1.5× (#6). */
+   целиком: надёжнее, чем точечная хит-зона. Вписывается в высоту сцены, чтобы
+   не обрезаться на коротких экранах. */
 .bui-end-banner {
-  display: block;
-  width: clamp(190px, 56vw, 370px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  max-width: min(360px, 86%);
+  max-height: 86%;
   padding: 0;
   border: 0;
   background: none;
@@ -1871,8 +1945,11 @@ body.loc-castle.in-battle .sprite-main .sm-ico {
 @keyframes endpop { from { opacity: 0; transform: scale(.7); } to { opacity: 1; transform: scale(1); } }
 .bui-end-img {
   display: block;
-  width: 100%;
+  width: auto;
   height: auto;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
   filter: drop-shadow(0 12px 30px rgba(0, 0, 0, .7));
   pointer-events: none;
 }
@@ -2029,6 +2106,8 @@ body.loc-castle.in-battle .bottom-dock.dock-open .dock-body {
 .member .m-lvl { color: #b89a55; font-size: 12px; }
 .member.dead { opacity: .5; text-decoration: line-through; }
 .members-grid.hide-dead .member.dead { display: none; }
+/* себя при смерти не прячем (#2) — остаёмся в списке, зачёркнутыми как противник */
+.members-grid.hide-dead .member.dead.is-self { display: block; }
 .members-center { padding-top: 2px; }
 
 /* выбор цели: участники в списке кликабельны (враг — удар, союзник — лечение,
@@ -2831,26 +2910,20 @@ button.belt-slot { padding: 0; font: inherit; color: inherit; -webkit-tap-highli
   .belt-slot svg { width: 16px; height: 16px; }
   .belt-slot.round { border-radius: 50%; }
   .belt-slot .bs-ico { font-size: 18px; }
-  /* боевые слоты */
+  /* нижняя боевая панель на телефоне — слоты чуть компактнее, на всю ширину */
   .combat-bar {
-    gap: 5px;
-    padding: 6px 8px;
-    max-width: calc(100% - 8px);
+    padding: 5px 7px;
+    max-width: calc(100% - 10px);
   }
   .combat-bar .combat-slot {
-    width: clamp(38px, 11.5vw, 46px);
-    height: clamp(38px, 11.5vw, 46px);
+    width: clamp(40px, 11.5vw, 48px);
+    height: clamp(40px, 11.5vw, 48px);
     border-radius: 12px;
   }
-  .combat-bar .combat-slot svg { width: clamp(20px, 6vw, 24px); height: clamp(20px, 6vw, 24px); }
-  .combat-bar .combat-slot .bs-ico { font-size: clamp(22px, 6.5vw, 26px); }
-  .combat-page {
-    width: clamp(30px, 9vw, 36px);
-    height: clamp(30px, 9vw, 36px);
-    font-size: clamp(17px, 5.2vw, 20px);
-    border-radius: 9px;
-  }
-  .combat-strip, .combat-slots { gap: 5px; }
+  .combat-bar .combat-slot svg { width: clamp(21px, 6vw, 24px); height: clamp(21px, 6vw, 24px); }
+  .combat-bar .combat-slot .bs-ico { font-size: clamp(22px, 6.6vw, 26px); }
+  .combat-slots { gap: 6px; }
+  .combat-page { width: 26px; height: 26px; }
 
   .bui-popup { font-size: 21px; }
   .bui-popup.crit { font-size: 28px; }
@@ -2897,17 +2970,13 @@ button.belt-slot { padding: 0; font: inherit; color: inherit; -webkit-tap-highli
 
 @media (max-width: 360px) {
   .belt-slot { width: 32px; height: 32px; }              /* гардероб */
-  .combat-bar { gap: 4px; padding: 5px 6px; }
-  .combat-bar .combat-slot {
-    width: 36px;
-    height: 36px;
-    border-radius: 10px;
-  }
-  .combat-bar .combat-slot svg { width: 19px; height: 19px; }
-  .combat-bar .combat-slot .bs-ico { font-size: 21px; }
-  .combat-slots { gap: 4px; }
-  .combat-strip { gap: 4px; }
-  .combat-page { width: 28px; height: 28px; font-size: 16px; border-radius: 8px; }
+  .combat-bar { padding: 4px 6px; gap: 5px; max-width: calc(100% - 8px); }
+  .combat-bar .combat-slot { width: 42px; height: 42px; border-radius: 11px; }
+  .combat-bar .combat-slot svg { width: 21px; height: 21px; }
+  .combat-bar .combat-slot .bs-ico { font-size: 23px; }
+  .combat-slots { gap: 5px; }
+  .cb-elixirs { gap: 5px; }
+  .combat-page { width: 24px; height: 24px; font-size: 16px; }
 }
 
 @media (max-height: 640px) {

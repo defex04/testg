@@ -86,6 +86,7 @@ export class BattleUI {
     this.onStrike = opts.onStrike || (() => {});
     this.onInfo = opts.onInfo || (() => {});         // «инфо» у ника в шапке (side)
     this.onMemberInfo = opts.onMemberInfo || (() => {}); // «инфо» у участника (id)
+    this.selfId = opts.selfId ?? null;               // id игрока — не прячем при смерти (#2)
     this.block = null;    // выбранный блок (BLOCKS id или null)
     this.target = null;
     this._targetManual = false; // цель выбрана игроком вручную (не авто-фокус)
@@ -458,15 +459,16 @@ export class BattleUI {
         const pct = f.maxHp ? Math.max(0, (f.hp / f.maxHp) * 100) : 0;
         const enPct = f.maxEn ? Math.max(0, (f.en / f.maxEn) * 100) : 0;
         const dead = f.alive === false || f.hp <= 0;
+        const isSelf = this.selfId != null && String(f.id) === String(this.selfId);
         const m = document.createElement('div');
-        m.className = 'member' + (dead ? ' dead' : '');
+        m.className = 'member' + (dead ? ' dead' : '') + (isSelf ? ' is-self' : '');
         const infoBtn = f.id != null
           ? `<button class="info-btn m-info" type="button" title="Информация об игроке">${INFO_SVG}</button>`
           : '';
-        // полоса жизни — красная, энергии — синяя (показываем даже пустую)
+        // полоса жизни — красная, энергии — синяя (значки как в шапке боя, #6)
         m.innerHTML = `<div class="m-line"><span class="m-name">${esc(f.name)} <span class="m-lvl">[${f.level ?? '?'}]</span></span>${infoBtn}</div>
-          <div class="m-bar m-hp"><div class="m-fill" style="width:${pct}%"></div></div>
-          <div class="m-bar m-en"><div class="m-fill" style="width:${enPct}%"></div></div>`;
+          <div class="m-stat"><span class="m-ico hp" aria-hidden="true">${HEART_SVG}</span><div class="m-bar m-hp"><div class="m-fill" style="width:${pct}%"></div></div></div>
+          <div class="m-stat"><span class="m-ico en" aria-hidden="true">${BOLT_SVG}</span><div class="m-bar m-en"><div class="m-fill" style="width:${enPct}%"></div></div></div>`;
         if (f.id != null) {
           m.dataset.id = f.id;
           m.dataset.side = side;
@@ -651,7 +653,8 @@ export class BattleUI {
     p.style.left = pos.x + 'px';
     p.style.top = pos.y + 'px';
     this.refs.popups.appendChild(p);
-    setTimeout(() => p.remove(), 1400);
+    // удаляем строго после конца анимации (#7) — чтобы цифра не пропадала резко
+    setTimeout(() => p.remove(), 1500);
   }
 
   /** Запись в журнал. История не затирается — журнал прокручивается. */

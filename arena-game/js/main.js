@@ -15,7 +15,7 @@ import { Arena } from './arena/Arena.js';
 import { api, ServerBattle } from './net/net.js';
 import { BattleUI } from './arena/BattleUI.js';
 import { DressingRoom } from './arena/DressingRoom.js';
-import { FIGHTERS, LOCATIONS, ITEMS, SLOT_META, SPELLS, SPELL_SLOTS, ELIXIR_SLOTS, ELIXIR_SLOTS_VISIBLE } from './content.js';
+import { FIGHTERS, LOCATIONS, ITEMS, SLOT_META, SPELLS, SPELL_SLOTS, ELIXIR_SLOTS } from './content.js';
 
 // ---------------------------------------------------------------------------
 // Утилиты и состояние игрока
@@ -438,10 +438,19 @@ function resumeBattle(serverBattle) {
   });
 }
 
+/** Завершить «подготовку боя» (#3): показать собранный UI и убрать заставку. */
+function endBattlePrep() {
+  document.body.classList.remove('battle-prep');
+  loadingEl.classList.add('fade-out');
+  setTimeout(() => loadingEl.classList.add('hidden'), 340);
+}
+
 async function initBattle(resumedBattle = null, starter = null, pvpTarget = null) {
   if (battleLoading) return;
   battleLoading = true;
-  loadingEl.classList.remove('hidden');
+  // #3: прячем весь боевой UI за заставкой, пока всё не соберётся и не разместится
+  document.body.classList.add('battle-prep');
+  loadingEl.classList.remove('hidden', 'fade-out');
   if (ui) ui.destroy();
   if (battle) battle.destroy();
 
@@ -455,11 +464,11 @@ async function initBattle(resumedBattle = null, starter = null, pvpTarget = null
   } catch (e) {
     console.error('Загрузка бойцов:', e);
     showToast('Не удалось загрузить бойцов: ' + e.message);
+    endBattlePrep();
     setMode('location');
     return;
   } finally {
     battleLoading = false;
-    loadingEl.classList.add('hidden');
   }
 
   // бой создаёт и ведёт сервер: формулы те же (порт BattleSystem),
@@ -473,6 +482,7 @@ async function initBattle(resumedBattle = null, starter = null, pvpTarget = null
       showToast('Не удалось начать бой: ' + (BATTLE_ERRORS[e.message] || e.message));
     }
     if (battle) { battle.destroy(); battle = null; }
+    endBattlePrep();
     setMode('location');
     return;
   }
@@ -486,6 +496,7 @@ async function initBattle(resumedBattle = null, starter = null, pvpTarget = null
              level: battle.sides.left.level ?? PLAYER.level },
     right: { name: battle.sides.right.name,
              level: battle.sides.right.level ?? '?' },
+    selfId: PLAYER.id ?? battle.sides.left.id,   // себя не прячем при смерти (#2)
     onStrike: (move) => {
       ui.hideControls();
       setBeltLive(false);          // удар завершает ввод хода — пояс блокируется
@@ -509,9 +520,10 @@ async function initBattle(resumedBattle = null, starter = null, pvpTarget = null
   ui.setEnergy('left', 0, 0);
   ui.setEnergy('right', 0, 0);
 
-  // колесо ставим ровно между бойцами и пересчитываем при каждом ресайзе сцены
+  // колесо ставим ровно между бойцами и пересчитываем при каждом ресайзе сцены;
+  // заодно пересчитываем нижнюю панель (страницы эликсиров под ширину экрана)
   const layoutWheel = () => { if (ui) ui.placeWheel(arena.wheelLayout()); };
-  arena.onResize = layoutWheel;
+  arena.onResize = () => { layoutWheel(); layoutCombatBar(); };
   layoutWheel();
   requestAnimationFrame(layoutWheel);
 
@@ -623,6 +635,14 @@ async function initBattle(resumedBattle = null, starter = null, pvpTarget = null
   });
 
   battle.activate?.();   // воспроизвести события, накопленные пока грузились модели
+
+  // всё собрано и размещено — плавно показываем бой (сборку UI пользователь
+  // не видел, элементы не «прыгают» по местам, #3)
+  requestAnimationFrame(() => {
+    layoutWheel();
+    layoutCombatBar();
+    endBattlePrep();
+  });
 }
 
 function leaveBattle(force = false) {
@@ -1400,7 +1420,6 @@ const SPELL_STAR_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColo
 
 const spellBar = new Array(SPELL_SLOTS).fill(null);
 ['spark', 'fireball', 'frost'].forEach((key, i) => { spellBar[i] = key; });
-let elixirPage = 0;
 
 const elixirBelt = new Array(ELIXIR_SLOTS).fill(null);  // ячейка -> ключ ITEMS | null
 const elixirSpent = new Set();         // индексы ячеек, использованных в этом бою
@@ -1410,10 +1429,25 @@ let beltLive = false;                  // можно ли использоват
 
 const combatBarEl = $('combat-bar');
 const spellSlotsEl = $('spell-slots');
-const elixirSlotsEl = $('elixir-slots');
+const elixirSlotsEl = $('elixir-slots');           // «лента» эликсиров (.cb-track)
+const elixirViewEl = document.querySelector('.cb-elixirs-view');
 const elixirPrevBtn = $('elixir-prev');
 const elixirNextBtn = $('elixir-next');
 const dressingBeltEl = $('dressing-belt');
+
+// состояние листания эликсиров (страницы считаются под ширину экрана)
+let elixirPage = 0;
+let elixirPerPage = ELIXIR_SLOTS;
+let elixirPages = 1;
+
+elixirPrevBtn?.addEventListener('click', () => {
+  if (elixirPage <= 0) return;
+  elixirPage--; applyElixirPage();
+});
+elixirNextBtn?.addEventListener('click', () => {
+  if (elixirPage >= elixirPages - 1) return;
+  elixirPage++; applyElixirPage();
+});
 
 /** Показать HP стороны (HP считает сервер; при baseHp<=0 — 0, иначе не ниже 1). */
 function showHP(side, baseHp, maxHp) {
@@ -1492,7 +1526,6 @@ function resetElixirBattle() {
   selfBuffTurns = 0;
   selfBuffPct = 0;
   beltLive = false;
-  elixirPage = 0;
   renderCombatBar();
   refreshSelfEffects();
 }
@@ -1513,20 +1546,9 @@ function setBeltLive(v) {
   renderCombatBar();
 }
 
-function elixirPageCount() {
-  return Math.max(1, Math.ceil(ELIXIR_SLOTS / ELIXIR_SLOTS_VISIBLE));
-}
-
-/** Нижний ряд боя: 3 заклинания + 3 эликсира (эликсиры листаются стрелками). */
+/** Нижняя боевая панель: 3 заклинания + 6 эликсиров (эликсиры листаются). */
 function renderCombatBar() {
-  if (!combatBarEl) return;
-  combatBarEl.classList.toggle('hidden', mode !== 'battle');
-
-  const elixirPages = elixirPageCount();
-  elixirPage = Math.min(elixirPage, elixirPages - 1);
-
-  if (elixirPrevBtn) elixirPrevBtn.disabled = elixirPage <= 0;
-  if (elixirNextBtn) elixirNextBtn.disabled = elixirPage >= elixirPages - 1;
+  if (combatBarEl) combatBarEl.classList.toggle('hidden', mode !== 'battle');
 
   if (spellSlotsEl) {
     spellSlotsEl.innerHTML = '';
@@ -1557,9 +1579,8 @@ function renderCombatBar() {
 
   if (elixirSlotsEl) {
     elixirSlotsEl.innerHTML = '';
-    for (let s = 0; s < ELIXIR_SLOTS_VISIBLE; s++) {
-      const i = elixirPage * ELIXIR_SLOTS_VISIBLE + s;
-      if (i >= ELIXIR_SLOTS || !elixirBelt[i]) {
+    for (let i = 0; i < ELIXIR_SLOTS; i++) {
+      if (!elixirBelt[i]) {
         const empty = document.createElement('div');
         empty.className = 'combat-slot elixir empty';
         empty.title = 'Пустая ячейка эликсира';
@@ -1580,6 +1601,68 @@ function renderCombatBar() {
       elixirSlotsEl.appendChild(slot);
     }
   }
+
+  layoutCombatBar();
+}
+
+/**
+ * Адаптивная раскладка нижней панели (#0, #5). Заклинания всегда видны слева;
+ * эликсиры показываются в окне фиксированной ширины. Если все 6 не помещаются
+ * по ширине экрана — включаются стрелки листания, окно подгоняется ровно под
+ * целое число слотов (без «обрезков»), чтобы при ресайзе ничего не съезжало.
+ */
+function layoutCombatBar() {
+  if (!combatBarEl || !elixirSlotsEl || !elixirViewEl) return;
+  if (combatBarEl.classList.contains('hidden')) return;
+  const slots = elixirSlotsEl.children;
+  if (!slots.length) return;
+
+  const slotW = slots[0].getBoundingClientRect().width;
+  if (!slotW) { requestAnimationFrame(layoutCombatBar); return; }  // ещё без размера
+  const cs = getComputedStyle(elixirSlotsEl);
+  const gap = parseFloat(cs.columnGap || cs.gap) || 6;
+  const step = slotW + gap;
+  const fullTrack = ELIXIR_SLOTS * step - gap;   // ширина всех 6 слотов
+
+  // 1) пробуем без стрелок: помещаются ли все эликсиры?
+  combatBarEl.classList.remove('paged');
+  elixirViewEl.style.width = '';
+  const availAll = elixirViewEl.clientWidth;
+  if (availAll + 0.5 >= fullTrack) {             // влезают все — стрелки не нужны
+    elixirPerPage = ELIXIR_SLOTS;
+    elixirPages = 1;
+    elixirPage = 0;
+    elixirSlotsEl.style.transform = '';
+    return;
+  }
+
+  // 2) нужны страницы: добавляем стрелки и считаем, сколько слотов в окне
+  combatBarEl.classList.add('paged');
+  const avail = elixirViewEl.clientWidth;        // место уже с учётом стрелок
+  let perPage = Math.max(1, Math.floor((avail + gap) / step));
+  perPage = Math.min(perPage, ELIXIR_SLOTS - 1); // в режиме страниц < 6
+  elixirPerPage = perPage;
+  elixirPages = Math.ceil(ELIXIR_SLOTS / perPage);
+  elixirViewEl.style.width = (perPage * step - gap) + 'px';
+  applyElixirPage();
+}
+
+/** Применить текущую страницу эликсиров: сдвиг ленты + доступность стрелок. */
+function applyElixirPage() {
+  if (!elixirSlotsEl) return;
+  if (elixirPages <= 1) {
+    elixirPage = 0;
+    elixirSlotsEl.style.transform = '';
+    return;
+  }
+  elixirPage = Math.max(0, Math.min(elixirPage, elixirPages - 1));
+  const cs = getComputedStyle(elixirSlotsEl);
+  const gap = parseFloat(cs.columnGap || cs.gap) || 6;
+  const slotW = elixirSlotsEl.children[0]?.getBoundingClientRect().width || 48;
+  const step = slotW + gap;
+  elixirSlotsEl.style.transform = `translateX(${-elixirPage * elixirPerPage * step}px)`;
+  if (elixirPrevBtn) elixirPrevBtn.disabled = elixirPage <= 0;
+  if (elixirNextBtn) elixirNextBtn.disabled = elixirPage >= elixirPages - 1;
 }
 
 /** Использовать эликсир из ячейки i (только в свой ход, по разу на ячейку).
@@ -1870,13 +1953,6 @@ castleMainMenu?.addEventListener('click', (e) => {
   if (id === 'location') toggleLocPanel();
   else if (CASTLE_DOCK_PANES.has(id)) openCastleDock(id);
   else if (id === 'clan') showToast('Модуль «Клан» подключается отдельно — пока заглушка');
-});
-
-elixirPrevBtn?.addEventListener('click', () => {
-  if (elixirPage > 0) { elixirPage--; renderCombatBar(); }
-});
-elixirNextBtn?.addEventListener('click', () => {
-  if (elixirPage < elixirPageCount() - 1) { elixirPage++; renderCombatBar(); }
 });
 
 // ---------------------------------------------------------------------------
