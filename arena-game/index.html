@@ -153,16 +153,16 @@
               <div class="arena-loading-spinner"></div>
               Загрузка бойцов…
             </div>
-            <!-- эликсиры: вертикальный пояс СЛЕВА у края сцены (фиксирован) -->
-            <div class="elixir-belt" id="elixir-belt" role="group" aria-label="Эликсиры"></div>
-            <!-- заклинания: 4 крупных слота под кругом, у нижней кромки сцены
-                 (ближе к бойцам — больше места снизу под окна) -->
-            <div class="combat-bar" id="combat-bar">
-              <div class="slot-group spells" id="spell-bar" role="group" aria-label="Заклинания">
-                <div class="combat-slot spell"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true"><path d="M12 4l1.8 5.4L19 12l-5.2 2.6L12 20l-1.8-5.4L5 12l5.2-2.6L12 4Z"/></svg></div>
-                <div class="combat-slot spell"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true"><path d="M12 4l1.8 5.4L19 12l-5.2 2.6L12 20l-1.8-5.4L5 12l5.2-2.6L12 4Z"/></svg></div>
-                <div class="combat-slot spell"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true"><path d="M12 4l1.8 5.4L19 12l-5.2 2.6L12 20l-1.8-5.4L5 12l5.2-2.6L12 4Z"/></svg></div>
-                <div class="combat-slot spell"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true"><path d="M12 4l1.8 5.4L19 12l-5.2 2.6L12 20l-1.8-5.4L5 12l5.2-2.6L12 4Z"/></svg></div>
+            <!-- нижний ряд: 3 заклинания (без листания) + 3 эликсира со стрелками -->
+            <div class="combat-bar hidden" id="combat-bar">
+              <div class="combat-strip spells-strip" aria-label="Заклинания">
+                <div class="combat-slots" id="spell-slots" role="group"></div>
+              </div>
+              <div class="combat-divider" aria-hidden="true"></div>
+              <div class="combat-strip elixirs-strip" aria-label="Эликсиры">
+                <button type="button" class="combat-page prev" id="elixir-prev" aria-label="Предыдущие эликсиры">‹</button>
+                <div class="combat-slots" id="elixir-slots" role="group"></div>
+                <button type="button" class="combat-page next" id="elixir-next" aria-label="Следующие эликсиры">›</button>
               </div>
             </div>
           </div>

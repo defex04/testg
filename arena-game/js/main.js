@@ -15,7 +15,7 @@ import { Arena } from './arena/Arena.js';
 import { api, ServerBattle } from './net/net.js';
 import { BattleUI } from './arena/BattleUI.js';
 import { DressingRoom } from './arena/DressingRoom.js';
-import { FIGHTERS, LOCATIONS, ITEMS, SLOT_META, ELIXIR_SLOTS } from './content.js';
+import { FIGHTERS, LOCATIONS, ITEMS, SLOT_META, SPELLS, SPELL_SLOTS, ELIXIR_SLOTS, ELIXIR_SLOTS_VISIBLE } from './content.js';
 
 // ---------------------------------------------------------------------------
 // Утилиты и состояние игрока
@@ -143,7 +143,7 @@ function applyUILayout() {
   // `auto 108% bottom`: низ (камень/колонны) прижат к низу, картинка чуть
   // увеличена и поднята — круг встаёт под ноги бойцов (крутить % высоты тут).
   castleBg.style.background = mode === 'battle'
-    ? '#0a0e07 url("assets/fight/back_arena.jpg") center bottom / auto 108% no-repeat'
+    ? '#0a0e07 url("assets/fight/back_arena2.webp") center bottom / auto 108% no-repeat'
     : (loc.image
         ? `#0a0e07 url("${loc.image}") center / cover no-repeat`
         : (loc.css || '#0a0e07'));
@@ -270,6 +270,7 @@ function setMode(next) {
     || CASTLE_DOCK_PANES.has(battleEntryPane) ? battleEntryPane : 'members');
   else closeCastleDock();
   applyUILayout();
+  renderCombatBar();
 }
 
 // ---------------------------------------------------------------------------
@@ -1395,6 +1396,11 @@ async function syncServerEquip(slotName, itemKey, prevKey = null) {
 
 // иконка-призрак пустой ячейки пояса (как в исходном боевом оверлее)
 const FLASK_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 3.5h4M10.8 3.5v5L5.6 17a3.2 3.2 0 0 0 2.9 4.6h7a3.2 3.2 0 0 0 2.9-4.6l-5.2-8.5v-5"/><path d="M7.5 14.5h9"/></svg>`;
+const SPELL_STAR_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true"><path d="M12 4l1.8 5.4L19 12l-5.2 2.6L12 20l-1.8-5.4L5 12l5.2-2.6L12 4Z"/></svg>`;
+
+const spellBar = new Array(SPELL_SLOTS).fill(null);
+['spark', 'fireball', 'frost'].forEach((key, i) => { spellBar[i] = key; });
+let elixirPage = 0;
 
 const elixirBelt = new Array(ELIXIR_SLOTS).fill(null);  // ячейка -> ключ ITEMS | null
 const elixirSpent = new Set();         // индексы ячеек, использованных в этом бою
@@ -1402,7 +1408,11 @@ let selfBuffTurns = 0;                 // оставшиеся усиленны�
 let selfBuffPct = 0;                   // прибавка урона «Эликсира мощи», %
 let beltLive = false;                  // можно ли использовать пояс прямо сейчас
 
-const battleBeltEl = $('elixir-belt');
+const combatBarEl = $('combat-bar');
+const spellSlotsEl = $('spell-slots');
+const elixirSlotsEl = $('elixir-slots');
+const elixirPrevBtn = $('elixir-prev');
+const elixirNextBtn = $('elixir-next');
 const dressingBeltEl = $('dressing-belt');
 
 /** Показать HP стороны (HP считает сервер; при baseHp<=0 — 0, иначе не ниже 1). */
@@ -1482,7 +1492,8 @@ function resetElixirBattle() {
   selfBuffTurns = 0;
   selfBuffPct = 0;
   beltLive = false;
-  renderBattleBelt();
+  elixirPage = 0;
+  renderCombatBar();
   refreshSelfEffects();
 }
 
@@ -1499,36 +1510,75 @@ function refreshSelfEffects() {
 
 function setBeltLive(v) {
   beltLive = v;
-  renderBattleBelt();
+  renderCombatBar();
 }
 
-/** Боевой пояс эликсиров под кругом: ВСЕ ячейки видны (пустые — заглушки),
- *  заполненные кликабельны в свой ход. */
-function renderBattleBelt() {
-  if (!battleBeltEl) return;
-  battleBeltEl.classList.toggle('hidden', mode !== 'battle');
-  battleBeltEl.innerHTML = '';
-  if (mode !== 'battle') return;
-  for (let i = 0; i < ELIXIR_SLOTS; i++) {
-    const key = elixirBelt[i];
-    if (!key) {
-      const empty = document.createElement('div');
-      empty.className = 'combat-slot elixir empty';
-      empty.title = 'Пустая ячейка эликсира';
-      battleBeltEl.appendChild(empty);
-      continue;
+function elixirPageCount() {
+  return Math.max(1, Math.ceil(ELIXIR_SLOTS / ELIXIR_SLOTS_VISIBLE));
+}
+
+/** Нижний ряд боя: 3 заклинания + 3 эликсира (эликсиры листаются стрелками). */
+function renderCombatBar() {
+  if (!combatBarEl) return;
+  combatBarEl.classList.toggle('hidden', mode !== 'battle');
+
+  const elixirPages = elixirPageCount();
+  elixirPage = Math.min(elixirPage, elixirPages - 1);
+
+  if (elixirPrevBtn) elixirPrevBtn.disabled = elixirPage <= 0;
+  if (elixirNextBtn) elixirNextBtn.disabled = elixirPage >= elixirPages - 1;
+
+  if (spellSlotsEl) {
+    spellSlotsEl.innerHTML = '';
+    for (let i = 0; i < SPELL_SLOTS; i++) {
+      const key = spellBar[i];
+      if (!key) {
+        const empty = document.createElement('div');
+        empty.className = 'combat-slot spell empty';
+        empty.title = 'Пустой слот заклинания';
+        empty.innerHTML = SPELL_STAR_SVG;
+        spellSlotsEl.appendChild(empty);
+        continue;
+      }
+      const sp = SPELLS[key];
+      const slot = document.createElement('button');
+      slot.type = 'button';
+      slot.className = 'combat-slot spell filled';
+      slot.disabled = !beltLive;
+      slot.title = sp?.name ?? key;
+      slot.innerHTML = `<span class="bs-ico">${sp?.icon ?? '✦'}</span>`;
+      slot.addEventListener('click', () => {
+        if (!beltLive) return;
+        showToast(`«${sp?.name ?? key}» — скоро`);
+      });
+      spellSlotsEl.appendChild(slot);
     }
-    const el = ITEMS[key];
-    const spent = elixirSpent.has(i);
-    const slot = document.createElement('button');
-    slot.type = 'button';
-    slot.className = `combat-slot elixir filled kind-${el.kind === 'health' ? 'health' : 'power'}`
-      + (spent ? ' spent' : '');
-    slot.disabled = spent || !beltLive;
-    slot.title = spent ? `${el.name} — использован` : `${el.name} — использовать`;
-    slot.innerHTML = `<span class="bs-ico">${el.icon || '🧪'}</span>`;
-    slot.addEventListener('click', () => useElixir(i));
-    battleBeltEl.appendChild(slot);
+  }
+
+  if (elixirSlotsEl) {
+    elixirSlotsEl.innerHTML = '';
+    for (let s = 0; s < ELIXIR_SLOTS_VISIBLE; s++) {
+      const i = elixirPage * ELIXIR_SLOTS_VISIBLE + s;
+      if (i >= ELIXIR_SLOTS || !elixirBelt[i]) {
+        const empty = document.createElement('div');
+        empty.className = 'combat-slot elixir empty';
+        empty.title = 'Пустая ячейка эликсира';
+        empty.innerHTML = FLASK_SVG;
+        elixirSlotsEl.appendChild(empty);
+        continue;
+      }
+      const el = ITEMS[elixirBelt[i]];
+      const spent = elixirSpent.has(i);
+      const slot = document.createElement('button');
+      slot.type = 'button';
+      slot.className = `combat-slot elixir filled kind-${el.kind === 'health' ? 'health' : 'power'}`
+        + (spent ? ' spent' : '');
+      slot.disabled = spent || !beltLive;
+      slot.title = spent ? `${el.name} — использован` : `${el.name} — использовать`;
+      slot.innerHTML = `<span class="bs-ico">${el.icon || '🧪'}</span>`;
+      slot.addEventListener('click', () => useElixir(i));
+      elixirSlotsEl.appendChild(slot);
+    }
   }
 }
 
@@ -1547,7 +1597,7 @@ function useElixir(i) {
   });
   ui.log(`<b>${esc(battle.sides.left.name)}</b> выпивает «${name}»…`);
   elixirSpent.add(i);
-  renderBattleBelt();
+  renderCombatBar();
 }
 
 /** Пояс в гардеробе: пряжка + все ячейки; клик по заполненной — убрать. */
@@ -1820,6 +1870,13 @@ castleMainMenu?.addEventListener('click', (e) => {
   if (id === 'location') toggleLocPanel();
   else if (CASTLE_DOCK_PANES.has(id)) openCastleDock(id);
   else if (id === 'clan') showToast('Модуль «Клан» подключается отдельно — пока заглушка');
+});
+
+elixirPrevBtn?.addEventListener('click', () => {
+  if (elixirPage > 0) { elixirPage--; renderCombatBar(); }
+});
+elixirNextBtn?.addEventListener('click', () => {
+  if (elixirPage < elixirPageCount() - 1) { elixirPage++; renderCombatBar(); }
 });
 
 // ---------------------------------------------------------------------------

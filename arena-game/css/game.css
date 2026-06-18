@@ -841,10 +841,8 @@ body.loc-castle.in-battle .sprite-main .sm-ico {
   box-shadow: var(--slot-shadow), 0 0 10px rgba(216, 169, 63, .22);
 }
 
-/* ---------- слоты под боевым кругом: заклинания + эликсиры ---------- */
+/* ---------- нижний ряд боя: 3 заклинания + 3 эликсира (стрелки только у эликсиров) ---------- */
 
-/* заклинания — крупные слоты у нижней кромки сцены, по центру под кругом
-   (оверлей внутри arena-stage: между ног бойцов, под колесом) */
 .combat-bar {
   position: absolute;
   left: 50%;
@@ -852,35 +850,64 @@ body.loc-castle.in-battle .sprite-main .sm-ico {
   transform: translateX(-50%);
   z-index: 12;
   display: flex;
+  flex-wrap: nowrap;
   align-items: center;
-  justify-content: center;
-  gap: 10px;
-}
-.slot-group {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-}
-
-/* эликсиры — вертикальный пояс СЛЕВА у самого края сцены (оверлей в arena-stage,
-   фиксирован, не задевает бойца). Поверх колеса (z выше). */
-.elixir-belt {
-  position: absolute;
-  left: 6px;
-  top: 50%;
-  transform: translateY(-50%);
-  z-index: 13;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  padding: 7px;
-  background: rgba(8, 11, 5, .4);
-  border: 1px solid rgba(138, 111, 60, .3);
-  border-radius: 14px;
+  gap: 6px;
+  max-width: calc(100% - 12px);
+  padding: 5px 7px;
+  background: rgba(8, 11, 5, .42);
+  border: 1px solid rgba(138, 111, 60, .32);
+  border-radius: 12px;
   backdrop-filter: blur(3px);
   box-shadow: 0 4px 14px rgba(0, 0, 0, .4), inset 0 1px 0 rgba(244, 205, 111, .06);
+}
+
+.combat-strip {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 4px;
+}
+
+.combat-slots {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
+}
+
+.combat-divider {
+  flex: 0 0 1px;
+  align-self: stretch;
+  margin: 3px 0;
+  background: linear-gradient(180deg, transparent, rgba(138, 111, 60, .45), transparent);
+}
+
+.combat-page {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid rgba(138, 111, 60, .38);
+  border-radius: 8px;
+  background: linear-gradient(180deg, rgba(22, 28, 14, .9), rgba(11, 15, 7, .92));
+  color: rgba(244, 205, 111, .82);
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+  touch-action: manipulation;
+  transition: border-color .15s, color .15s, opacity .15s;
+  -webkit-tap-highlight-color: transparent;
+}
+.combat-page:hover:not(:disabled) {
+  color: var(--gold-bright);
+  border-color: rgba(244, 205, 111, .55);
+}
+.combat-page:disabled {
+  opacity: .28;
+  cursor: default;
 }
 
 /* единая ячейка слота (заклинание/эликсир) — тёмная плитка с золотой рамкой */
@@ -907,15 +934,23 @@ body.loc-castle.in-battle .sprite-main .sm-ico {
 .combat-slot svg { width: 19px; height: 19px; color: rgba(244, 205, 111, .3); }
 .combat-slot .bs-ico { font-size: 20px; line-height: 1; filter: drop-shadow(0 1px 2px rgba(0, 0, 0, .6)); }
 
-/* магия под кругом — крупнее (4 слота); эликсиры в правом поясе — обычный размер */
-.combat-bar .combat-slot { width: 50px; height: 50px; border-radius: 13px; }
-.combat-bar .combat-slot svg { width: 24px; height: 24px; }
-.elixir-belt .combat-slot { width: 42px; height: 42px; }
-.elixir-belt .combat-slot .bs-ico { font-size: 22px; }
+/* магия и эликсиры в нижнем ряду */
+.combat-bar .combat-slot {
+  width: 42px;
+  height: 42px;
+  border-radius: 11px;
+  touch-action: manipulation;
+}
+.combat-bar .combat-slot svg { width: 22px; height: 22px; }
+.combat-bar .combat-slot .bs-ico { font-size: 24px; }
 
 /* заклинания — холодный акцент рамки, отличает их от эликсиров */
 .combat-slot.spell { border-color: rgba(120, 160, 220, .42); }
 .combat-slot.spell svg { color: rgba(150, 190, 240, .5); }
+.combat-slot.spell.empty { opacity: .45; border-style: dashed; }
+.combat-slot.spell.filled { cursor: pointer; }
+.combat-slot.spell.filled:not(:disabled):hover { transform: translateY(-2px); }
+.combat-slot.spell:disabled { cursor: default; filter: saturate(.55) brightness(.8); }
 
 /* эликсиры: пустые — приглушены пунктиром; заполненные — кликабельны */
 .combat-slot.elixir.empty { opacity: .45; border-style: dashed; }
@@ -2795,13 +2830,27 @@ button.belt-slot { padding: 0; font: inherit; color: inherit; -webkit-tap-highli
   .belt-slot svg { width: 16px; height: 16px; }
   .belt-slot.round { border-radius: 50%; }
   .belt-slot .bs-ico { font-size: 18px; }
-  /* боевые слоты — магия крупная (4), эликсиры в правом поясе компактнее */
-  .combat-bar { gap: 8px; }
-  .combat-bar .combat-slot { width: 46px; height: 46px; border-radius: 12px; }
-  .combat-bar .combat-slot svg { width: 22px; height: 22px; }
-  .elixir-belt { left: 5px; gap: 7px; padding: 6px; }
-  .elixir-belt .combat-slot { width: 38px; height: 38px; }
-  .elixir-belt .combat-slot .bs-ico { font-size: 20px; }
+  /* боевые слоты — крупнее для пальца на телефоне */
+  .combat-bar {
+    gap: 5px;
+    padding: 6px 8px;
+    max-width: calc(100% - 6px);
+    bottom: max(6px, env(safe-area-inset-bottom));
+  }
+  .combat-bar .combat-slot {
+    width: clamp(38px, 11.5vw, 46px);
+    height: clamp(38px, 11.5vw, 46px);
+    border-radius: 12px;
+  }
+  .combat-bar .combat-slot svg { width: clamp(20px, 6vw, 24px); height: clamp(20px, 6vw, 24px); }
+  .combat-bar .combat-slot .bs-ico { font-size: clamp(22px, 6.5vw, 26px); }
+  .combat-page {
+    width: clamp(30px, 9vw, 36px);
+    height: clamp(30px, 9vw, 36px);
+    font-size: clamp(17px, 5.2vw, 20px);
+    border-radius: 9px;
+  }
+  .combat-strip, .combat-slots { gap: 5px; }
 
   .bui-popup { font-size: 21px; }
   .bui-popup.crit { font-size: 28px; }
@@ -2848,9 +2897,17 @@ button.belt-slot { padding: 0; font: inherit; color: inherit; -webkit-tap-highli
 
 @media (max-width: 360px) {
   .belt-slot { width: 32px; height: 32px; }              /* гардероб */
-  .combat-bar { gap: 6px; }
-  .combat-bar .combat-slot { width: 42px; height: 42px; }
-  .elixir-belt .combat-slot { width: 34px; height: 34px; }
+  .combat-bar { gap: 4px; padding: 5px 6px; }
+  .combat-bar .combat-slot {
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+  }
+  .combat-bar .combat-slot svg { width: 19px; height: 19px; }
+  .combat-bar .combat-slot .bs-ico { font-size: 21px; }
+  .combat-slots { gap: 4px; }
+  .combat-strip { gap: 4px; }
+  .combat-page { width: 28px; height: 28px; font-size: 16px; border-radius: 8px; }
 }
 
 @media (max-height: 640px) {
