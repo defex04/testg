@@ -825,6 +825,9 @@ showDeadBtn.addEventListener('click', () => {
 });
 
 const membersSearch = $('members-search');
+membersSearch?.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { e.preventDefault(); membersSearch.blur(); }  // Enter — скрыть клавиатуру
+});
 membersSearch?.addEventListener('input', () => {
   if (ui) ui.setRosterFilter({ search: membersSearch.value });
 });
@@ -923,10 +926,11 @@ $('chat-form').addEventListener('submit', (e) => {
   e.preventDefault();
   const input = $('chat-input');
   const text = input.value.trim();
+  input.value = '';
+  input.blur();                          // Enter — отправили и скрыли клавиатуру
   if (!text) return;
   if (online) api.sendChat(text);        // вернётся всем в локации, включая нас
   else chatMessage(PLAYER.name, text);   // оффлайн: локальное эхо
-  input.value = '';
 });
 
 // ---------------------------------------------------------------------------
@@ -1000,14 +1004,15 @@ $('chat-form').addEventListener('submit', (e) => {
   document.addEventListener('focusin', (e) => onChatFocus(e, true));
   document.addEventListener('focusout', (e) => onChatFocus(e, false));
 
-  // тап по области локации (сцена/фон вне дока и меню) снимает фокус с поля
-  // ввода чата → клавиатура закрывается. На тач-устройствах сцена перехватывает
-  // тач и сама по себе фокус не сбрасывает, поэтому делаем это явно.
-  const gameMid = document.querySelector('.game-mid');
-  gameMid?.addEventListener('pointerdown', () => {
+  // Тап в ЛЮБОЕ место вне текстового поля снимает фокус → клавиатура скрывается.
+  // (на тач-устройствах сцена/кнопки сами фокус не сбрасывают — делаем явно).
+  // Тап по другому полю не трогаем: браузер сам переведёт фокус.
+  document.addEventListener('pointerdown', (e) => {
     const ae = document.activeElement;
-    if (ae && ae.closest && ae.closest('.chat-input-row')) ae.blur();
-  });
+    if (!ae || !ae.matches || !ae.matches('input, textarea')) return;
+    if (e.target.closest && e.target.closest('input, textarea')) return;
+    ae.blur();
+  }, true);
 })();
 
 // ---------------------------------------------------------------------------
@@ -1617,7 +1622,7 @@ function layoutCombatBar() {
   const slots = elixirSlotsEl.children;
   if (!slots.length) return;
 
-  const slotW = slots[0].getBoundingClientRect().width;
+  const slotW = slots[0].offsetWidth;
   if (!slotW) { requestAnimationFrame(layoutCombatBar); return; }  // ещё без размера
   const cs = getComputedStyle(elixirSlotsEl);
   const gap = parseFloat(cs.columnGap || cs.gap) || 6;
@@ -1658,7 +1663,7 @@ function applyElixirPage() {
   elixirPage = Math.max(0, Math.min(elixirPage, elixirPages - 1));
   const cs = getComputedStyle(elixirSlotsEl);
   const gap = parseFloat(cs.columnGap || cs.gap) || 6;
-  const slotW = elixirSlotsEl.children[0]?.getBoundingClientRect().width || 48;
+  const slotW = elixirSlotsEl.children[0]?.offsetWidth || 44;
   const step = slotW + gap;
   elixirSlotsEl.style.transform = `translateX(${-elixirPage * elixirPerPage * step}px)`;
   if (elixirPrevBtn) elixirPrevBtn.disabled = elixirPage <= 0;

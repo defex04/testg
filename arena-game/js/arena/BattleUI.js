@@ -653,8 +653,7 @@ export class BattleUI {
     p.style.left = pos.x + 'px';
     p.style.top = pos.y + 'px';
     this.refs.popups.appendChild(p);
-    // удаляем строго после конца анимации (#7) — чтобы цифра не пропадала резко
-    setTimeout(() => p.remove(), 1500);
+    setTimeout(() => p.remove(), 1400);
   }
 
   /** Запись в журнал. История не затирается — журнал прокручивается. */
