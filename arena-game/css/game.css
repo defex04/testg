@@ -539,9 +539,8 @@ body.loc-castle.in-battle .battle-head {
   backdrop-filter: none;
 }
 
-/* СЦЕНА — фиксированный прямоугольник: бойцы стоят на круге фона. Доля высоты
-   подобрана так, чтобы низ сцены (ноги) приходился на круг картинки. Сцена и
-   слоты НЕ меняют размер при открытии окон — окна всплывают поверх. */
+/* СЦЕНА — фиксированный прямоугольник: бойцы стоят на круге фона. Под ней —
+   строка слотов, ниже — зона, куда всплывают окна. */
 body.loc-castle.in-battle .arena-stage {
   flex: 2.4 1 0%;
   min-height: 0;
@@ -552,14 +551,20 @@ body.loc-castle.in-battle .arena-stage::after {
   box-shadow: none;
 }
 
-/* нижний прямоугольник (камень фона) — место, ПОВЕРХ которого всплывают окна.
-   Слоты заклинаний теперь ВНУТРИ сцены (оверлей у её низа), поэтому эта зона
-   целиком отдана под окна — окнам больше места. */
+/* нижний прямоугольник (камень фона) — зона всплывающих окон, ниже слотов. */
 body.loc-castle.in-battle .battle-foreground { flex: 1.55 1 0%; min-height: 0; }
 
-/* ОКНА (участники/лог/чат) в бою — абсолютный оверлей над меню: всплывают поверх
-   нижнего прямоугольника и НЕ двигают сцену, слоты и эликсиры (суть прототипа).
-   bottom:100% от .castle-bottom = ровно над меню (само отслеживает высоту меню). */
+/* панель слотов — только внутри #screen-battle, не в castle-bottom */
+body.loc-castle.in-battle .screen-battle .combat-bar {
+  flex: 0 0 auto;
+  align-self: center;
+  margin: -8px auto 14px;
+  transform: translateY(-14px);
+  width: max-content;
+  max-width: calc(100% - 12px);
+}
+
+/* ОКНА в бою — всплывают над каменным низом (высота — общее правило .dock-open) */
 body.loc-castle.in-battle .castle-bottom { position: relative; }
 body.loc-castle.in-battle .bottom-dock {
   position: absolute;
@@ -844,16 +849,12 @@ body.loc-castle.in-battle .sprite-main .sm-ico {
 /* ---------- нижний ряд боя: 3 заклинания + 3 эликсира (стрелки только у эликсиров) ---------- */
 
 .combat-bar {
-  position: absolute;
-  left: 50%;
-  bottom: 6px;
-  transform: translateX(-50%);
-  z-index: 12;
+  position: relative;
   display: flex;
   flex-wrap: nowrap;
   align-items: center;
+  justify-content: center;
   gap: 6px;
-  max-width: calc(100% - 12px);
   padding: 5px 7px;
   background: rgba(8, 11, 5, .42);
   border: 1px solid rgba(138, 111, 60, .32);
@@ -2830,12 +2831,11 @@ button.belt-slot { padding: 0; font: inherit; color: inherit; -webkit-tap-highli
   .belt-slot svg { width: 16px; height: 16px; }
   .belt-slot.round { border-radius: 50%; }
   .belt-slot .bs-ico { font-size: 18px; }
-  /* боевые слоты — крупнее для пальца на телефоне */
+  /* боевые слоты */
   .combat-bar {
     gap: 5px;
     padding: 6px 8px;
-    max-width: calc(100% - 6px);
-    bottom: max(6px, env(safe-area-inset-bottom));
+    max-width: calc(100% - 8px);
   }
   .combat-bar .combat-slot {
     width: clamp(38px, 11.5vw, 46px);

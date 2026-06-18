@@ -141,9 +141,7 @@
           </div>
         </section>
 
-        <!-- экран боя: фиксированные прямоугольники (шапка · сцена · слоты ·
-             нижняя зона) — не сдвигаются при открытии окон, масштабируются
-             только под размер экрана -->
+        <!-- экран боя: шапка · сцена · слоты · нижняя зона (слоты только здесь) -->
         <section class="screen screen-battle hidden" id="screen-battle">
           <div class="battle-head" id="battle-head"></div>
 
@@ -153,17 +151,17 @@
               <div class="arena-loading-spinner"></div>
               Загрузка бойцов…
             </div>
-            <!-- нижний ряд: 3 заклинания (без листания) + 3 эликсира со стрелками -->
-            <div class="combat-bar hidden" id="combat-bar">
-              <div class="combat-strip spells-strip" aria-label="Заклинания">
-                <div class="combat-slots" id="spell-slots" role="group"></div>
-              </div>
-              <div class="combat-divider" aria-hidden="true"></div>
-              <div class="combat-strip elixirs-strip" aria-label="Эликсиры">
-                <button type="button" class="combat-page prev" id="elixir-prev" aria-label="Предыдущие эликсиры">‹</button>
-                <div class="combat-slots" id="elixir-slots" role="group"></div>
-                <button type="button" class="combat-page next" id="elixir-next" aria-label="Следующие эликсиры">›</button>
-              </div>
+          </div>
+
+          <div class="combat-bar hidden" id="combat-bar">
+            <div class="combat-strip spells-strip" aria-label="Заклинания">
+              <div class="combat-slots" id="spell-slots" role="group"></div>
+            </div>
+            <div class="combat-divider" aria-hidden="true"></div>
+            <div class="combat-strip elixirs-strip" aria-label="Эликсиры">
+              <button type="button" class="combat-page prev" id="elixir-prev" aria-label="Предыдущие эликсиры">‹</button>
+              <div class="combat-slots" id="elixir-slots" role="group"></div>
+              <button type="button" class="combat-page next" id="elixir-next" aria-label="Следующие эликсиры">›</button>
             </div>
           </div>
 
