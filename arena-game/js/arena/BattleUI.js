@@ -319,13 +319,15 @@ export class BattleUI {
     this._locked = true; // защита от двойного клика до hideControls()
     const sp = this._sprites['atk-' + zone];
     sp.classList.remove('thrust'); void sp.offsetWidth; sp.classList.add('thrust');
-    this.onStrike({ attack: zone, block: this.block, target: this.target });
+    // цель удара НЕ передаём — её решает сервер (пара «кто напротив»);
+    // выбор в ростере (this.target) — только для эликсиров/эффектов
+    this.onStrike({ attack: zone, block: this.block });
   }
 
   _skip() {
     if (this._locked) return;
     this._locked = true;
-    this.onStrike({ attack: null, block: this.block, pass: true, target: this.target });
+    this.onStrike({ attack: null, block: this.block, pass: true });
   }
 
   _selectBlock(zone) {
@@ -345,28 +347,27 @@ export class BattleUI {
   }
 
   /**
-   * Цель по умолчанию (сфокусированный враг). Сам выбор — кликом по участнику
-   * во вкладке «Участники боя» (см. setRoster).
+   * Цель ЭФФЕКТА/эликсира (this.target) — выбирается вручную кликом по участнику
+   * (см. _pickTarget). По умолчанию её нет (null = эффект на себя). На выбор
+   * соперника по удару это НЕ влияет — удар всегда по серверной паре «напротив».
+   * Сохраняем ручной выбор, пока выбранный участник есть в составе боя.
    */
-  setTargets(list = [], focusId = null) {
-    // ручной выбор игрока сохраняется, пока выбранный участник есть в составе
+  setTargets() {
     const all = this._rosterEls && this._rosterEls.all;
     if (this._targetManual && this.target != null && all && all[this.target]) {
       this._refreshTargetMark();
       return;
     }
-    const targets = list.filter((t) => t && t.alive !== false);
-    const ids = new Set(targets.map((t) => t.id));
-    this.target = (focusId != null && ids.has(focusId))
-      ? focusId : (targets[0] ? targets[0].id : null);
+    this.target = null;
     this._targetManual = false;
     this._refreshTargetMark();
   }
 
   /**
-   * Выбрать цель кликом по участнику (повторный клик по выбранному — снять
-   * выделение). Можно выбирать кого угодно — врага (удар), союзника (лечение),
-   * мёртвого (свиток воскрешения); что допустимо для действия, решает сервер.
+   * Выбрать цель ЭФФЕКТА кликом по участнику (повторный клик — снять выделение).
+   * Это цель эликсира/заклинания (союзник — лечение/бафф, и т.п.); на то, по кому
+   * бьёшь в ближнем бою, выбор НЕ влияет (удар решает сервер). Допустимость цели
+   * для конкретного эффекта проверяет сервер.
    */
   _pickTarget(id) {
     if (this._locked) return;

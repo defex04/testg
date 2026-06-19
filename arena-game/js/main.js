@@ -534,7 +534,7 @@ async function initBattle(resumedBattle = null, starter = null, pvpTarget = null
     if (d.roster) ui.setRoster(d.roster);
     if (d.canAct) {                // мой ход
       applyFocus(d.focus);
-      ui.setTargets(d.targets || [], d.focus ? d.focus.id : null);
+      ui.setTargets();             // сохранить ручную цель эффекта (если есть)
       ui.showControls();
       setBeltLive(true);
     } else if (d.waiting) {        // ходит союзник — ждём своего соперника
@@ -1682,6 +1682,7 @@ function useElixir(i) {
     kind: el.kind === 'health' ? 'health' : 'power',
     potency: el.potency ?? 0.3,
     turns: el.turns ?? 3,
+    target: ui?.target ?? null,    // выбранный в ростере союзник/себя (эффект)
   });
   ui.log(`<b>${esc(battle.sides.left.name)}</b> выпивает «${name}»…`);
   elixirSpent.add(i);

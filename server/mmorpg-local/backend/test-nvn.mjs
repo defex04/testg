@@ -37,6 +37,11 @@ function connect(token) {
     ws.on('open', () => resolve({
       ws, send: (o) => ws.send(JSON.stringify(o)),
       drain: (type) => queue.filter((m) => m.type === type),
+      // неблокирующе забрать первое накопленное событие нужного типа (или null)
+      poll: (types) => {
+        const i = queue.findIndex((m) => types.includes(m.type));
+        return i >= 0 ? queue.splice(i, 1)[0] : null;
+      },
       wait: (types, ms = 9000) => {
         const i = queue.findIndex((m) => types.includes(m.type));
         if (i >= 0) return Promise.resolve(queue.splice(i, 1)[0]);
@@ -102,37 +107,47 @@ if (!ended) {
   c.send({ type: 'join', battleId, side: 'right' });
   const cs = await c.wait(['battleStart', 'error'], 9000);
   ok(cs.type === 'battleStart', 'C вошёл в бой', cs.type === 'error' ? cs.error : 'ok');
-  ok(cs.roster && cs.roster.right.length === 2,
-    'у стороны C теперь 2 бойца', 'right=' + (cs.roster ? cs.roster.right.length : '?'));
+  // зеркалирование: своя команда — слева. У C своя сторона (B+C) = 2 слева,
+  // один враг (A) — справа.
+  ok(cs.roster && cs.roster.left.length === 2 && cs.roster.right.length === 1,
+    'у стороны C теперь 2 бойца (своя слева), 1 враг справа',
+    'left=' + (cs.roster ? cs.roster.left.length : '?')
+    + ' right=' + (cs.roster ? cs.roster.right.length : '?'));
 
-  // A видит, что врагов стало двое (roster.right = 2)
-  const aRoster = await a.wait(['turnStart', 'resolve', 'rosterUpdate'], 9000);
+  // A видит, что врагов стало двое — ждём именно rosterUpdate (его шлёт join
+  // всем, кроме вошедшего); turnStart/resolve в очереди могут быть «дожоиновые»
+  const aRoster = await a.wait(['rosterUpdate'], 9000);
   ok(aRoster.roster && aRoster.roster.right.length === 2,
     'A видит двух соперников', 'right=' + (aRoster.roster ? aRoster.roster.right.length : '?'));
 
-  // --- пока ходит союзник, второй из пары видит «ожидание соперника» ---
-  let sawWaiting = false, sawTwoFoci = false;
+  // --- 2-на-1: ровный «насос» событий гоняет бой, пока A не увидит обоих
+  //     соперников в фокусе либо бой не закончится. Фокус A на СВОЁМ ходу теперь
+  //     стабилен (один соперник), но смена видна, когда активен/бьёт другой враг:
+  //     turnStart активного врага и resolve по A несут его как focus. ---
+  let sawWaiting = false;
   const fociA = new Set();
-  for (let i = 0; i < 14; i++) {
-    const evB = await b.wait(['turnStart', 'battleEnd'], 25000).catch(() => null);
-    const evC = await c.wait(['turnStart', 'battleEnd'], 25000).catch(() => null);
-    const evA = await a.wait(['turnStart', 'battleEnd'], 25000).catch(() => null);
-    if (!evA || evA.type === 'battleEnd') break;
-    if (evB && evB.waiting) sawWaiting = true;
-    if (evC && evC.waiting) sawWaiting = true;
-    if (evA.focus) fociA.add(evA.focus.name);
-    if (fociA.size >= 2) sawTwoFoci = true;
-    // ходит тот, у кого canAct
-    for (const [conn, ev] of [[a, evA], [b, evB], [c, evC]]) {
-      if (ev && ev.type === 'turnStart' && ev.canAct) {
-        conn.send({ type: 'move', attack: 'high', block: 'mid' });
+  const pump = (conn) => {
+    let ev, ended = false;
+    while ((ev = conn.poll(['turnStart', 'resolve', 'battleEnd']))) {
+      if (ev.type === 'battleEnd') { ended = true; continue; }
+      if (conn === a && ev.focus) fociA.add(ev.focus.name);
+      if (ev.type === 'turnStart') {
+        if (ev.waiting) sawWaiting = true;
+        if (ev.canAct) conn.send({ type: 'move', attack: 'high', block: 'mid' });
+      } else if (ev.type === 'resolve') {
+        conn.send({ type: 'turnDone' });
       }
     }
-    await a.wait(['resolve'], 25000).catch(() => {});
-    a.send({ type: 'turnDone' }); b.send({ type: 'turnDone' }); c.send({ type: 'turnDone' });
+    return ended;
+  };
+  let ended = false;
+  for (let i = 0; i < 80 && !ended && fociA.size < 2; i++) {
+    const ea = pump(a), eb = pump(b), ec = pump(c);
+    ended = ea || eb || ec;
+    await new Promise((r) => setTimeout(r, 100));
   }
   ok(sawWaiting, 'появлялась плашка «ожидание соперника» (waiting=true)');
-  ok(sawTwoFoci, 'A видит переключение между двумя соперниками',
+  ok(fociA.size >= 2, 'A видит переключение между двумя соперниками',
     'фокусы=' + [...fociA].join(','));
 }
 

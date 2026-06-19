@@ -435,7 +435,7 @@ function onTurnTimeout(b) {
     return beginRound(b);
   }
   const move = af.isAI
-    ? b.engine.aiMove(af.id)
+    ? b.engine.aiMove()
     : { attack: null, block: null, pass: true };
   if (!b.engine.submit(af.id, move) && af.isAI) {
     b.engine.submit(af.id, { attack: null, block: null, pass: true });
@@ -459,16 +459,15 @@ function enterActor(b) {
     af = b.engine.currentActor();
   }
   if (!af) return;
-  // живому игроку заранее закрепляем «липкого» соперника — фокус не прыгает,
-  // и удар без явной цели придётся ровно по тому, кого показали (см. submit)
-  if (af && !af.isAI) b.engine.chooseOpponent(af.id);
+  // соперник «напротив» уже задан на весь раунд (engine.buildPairs в startRound)
+  // и не переключается до следующего раунда — отдельный ре-пик в суб-ходе не нужен.
   broadcast(b, (p) => turnStartFor(b, p));
   startTurnTimer(b);
   if (af && af.isAI) {
     setTimeout(() => {
       if (b.step !== step) return;   // ход уже сменился — не дублируем
       if (b.engine.phase === 'choose' && b.engine.currentActorId() === af.id) {
-        if (!b.engine.submit(af.id, b.engine.aiMove(af.id))) {
+        if (!b.engine.submit(af.id, b.engine.aiMove())) {
           console.warn(`Бой ${b.id}: ИИ ${af.name} (${af.id}) — пропуск хода`);
           b.engine.submit(af.id, { attack: null, block: null, pass: true });
         }

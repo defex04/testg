@@ -9,8 +9,12 @@
  *  - порядок инициативы считается ОДИН РАЗ со стабильным тай-брейком и
  *    переиспользуется каждый раунд → строго чередование, без ударов подряд
  *    одним бойцом (это и был баг «ходит дважды» при равной инициативе);
+ *  - «пары» (кто против кого) сватаются ОДИН раз за раунд (buildPairs) и держатся
+ *    весь раунд: удар бойца всегда приходит его паре — «пока соперник не ответит,
+ *    ничего не переключается». Между раундами сервер решает: пара продолжает или
+ *    меняется (стабильность против простаивания);
  *  - удар активного бойца разыгрывается сразу (sub-turn), затем ход переходит
- *    следующему по инициативе — отсюда естественное «переключение» соперника.
+ *    следующему по инициативе.
  */
 export const ZONES = ['high', 'mid', 'low'];
 const rnd = (min, max) => min + Math.random() * (max - min);
@@ -64,7 +68,7 @@ export class Engine {
       tiebreak: Math.random(),
       alive: hp > 0,
       block: null,                       // стойка; null в ходе снимает блок
-      opponentId: null,                  // «липкий» соперник (цель/фокус)
+      opponentId: null,                  // «пара» на раунд (цель удара/фокус), см. buildPairs
       lastActiveTurn: 0,                 // раунд последнего размена — для «холода»
       buffMult: 1,                       // множитель урона от «Эликсира мощи»
       buffTurns: 0,                      // на сколько своих ударов он действует
@@ -106,12 +110,14 @@ export class Engine {
     return f;
   }
 
-  /** Новый раунд: сбрасываем «походивших», порядок инициативы НЕ перевыбираем. */
+  /** Новый раунд: сбрасываем «походивших», порядок инициативы НЕ перевыбираем,
+   *  и ОДИН раз сватаем пары «кто против кого» на весь раунд (buildPairs). */
   startRound() {
     this.turn += 1;
     this.phase = 'choose';
     this.acted = new Set();
     this.idx = -1;
+    this.buildPairs();
     return this._nextActor();
   }
 
@@ -150,28 +156,68 @@ export class Engine {
   /** Вес выбора цели: база + приоритет «холодным» (на кого давно не нападали). */
   _targetWeight(enemy) { return 1 + this.target.coldWeight * this.coldness(enemy); }
 
-  _weightedPick(list) {
-    if (list.length <= 1) return list[0] || null;
-    const w = list.map((e) => this._targetWeight(e));
-    let r = Math.random() * w.reduce((a, b) => a + b, 0);
-    for (let i = 0; i < list.length; i++) { r -= w[i]; if (r <= 0) return list[i]; }
-    return list[list.length - 1];
+  /**
+   * Сватовство пар «кто против кого» — ОДИН раз за раунд (см. startRound).
+   * Закрепляет `opponentId` каждому живому бойцу на весь раунд → «пока соперник
+   * не ответит, ничего не переключается». Решает СЕРВЕР, по трём правилам:
+   *  1) стабильность: валидную взаимную пару с вероятностью (1−switchChance)
+   *     сохраняем (реже переключения); «холодную» пару (давно без размена) —
+   *     обязательно пере-сватываем;
+   *  2) меньше простаивания: свободных бойцов (в порядке инициативы) ведём к
+   *     наименее занятому и самому «холодному» врагу (вес `_targetWeight`/нагрузка);
+   *  3) неравные команды: лишние бойцы «дублируются» на врага (2-в-1) — никто не
+   *     стоит без дела; у врага opponentId = один из его атакующих (ответный удар).
+   */
+  buildPairs() {
+    const left = this.aliveOf('left'), right = this.aliveOf('right');
+    if (!left.length || !right.length) return;
+    const engaged = new Set();
+    const load = new Map();                       // enemyId -> сколько атакующих на нём
+    const bump = (id) => load.set(String(id), (load.get(String(id)) || 0) + 1);
+
+    // 1) сохраняем устойчивые взаимные пары (если не «холодные» и не выпал шанс смены)
+    for (const f of [...left, ...right]) {
+      if (engaged.has(f.id)) continue;
+      const p = f.opponentId ? this.fighter(f.opponentId) : null;
+      const mutual = p && p.alive && p.side !== f.side
+        && String(p.opponentId) === String(f.id) && !engaged.has(p.id);
+      if (!mutual) continue;
+      const cold = this.coldness(f) >= this.target.coldTurns
+        || this.coldness(p) >= this.target.coldTurns;
+      if (cold || Math.random() < this.target.switchChance) continue;   // разъединяем
+      engaged.add(f.id); engaged.add(p.id); bump(f.id); bump(p.id);
+    }
+
+    // 2) свободных (по инициативе) сватаем к наименее занятому/«холодному» врагу;
+    //    взаимность ставим, если враг ещё свободен — иначе это «дубль» (2-в-1)
+    for (const id of this.order) {
+      const f = this.fighter(id);
+      if (!f || !f.alive || engaged.has(f.id)) continue;
+      const enemies = this.enemiesOf(f.id);
+      if (!enemies.length) continue;
+      let best = null, bestW = -Infinity;
+      for (const e of enemies) {
+        const w = this._targetWeight(e) / (1 + (load.get(String(e.id)) || 0));
+        if (w > bestW) { bestW = w; best = e; }
+      }
+      f.opponentId = best.id; engaged.add(f.id); bump(best.id);
+      if (!engaged.has(best.id)) { best.opponentId = f.id; engaged.add(best.id); bump(f.id); }
+    }
   }
 
   /**
-   * Закрепить/обновить соперника бойца (липкий фокус + вероятностное
-   * переключение + «холод»). Возвращает выбранного живого врага.
+   * Стабильный соперник «напротив» для живого игрока: пока текущий жив — он и
+   * остаётся (никакого случайного переключения), иначе детерминированно берём
+   * первого живого врага в порядке инициативы (тот же, что вернёт enemiesOf[0],
+   * — поэтому показанный фокус и реальная цель удара всегда совпадают).
+   * Возвращает закреплённого живого врага (или null, если врагов не осталось).
    */
-  chooseOpponent(actorId) {
+  ensureOpponent(actorId) {
     const f = this.fighter(actorId);
     if (!f) return null;
-    const enemies = this.enemiesOf(actorId);
-    if (!enemies.length) { f.opponentId = null; return null; }
     const cur = f.opponentId ? this.fighter(f.opponentId) : null;
-    const valid = cur && cur.alive && cur.side !== f.side;
-    const selfCold = this.coldness(f) >= this.target.coldTurns;
-    const wantSwitch = !valid || selfCold || Math.random() < this.target.switchChance;
-    const pick = wantSwitch ? this._weightedPick(enemies) : cur;
+    if (cur && cur.alive && cur.side !== f.side) return cur;   // держим стабильно
+    const pick = this.enemiesOf(actorId)[0] || null;
     f.opponentId = pick ? pick.id : null;
     return pick;
   }
@@ -183,13 +229,18 @@ export class Engine {
     return cur && cur.alive && cur.side !== f.side ? cur : null;
   }
 
-  aiMove(actorId) {
-    const t = this.chooseOpponent(actorId);
-    return { attack: ZONES[(Math.random() * 3) | 0], block: ZONES[(Math.random() * 3) | 0],
-             target: t ? t.id : null };
+  aiMove() {
+    // цель ИИ — его «пара» на этот раунд (см. submit/ensureOpponent), поэтому
+    // здесь только зоны удара/блока
+    return { attack: ZONES[(Math.random() * 3) | 0], block: ZONES[(Math.random() * 3) | 0] };
   }
 
-  /** Выбор хода активного бойца. move: { attack, block, target, pass }. */
+  /**
+   * Выбор хода активного бойца. move: { attack, block, pass }.
+   * Цель ближнего удара НЕ из move — это всегда «пара» бойца (кто стоит
+   * напротив, задано buildPairs на раунд). move.target для удара игнорируется
+   * (выбор в ростере — только для эликсиров/эффектов, не для удара).
+   */
   submit(actorId, move) {
     if (this.phase !== 'choose') return false;
     const f = this.fighter(actorId);
@@ -198,13 +249,9 @@ export class Engine {
     let target = null;
     if (!move.pass) {
       if (!ZONES.includes(move.attack)) return false;
-      target = this.fighter(move.target);
-      if (target && target.alive && target.side !== f.side) {
-        f.opponentId = target.id;          // явный выбор закрепляем как соперника
-      } else {
-        // нет/павшая/своя цель — берём уже закреплённого, иначе выбираем нового
-        target = this.opponentOf(f.id) || this.chooseOpponent(f.id);
-      }
+      // бьём «пару»; если она погибла раньше в этом раунде — ensureOpponent
+      // добивает следующего живого врага, чтобы ход не простаивал
+      target = this.ensureOpponent(f.id);
       if (!target) return false;
     }
     f.block = move.block ?? null;
