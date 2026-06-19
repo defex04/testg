@@ -120,11 +120,13 @@ if (!ended) {
   ok(aRoster.roster && aRoster.roster.right.length === 2,
     'A видит двух соперников', 'right=' + (aRoster.roster ? aRoster.roster.right.length : '?'));
 
-  // --- 2-на-1: ровный «насос» событий гоняет бой, пока A не увидит обоих
-  //     соперников в фокусе либо бой не закончится. Фокус A на СВОЁМ ходу теперь
-  //     стабилен (один соперник), но смена видна, когда активен/бьёт другой враг:
-  //     turnStart активного врага и resolve по A несут его как focus. ---
-  let sawWaiting = false;
+  // --- 2-на-1: ровный «насос» событий гоняет бой. В модели «пар» соперник
+  //     «напротив» задан сервером и стабилен на раунд, поэтому проверяем ГЛАВНОЕ
+  //     и детерминированное: на СВОЁМ ходу фокус A — это всегда ЖИВОЙ враг из
+  //     ростера (тот, по кому и придётся удар; «урон тому, кто напротив»).
+  //     Живая смена пары при гибели соперника детерминированно покрыта
+  //     test-facing.mjs. ---
+  let sawWaiting = false, sawOwnFocus = false, focusInvalid = false;
   const fociA = new Set();
   const pump = (conn) => {
     let ev, ended = false;
@@ -133,6 +135,12 @@ if (!ended) {
       if (conn === a && ev.focus) fociA.add(ev.focus.name);
       if (ev.type === 'turnStart') {
         if (ev.waiting) sawWaiting = true;
+        if (conn === a && ev.canAct && ev.focus) {
+          sawOwnFocus = true;
+          const liveEnemies = (ev.roster && ev.roster.right || [])
+            .filter((f) => f.alive !== false && f.hp > 0).map((f) => f.name);
+          if (!liveEnemies.includes(ev.focus.name)) focusInvalid = true;
+        }
         if (ev.canAct) conn.send({ type: 'move', attack: 'high', block: 'mid' });
       } else if (ev.type === 'resolve') {
         conn.send({ type: 'turnDone' });
@@ -141,13 +149,14 @@ if (!ended) {
     return ended;
   };
   let ended = false;
-  for (let i = 0; i < 80 && !ended && fociA.size < 2; i++) {
+  for (let i = 0; i < 80 && !ended && !(sawOwnFocus && sawWaiting); i++) {
     const ea = pump(a), eb = pump(b), ec = pump(c);
     ended = ea || eb || ec;
     await new Promise((r) => setTimeout(r, 100));
   }
   ok(sawWaiting, 'появлялась плашка «ожидание соперника» (waiting=true)');
-  ok(fociA.size >= 2, 'A видит переключение между двумя соперниками',
+  ok(sawOwnFocus && !focusInvalid,
+    'на своём ходу фокус A — живой враг из ростера (по нему и придётся удар)',
     'фокусы=' + [...fociA].join(','));
 }
 

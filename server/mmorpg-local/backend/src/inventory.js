@@ -90,20 +90,26 @@ export async function unequip(charId, slot) {
   return getInventory(charId);
 }
 
-/** Выдать стартовый предмет (бронзовый доспех), если у персонажа пусто. */
+/** Выдать стартовые предметы (доспех + боевые эликсиры), если у персонажа пусто. */
 export async function grantStarterItems(charId) {
   const has = await game.query(
     `SELECT 1 FROM item_instances WHERE owner_id = $1 AND owner_type IN (1,2) LIMIT 1`,
     [charId]);
   if (has.rows[0]) return;
+  // [templateId, quantity]: бронзовый доспех + по стопке эликсиров здоровья/мощи
+  // и эликсир побега — чтобы поясом и выходом можно было пользоваться сразу
+  const grants = [[101, 1], [202, 5], [203, 5], [201, 1]];
   await tx(async (c) => {
-    const ins = await c.query(
-      `INSERT INTO item_instances (template_id, owner_type, owner_id)
-       VALUES (101, 1, $1) RETURNING id`, [charId]);
-    await c.query(
-      `INSERT INTO item_ledger (idempotency_key, item_instance_id, template_id, quantity,
-          to_owner_type, to_owner_id, reason)
-       VALUES ($1, $2, 101, 1, 1, $3, 2)`, [randomUUID(), ins.rows[0].id, charId]);
+    for (const [tpl, qty] of grants) {
+      const ins = await c.query(
+        `INSERT INTO item_instances (template_id, owner_type, owner_id, quantity)
+         VALUES ($1, 1, $2, $3) RETURNING id`, [tpl, charId, qty]);
+      await c.query(
+        `INSERT INTO item_ledger (idempotency_key, item_instance_id, template_id, quantity,
+            to_owner_type, to_owner_id, reason)
+         VALUES ($1, $2, $3, $4, 1, $5, 2)`,
+        [randomUUID(), ins.rows[0].id, tpl, qty, charId]);
+    }
   });
 }
 

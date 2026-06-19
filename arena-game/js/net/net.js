@@ -62,6 +62,10 @@ export const api = {
   inventory: () => rest('/api/inventory'),
   equip:     (itemId) => rest('/api/inventory/equip', { itemId }),
   unequip:   (slot) => rest('/api/inventory/unequip', { slot }),
+  // пояс эликсиров (сервер помнит состав): массив ячеек ELIXIR_SLOTS
+  belt:        () => rest('/api/belt'),
+  beltEquip:   (slot, templateId) => rest('/api/belt/equip', { slot, templateId }),
+  beltUnequip: (slot) => rest('/api/belt/unequip', { slot }),
   chatHistory: () => rest('/api/chat/history'),
   battleInfo: (id) => rest('/api/battles/' + Number(id)),
   sendChat:  (text) => socket && socket.send(JSON.stringify({ type: 'chat', text })),
@@ -134,8 +138,10 @@ function wireBattleHandlers() {
     currentBattle && currentBattle._on('rosterUpdate', { roster: m.roster }));
   socketHandlers.set('elixir', (m) =>
     currentBattle && currentBattle._on('elixir',
-      { side: m.side, kind: m.kind, heal: m.heal, mult: m.mult, turns: m.turns,
-        buffTurns: m.buffTurns, hp: m.hp, maxHp: m.maxHp, roster: m.roster }));
+      { byId: m.byId, onSelf: !!m.onSelf, isUser: !!m.isUser,
+        kind: m.kind, heal: m.heal, mult: m.mult, turns: m.turns,
+        buffTurns: m.buffTurns, hp: m.hp, maxHp: m.maxHp,
+        slot: m.slot, slotQty: m.slotQty, roster: m.roster }));
   socketHandlers.set('policy', (m) =>
     currentBattle && currentBattle._on('policy', { intervention: m.intervention }));
   socketHandlers.set('battleEnd', (m) =>
@@ -222,7 +228,7 @@ export class ServerBattle extends EventTarget {
       this._applySides(detail.sides);
       detail.sides = this.sides;
     }
-    if (type === 'elixir' && detail.side === 'left') {
+    if (type === 'elixir' && detail.onSelf) {   // эффект пришёлся мне — обновить плашку
       this.sides.left.hp = detail.hp;
       if (detail.maxHp != null) this.sides.left.maxHp = detail.maxHp;
     }

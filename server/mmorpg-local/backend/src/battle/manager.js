@@ -5,6 +5,7 @@ import { addCurrency, CUR } from '../economy.js';
 import { addExp, combatProfileFor, getCharacter } from '../characters.js';
 import { onHuntVictory } from '../quests.js';
 import { sendSystemChat } from '../chat.js';
+import { elixirParams } from '../belt.js';
 
 /**
  * Бои живут в памяти процесса; снапшот хода — в Redis battle:{id}:state;
@@ -513,12 +514,15 @@ const clampNum = (v, lo, hi, d) => {
 };
 
 /**
- * Использовать боевой эликсир (здоровья/мощи) в свой ход. Сервер применяет
- * эффект к движку (реальное лечение / усиление урона на N ударов) и рассылает
- * результат: пьющему — для шапки/всплывашки, всем — обновлённый ростер.
+ * Использовать боевой эликсир из ячейки пояса (slot) в свой ход — АВТОРИТЕТНО:
+ *  1) параметры эффекта (kind/potency/turns) берём из шаблона эликсира на сервере;
+ *  2) реально СПИСЫВАЕМ 1 заряд из инвентаря (FOR UPDATE + item_ledger), как
+ *     Эликсир побега — без предмета выпить нельзя;
+ *  3) применяем эффект к выбранной в ростере цели (союзник/себя), по умолчанию — себе;
+ *  4) рассылаем итог: пьющему — слот/чип, всем — обновлённый ростер.
  * Значения зажимаются (анти-чит): heal ≤ 60% макс. HP, мощь ≤ +100% на ≤5 ударов.
  */
-export function useElixir(charId, msg = {}) {
+export async function useElixir(charId, msg = {}) {
   const b = live.get(byChar.get(cid(charId)));
   if (!b || b.engine.phase === 'ended') return false;
   const me = b.engine.fighter(cid(charId));
@@ -529,22 +533,74 @@ export function useElixir(charId, msg = {}) {
     p?.send({ type: 'error', error: 'not_your_turn' });
     return false;
   }
-  const kind = msg.kind === 'power' ? 'power' : 'health';
+  // шаблон эликсира из ячейки пояса (параметры эффекта — с сервера, не с клиента)
+  const slot = Number(msg.slot);
+  const belt = (await game.query(
+    `SELECT b.template_id, t.base_stats FROM character_belt b
+       JOIN item_templates t ON t.id = b.template_id
+      WHERE b.character_id = $1 AND b.slot = $2`, [charId, slot])).rows[0];
+  const params = belt && elixirParams(belt.base_stats);
+  if (!params) { p?.send({ type: 'error', error: 'belt_empty' }); return false; }
+
+  // авторитетно списываем 1 заряд из инвентаря; без предмета — отказ
+  try {
+    await tx(async (c) => {
+      const it = (await c.query(
+        `SELECT id, quantity FROM item_instances
+          WHERE owner_type = 1 AND owner_id = $1 AND template_id = $2 AND status = 1
+          ORDER BY id LIMIT 1 FOR UPDATE`, [charId, belt.template_id])).rows[0];
+      if (!it) throw Object.assign(new Error('no_elixir'), { status: 400 });
+      if (it.quantity > 1) {
+        await c.query(`UPDATE item_instances SET quantity = quantity - 1,
+            version = version + 1, updated_at = now() WHERE id = $1`, [it.id]);
+      } else {
+        await c.query(`UPDATE item_instances SET status = 2, deleted_at = now(),
+            version = version + 1 WHERE id = $1`, [it.id]);
+      }
+      await c.query(
+        `INSERT INTO item_ledger (idempotency_key, item_instance_id, template_id,
+            quantity, from_owner_type, from_owner_id, reason, ref_type, ref_id)
+         VALUES ($1, $2, $3, 1, 1, $4, 7, 1, $5)`,
+        [randomUUID(), it.id, belt.template_id, charId, b.id]);
+    });
+  } catch (e) {
+    p?.send({ type: 'error', error: e.message || 'no_elixir' });
+    return false;
+  }
+
+  // цель эффекта: выбранный в ростере союзник или себя (своя сторона, живой)
+  let tf = me;
+  if (msg.target != null) {
+    const cand = b.engine.fighter(cid(msg.target));
+    if (cand && cand.alive && cand.side === me.side) tf = cand;
+  }
+  const kind = params.kind;
   let healed = 0, mult = 1, turns = 0;
   if (kind === 'health') {
-    healed = b.engine.heal(me.id, me.maxHp * clampNum(msg.potency, 0.05, 0.6, 0.3));
+    // лечим на абсолютную величину из шаблона, зажатую до макс. HP (анти-чит)
+    healed = b.engine.heal(tf.id, clampNum(params.heal, 1, tf.maxHp, Math.round(tf.maxHp * 0.3)));
   } else {
-    mult = 1 + clampNum(msg.potency, 0.05, 1, 0.3);
-    turns = clampNum(msg.turns, 1, 5, 3);
-    b.engine.addBuff(me.id, mult, turns);
+    mult = clampNum(params.mult, 1, 2, 1.3);
+    turns = clampNum(params.turns, 1, 5, 3);
+    b.engine.addBuff(tf.id, mult, turns);
   }
-  snapshot(b.id, b).catch(console.error);
+  await snapshot(b.id, b);
+
+  // остаток заряда в ячейке после списания (для клиента пьющего)
+  const slotQty = Number((await game.query(
+    `SELECT COALESCE(SUM(quantity), 0) AS qty FROM item_instances
+      WHERE owner_id = $1 AND owner_type = 1 AND status = 1 AND template_id = $2`,
+    [charId, belt.template_id])).rows[0].qty);
+
   broadcast(b, (q) => {
-    const isUser = cid(q.charId) === cid(charId);
     const qme = b.engine.fighter(q.charId);
-    return { type: 'elixir', side: isUser ? 'left' : null,
-      kind, heal: healed, mult, turns, buffTurns: me.buffTurns,
-      hp: Math.round(me.hp), maxHp: me.maxHp,
+    return { type: 'elixir',
+      byId: cid(charId),                                  // кто выпил (лог/слот)
+      onSelf: cid(q.charId) === cid(tf.charId ?? ''),     // эффект пришёлся зрителю → его плашка
+      isUser: cid(q.charId) === cid(charId),              // зритель — пьющий → его пояс/чип
+      kind, heal: healed, mult, turns, buffTurns: tf.buffTurns,
+      hp: Math.round(tf.hp), maxHp: tf.maxHp,
+      slot, slotQty,
       roster: rosterFor(b, qme.side) };
   });
   return true;

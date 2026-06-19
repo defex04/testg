@@ -505,7 +505,8 @@ async function initBattle(resumedBattle = null, starter = null, pvpTarget = null
     onInfo: (side) => showFighterInfo(side),
     onMemberInfo: (id) => showMemberInfo(id),
   });
-  resetElixirBattle();             // новый бой — заряды пояса и эффекты с нуля
+  await loadBelt();                // состав пояса с сервера (он его помнит)
+  resetElixirBattle();             // эффекты с нуля; пояс уже загружен
   lastTurnShown = 0;
   currentFocusId = battle.focus ? (battle.focus.id ?? null) : null;
   showHP('left', battle.sides.left.hp, battle.sides.left.maxHp);
@@ -582,23 +583,32 @@ async function initBattle(resumedBattle = null, starter = null, pvpTarget = null
     }
   });
 
-  // Эликсир применил СЕРВЕР: обновляем HP/всплывашку/эффект игрока и ростер.
+  // Эликсир применил и СПИСАЛ сервер: обновляем ростер, остаток ячейки у пьющего,
+  // и (если эффект пришёлся на меня) — HP/всплывашку/чип эффекта.
   battle.addEventListener('elixir', (e) => {
     const d = e.detail;
     if (d.roster) ui.setRoster(d.roster);
-    if (d.side !== 'left') return;          // эффект союзника/врага — только ростер
+    // остаток заряда в моей ячейке (пил я) — пояс авторитетно с сервера
+    if (d.isUser && d.slot != null && elixirBelt[d.slot]) {
+      elixirBelt[d.slot].qty = d.slotQty;
+      renderCombatBar();
+    }
+    // лог «кто что выпил» — пишет только пьющий у себя (избегаем дублей)
+    if (d.isUser) {
+      const name = esc(battle.sides.left.name);
+      if (d.kind === 'health') ui.log(`<b>${name}</b> восстанавливает ${d.heal} HP`);
+      else ui.log(`<b>${name}</b> усиливает удары на +${Math.round((d.mult - 1) * 100)}% (${d.turns} х.)`);
+    }
+    if (!d.onSelf) return;                   // эффект на союзника — дальше только ростер
     showHP('left', d.hp, d.maxHp);
     const pos = fighters.left
       ? arena.worldToScreen(fighters.left.headPoint()) : { x: 70, y: 90 };
-    const name = esc(battle.sides.left.name);
     if (d.kind === 'health' && d.heal > 0) {
       ui.popup(pos, `+${d.heal}`, 'heal');
-      ui.log(`<b>${name}</b> восстанавливает ${d.heal} HP`);
     } else if (d.kind === 'power') {
       const pct = Math.round((d.mult - 1) * 100);
       selfBuffPct = pct;
       ui.popup(pos, `Мощь +${pct}%`, 'crit');
-      ui.log(`<b>${name}</b> усиливает удары на +${pct}% (${d.turns} х.)`);
     }
     selfBuffTurns = d.buffTurns || 0;
     refreshSelfEffects();
@@ -1426,11 +1436,21 @@ const SPELL_STAR_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColo
 const spellBar = new Array(SPELL_SLOTS).fill(null);
 ['spark', 'fireball', 'frost'].forEach((key, i) => { spellBar[i] = key; });
 
-const elixirBelt = new Array(ELIXIR_SLOTS).fill(null);  // ячейка -> ключ ITEMS | null
-const elixirSpent = new Set();         // индексы ячеек, использованных в этом бою
+// пояс эликсиров приходит с СЕРВЕРА (api.belt): ячейка -> { slot, templateId,
+// name, icon, kind, qty } | null. Сервер помнит состав пояса и списывает заряды.
+let elixirBelt = new Array(ELIXIR_SLOTS).fill(null);
+const elixirSpent = new Set();         // (резерв; при серверном поясе доступность — по qty)
 let selfBuffTurns = 0;                 // оставшиеся усиленные удары (с сервера)
 let selfBuffPct = 0;                   // прибавка урона «Эликсира мощи», %
 let beltLive = false;                  // можно ли использовать пояс прямо сейчас
+
+const elixirGlyph = (kind) => (kind === 'power' ? '⚡' : '🧪');
+
+/** Подтянуть состав пояса с сервера (сервер его помнит между сессиями). */
+async function loadBelt() {
+  if (!online || !api.belt) return;
+  try { elixirBelt = await api.belt(); } catch (e) { console.warn('Пояс эликсиров:', e); }
+}
 
 const combatBarEl = $('combat-bar');
 const spellSlotsEl = $('spell-slots');
@@ -1585,7 +1605,8 @@ function renderCombatBar() {
   if (elixirSlotsEl) {
     elixirSlotsEl.innerHTML = '';
     for (let i = 0; i < ELIXIR_SLOTS; i++) {
-      if (!elixirBelt[i]) {
+      const cell = elixirBelt[i];
+      if (!cell) {
         const empty = document.createElement('div');
         empty.className = 'combat-slot elixir empty';
         empty.title = 'Пустая ячейка эликсира';
@@ -1593,15 +1614,15 @@ function renderCombatBar() {
         elixirSlotsEl.appendChild(empty);
         continue;
       }
-      const el = ITEMS[elixirBelt[i]];
-      const spent = elixirSpent.has(i);
+      const out = cell.qty != null && cell.qty <= 0;   // зарядов не осталось
       const slot = document.createElement('button');
       slot.type = 'button';
-      slot.className = `combat-slot elixir filled kind-${el.kind === 'health' ? 'health' : 'power'}`
-        + (spent ? ' spent' : '');
-      slot.disabled = spent || !beltLive;
-      slot.title = spent ? `${el.name} — использован` : `${el.name} — использовать`;
-      slot.innerHTML = `<span class="bs-ico">${el.icon || '🧪'}</span>`;
+      slot.className = `combat-slot elixir filled kind-${cell.kind === 'power' ? 'power' : 'health'}`
+        + (out ? ' spent' : '');
+      slot.disabled = out || !beltLive;
+      slot.title = out ? `${cell.name} — нет зарядов`
+        : `${cell.name}${cell.qty != null ? ' ×' + cell.qty : ''} — использовать`;
+      slot.innerHTML = `<span class="bs-ico">${elixirGlyph(cell.kind)}</span>`;
       slot.addEventListener('click', () => useElixir(i));
       elixirSlotsEl.appendChild(slot);
     }
@@ -1674,19 +1695,13 @@ function applyElixirPage() {
  *  Эффект применяет СЕРВЕР (battle.useElixir) и присылает событие 'elixir'. */
 function useElixir(i) {
   if (mode !== 'battle' || !battle || battle.phase === 'ended' || !beltLive) return;
-  const key = elixirBelt[i];
-  if (!key || elixirSpent.has(i)) return;
-  const el = ITEMS[key];
-  const name = esc(el.name);
-  battle.useElixir({
-    kind: el.kind === 'health' ? 'health' : 'power',
-    potency: el.potency ?? 0.3,
-    turns: el.turns ?? 3,
-    target: ui?.target ?? null,    // выбранный в ростере союзник/себя (эффект)
-  });
-  ui.log(`<b>${esc(battle.sides.left.name)}</b> выпивает «${name}»…`);
-  elixirSpent.add(i);
-  renderCombatBar();
+  const cell = elixirBelt[i];
+  if (!cell || (cell.qty != null && cell.qty <= 0)) return;
+  // авторитетно: сервер берёт эликсир из ячейки пояса, списывает заряд и
+  // применяет эффект к выбранной в ростере цели (союзник/себя). Параметры —
+  // с сервера; клиент шлёт только номер ячейки и цель эффекта.
+  battle.useElixir({ slot: i, target: ui?.target ?? null });
+  ui.log(`<b>${esc(battle.sides.left.name)}</b> выпивает «${esc(cell.name)}»…`);
 }
 
 /** Пояс в гардеробе: пряжка + все ячейки; клик по заполненной — убрать. */
@@ -1694,30 +1709,40 @@ function renderDressingBelt() {
   if (!dressingBeltEl) return;
   dressingBeltEl.innerHTML = '<span class="belt-buckle" aria-hidden="true"></span>';
   for (let i = 0; i < ELIXIR_SLOTS; i++) {
-    const key = elixirBelt[i];
-    const el = key ? ITEMS[key] : null;
+    const cell = elixirBelt[i];
     const slot = document.createElement('button');
     slot.type = 'button';
     slot.className = 'belt-slot elixir round'
-      + (el ? ` filled kind-${el.kind === 'health' ? 'health' : 'power'}` : '');
-    slot.title = el ? `${el.name} (клик — убрать из пояса)`
+      + (cell ? ` filled kind-${cell.kind === 'power' ? 'power' : 'health'}` : '');
+    slot.title = cell
+      ? `${cell.name}${cell.qty != null ? ' ×' + cell.qty : ''} (клик — убрать из пояса)`
       : 'Пустая ячейка — добавьте эликсир кнопкой «В пояс»';
-    slot.innerHTML = el ? `<span class="bs-ico">${el.icon || '🧪'}</span>` : FLASK_SVG;
+    slot.innerHTML = cell ? `<span class="bs-ico">${elixirGlyph(cell.kind)}</span>` : FLASK_SVG;
     slot.addEventListener('click', () => {
-      if (!el) { showToast('Добавьте эликсир из рюкзака кнопкой «В пояс»'); return; }
-      elixirBelt[i] = null;
-      renderDressingBelt();
-      renderInventory();
+      if (!cell) { showToast('Добавьте эликсир из рюкзака кнопкой «В пояс»'); return; }
+      removeElixirFromBelt(i);
     });
     dressingBeltEl.appendChild(slot);
   }
 }
 
-/** Положить эликсир в первую свободную ячейку пояса. */
-function addElixirToBelt(key) {
-  const free = elixirBelt.indexOf(null);
+/** Освободить ячейку пояса (сервер помнит состав). */
+async function removeElixirFromBelt(slot) {
+  if (!online) { showToast('Пояс требует подключения к серверу'); return; }
+  try { elixirBelt = await api.beltUnequip(slot); }
+  catch (e) { showToast('Не убрать из пояса: ' + e.message); }
+  renderDressingBelt();
+  renderInventory();
+}
+
+/** Положить эликсир (по templateId) в первую свободную ячейку пояса (через сервер). */
+async function addElixirToBelt(templateId) {
+  if (!online) { showToast('Пояс требует подключения к серверу'); return; }
+  if (templateId == null) return;
+  const free = elixirBelt.findIndex((c) => c == null);
   if (free === -1) { showToast('Пояс эликсиров заполнен'); return; }
-  elixirBelt[free] = key;
+  try { elixirBelt = await api.beltEquip(free, templateId); }
+  catch (e) { showToast('Не добавить в пояс: ' + e.message); }
   renderDressingBelt();
   renderInventory();
 }
@@ -1820,7 +1845,11 @@ function renderInventory() {
     name.textContent = item.name
       + (inst && inst.quantity > 1 ? ` ×${inst.quantity}` : '');
     head.append(icon, name);
-    if (item.type === 'elixir') {     // бейдж: эликсир кладётся в пояс
+    // эликсир определяем по серверному типу (item_templates.type === 4),
+    // иначе — по демо-конфигу ITEMS
+    const isElixir = inst ? inst.type === 4 : item.type === 'elixir';
+    const tplId = inst ? inst.templateId : null;
+    if (isElixir) {                   // бейдж: эликсир кладётся в пояс
       const badge = document.createElement('span');
       badge.className = 'inv-slot';
       badge.textContent = 'Пояс';
@@ -1833,14 +1862,15 @@ function renderInventory() {
     }
     const actions = document.createElement('div');
     actions.className = 'inv-actions';
-    if (item.type === 'elixir') {     // эликсир — кнопка «В пояс»
-      const inBelt = elixirBelt.filter((k) => k === key).length;
+    if (isElixir) {                   // эликсир — кнопка «В пояс» (сервер помнит пояс)
+      const inBelt = tplId != null
+        ? elixirBelt.filter((c) => c && c.templateId === tplId).length : 0;
       const b = document.createElement('button');
       b.type = 'button';
       b.className = 'inv-btn';
-      b.disabled = elixirBelt.every((k) => k !== null);
+      b.disabled = !online || tplId == null || elixirBelt.every((c) => c !== null);
       b.textContent = inBelt ? `В пояс (×${inBelt})` : 'В пояс';
-      b.addEventListener('click', () => addElixirToBelt(key));
+      b.addEventListener('click', () => addElixirToBelt(tplId));
       actions.appendChild(b);
     } else if (slotName) { // вещь надевается — кнопка «Надеть/Снять»
       const b = document.createElement('button');
@@ -1867,10 +1897,12 @@ async function openDressing() {
   selectedSlot = null;
   renderDressingUI();
   try {
-    // свежий рюкзак с сервера: выданные/полученные вещи появляются сразу
+    // свежий рюкзак и пояс с сервера: выданные/полученные вещи появляются сразу
     if (online) {
       try { registerServerItems(await api.inventory()); }
       catch (e) { console.error('Обновление рюкзака:', e); }
+      await loadBelt();
+      renderDressingBelt();
     }
     await dressing.show(FIGHTERS.brawler);
     // автоскиннинг тяжёлых FBX — в фоне, пока смотрим рюкзак
