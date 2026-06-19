@@ -31,8 +31,10 @@ const HEART_SVG =
   '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-7.4-4.6-9.9-9.1C.7 9 1.8 5.6 4.9 4.9 7.1 4.4 9 5.6 12 8.3c3-2.7 4.9-3.9 7.1-3.4 3.1.7 4.2 4.1 2.8 6.6C19.4 16.4 12 21 12 21Z"/></svg>';
 const BOLT_SVG =
   '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2 4 13.2h6l-1 8.8 9-12.4h-6.3L13 2Z"/></svg>';
+/* «инфо» — крупный чёткий заполненный знак «i» (точка + ножка со скруглениями);
+   рамку-медальон рисует сам .info-btn в CSS, поэтому в SVG только сама буква. */
 const INFO_SVG =
-  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v5.2" stroke-linecap="round"/><circle cx="12" cy="7.7" r="0.4" fill="currentColor" stroke="none"/></svg>';
+  '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="12" cy="6.7" r="2"/><rect x="10.25" y="10.2" width="3.5" height="8.1" rx="1.75"/></svg>';
 
 /* Сектора колеса заданы по РЕАЛЬНЫМ углам спиц wheel.png (адаптивно): спицы
    стоят неравномерно, поэтому границы секторов берём из замера, а не из
@@ -165,7 +167,10 @@ export class BattleUI {
     this.stageEl.appendChild(wheel);
     this.stageEl.appendChild(wait);
     this.stageEl.appendChild(popups);
-    this.stageEl.appendChild(end);
+    // экран итога — в <body>, а НЕ в сцену: position:fixed внутри .arena-stage
+    // остаётся в стек-контексте .game-mid (z-index:1) и оказывается НИЖЕ нижнего
+    // меню (.castle-bottom z-index:5) — оно «просвечивало» поверх затемнения (#5).
+    document.body.appendChild(end);
     this.wheel = wheel;
     this.waitEl = wait;
 
@@ -260,7 +265,7 @@ export class BattleUI {
 
       const fill = document.createElementNS(SVGNS, 'path');
       fill.setAttribute('d', wedgePath(s.a0 + FILL_PAD, s.a1 - FILL_PAD, RI, RO));
-      fill.setAttribute('class', 'swedge ' + s.k);
+      fill.setAttribute('class', 'swedge ' + s.k + ' z-' + s.zone);
       fills.appendChild(fill);
       this._fills[id] = fill;
 
@@ -274,7 +279,7 @@ export class BattleUI {
       // меч: остриём наружу по своему сектору (к врагу); щит — строго вертикально
       const rot = s.k === 'atk' ? 270 - c : 0;
       const sp = document.createElement('div');
-      sp.className = 'sw-sprite ' + icon;
+      sp.className = 'sw-sprite ' + icon + ' z-' + s.zone;
       sp.style.left = sx + '%';
       sp.style.top = sy + '%';
       sp.style.setProperty('--ux', ux.toFixed(3));
@@ -335,6 +340,7 @@ export class BattleUI {
     const id = this._blockIdByZone[zone];
     this.block = this.block === id ? null : id;
     this._refreshBlocks();
+    this._updateHints();
   }
 
   /** Подсветить выбранный блок на всех левых секторах. */
@@ -345,6 +351,19 @@ export class BattleUI {
       this._sprites['blk-' + z].classList.toggle('on', on);
     }
   }
+
+  /**
+   * Подсказки на колесе (мой ход): пока БРОНЯ (блок) не выбрана — по очереди
+   * подсвечиваем три синих сектора блока («выбери защиту здесь»); сектора атаки
+   * (мечи) мягко пульсируют постоянно («бей сюда»). Анимации — в CSS по классам
+   * hint-block / hint-attack на колесе.
+   */
+  _updateHints() {
+    if (this._locked) { this._clearHints(); return; }
+    this.wheel.classList.add('hint-attack');
+    this.wheel.classList.toggle('hint-block', this.block == null);
+  }
+  _clearHints() { this.wheel.classList.remove('hint-attack', 'hint-block'); }
 
   /**
    * Цель ЭФФЕКТА/эликсира (this.target) — выбирается вручную кликом по участнику
@@ -466,10 +485,13 @@ export class BattleUI {
         const infoBtn = f.id != null
           ? `<button class="info-btn m-info" type="button" title="Информация об игроке">${INFO_SVG}</button>`
           : '';
-        // полоса жизни — красная, энергии — синяя (значки как в шапке боя, #6)
+        // две полосы вплотную: жизнь (красная) + энергия (синяя), БЕЗ значков (#6.2);
+        // «инфо» сидит рядом с ником (#6.3 — раскладка в CSS)
         m.innerHTML = `<div class="m-line"><span class="m-name">${esc(f.name)} <span class="m-lvl">[${f.level ?? '?'}]</span></span>${infoBtn}</div>
-          <div class="m-stat"><span class="m-ico hp" aria-hidden="true">${HEART_SVG}</span><div class="m-bar m-hp"><div class="m-fill" style="width:${pct}%"></div></div></div>
-          <div class="m-stat"><span class="m-ico en" aria-hidden="true">${BOLT_SVG}</span><div class="m-bar m-en"><div class="m-fill" style="width:${enPct}%"></div></div></div>`;
+          <div class="m-bars">
+            <div class="m-bar m-hp"><div class="m-fill" style="width:${pct}%"></div></div>
+            <div class="m-bar m-en"><div class="m-fill" style="width:${enPct}%"></div></div>
+          </div>`;
         if (f.id != null) {
           m.dataset.id = f.id;
           m.dataset.side = side;
@@ -495,7 +517,7 @@ export class BattleUI {
   }
 
   /** Колесо ударов полностью скрыто (чужой ход / ожидание / розыгрыш). */
-  _hideWheel() { this.wheel.classList.add('gone', 'locked'); }
+  _hideWheel() { this.wheel.classList.add('gone', 'locked'); this._clearHints(); }
   /** Колесо снова видно и активно (мой ход). */
   _showWheel() { this.wheel.classList.remove('gone', 'locked'); }
   /** Баннер «ожидание противника» (вверху сцены). */
@@ -589,6 +611,7 @@ export class BattleUI {
     this._showWheel();
     this._toggleWait(false);
     for (const id in this._sprites) this._sprites[id].classList.remove('thrust');
+    this._updateHints();
   }
 
   /** Свой ход: колесо снова видно и активно; блок держится между ходами. */
@@ -599,6 +622,7 @@ export class BattleUI {
     this._setLocked(false, null);
     this._showWheel();
     this._toggleWait(false);
+    this._updateHints();   // привлечь внимание к выбору брони/атаки (ТЗ #2)
   }
 
   /** Чужой ход (#7): колесо пропадает, БЕЗ баннера — просто ждём удара врага. */

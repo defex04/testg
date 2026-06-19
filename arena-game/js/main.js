@@ -835,11 +835,25 @@ showDeadBtn.addEventListener('click', () => {
 });
 
 const membersSearch = $('members-search');
+const membersSearchToggle = $('members-search-toggle');
 membersSearch?.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') { e.preventDefault(); membersSearch.blur(); }  // Enter — скрыть клавиатуру
 });
 membersSearch?.addEventListener('input', () => {
   if (ui) ui.setRosterFilter({ search: membersSearch.value });
+});
+// поиск по нику спрятан за лупой (#6.1): тап разворачивает поле и фокусирует его;
+// повторный тап — прячет и сбрасывает фильтр
+membersSearchToggle?.addEventListener('click', () => {
+  const show = membersSearch.classList.contains('hidden');
+  membersSearch.classList.toggle('hidden', !show);
+  membersSearchToggle.classList.toggle('active', show);
+  if (show) {
+    membersSearch.focus();
+  } else {
+    membersSearch.value = '';
+    if (ui) ui.setRosterFilter({ search: '' });
+  }
 });
 
 // сортировка по HP/энергии: повторный тап по той же кнопке меняет направление

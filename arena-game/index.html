@@ -195,9 +195,14 @@
             <!-- инструменты — снизу: поиск по нику, сортировка по HP/энергии, показ
                  убитых. Кнопки/инпут не запускают перетаскивание окна. -->
             <div class="members-tools">
-              <input class="members-search" id="members-search" type="text"
+              <!-- поиск спрятан за лупой: тап по лупе разворачивает поле (#6.1) -->
+              <button class="mtool-btn mtool-search-toggle" id="members-search-toggle" type="button"
+                      title="Поиск по нику" aria-label="Поиск по нику">
+                <svg class="mtool-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.4-3.4"/></svg>
+              </button>
+              <input class="members-search hidden" id="members-search" type="text"
                      placeholder="Поиск по нику…" autocomplete="off" maxlength="24">
-              <button class="mtool-btn" id="sort-hp" type="button" title="Сортировать по здоровью">
+              <button class="mtool-btn mtool-actions-start" id="sort-hp" type="button" title="Сортировать по здоровью">
                 <span class="mtool-ico hp">♥</span><span class="mtool-dir" aria-hidden="true"></span>
               </button>
               <button class="mtool-btn" id="sort-en" type="button" title="Сортировать по энергии">

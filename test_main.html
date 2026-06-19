@@ -1,0 +1,532 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Темное Фэнтези - Крупный мобильный интерфейс</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700&family=Marcellus&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --gold: #c5a059;
+            --gold-bright: #f0d98a;
+            --dark-bg: #0e0b08;
+            --metal: #2a241e;
+            --metal-light: #3d342b;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            user-select: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        body {
+            background: #000;
+            font-family: 'Marcellus', serif;
+            color: #e0d8c5;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+
+        .mobile-screen {
+            width: 100%;
+            max-width: 405px; 
+            aspect-ratio: 9 / 16;
+            background: url('https://images.unsplash.com/photo-1565538810643-b5bdb714032a?q=80&w=1000') center/cover no-repeat;
+            position: relative;
+            box-shadow: 0 0 30px rgba(0,0,0,0.9);
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+
+        /* --- ВЕРХНЯЯ ПАНЕЛЬ --- */
+        .game-topbar {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            padding: 14px;
+            background: linear-gradient(to bottom, rgba(26, 22, 18, 0.98) 0%, rgba(14, 11, 8, 0.85) 100%);
+            box-shadow: 
+                inset 0 2px 4px rgba(197, 160, 89, 0.15), 
+                inset 0 -4px 10px rgba(0,0,0,0.8),
+                0 6px 15px rgba(0,0,0,0.9);
+            border-bottom: 2px solid #000;
+            position: relative;
+            width: 100%;
+        }
+
+        .game-topbar::after {
+            content: '';
+            position: absolute;
+            bottom: -4px;
+            left: 0;
+            width: 100%;
+            height: 3px;
+            background: linear-gradient(to right, transparent, #c5a059 20%, #f0d98a 50%, #c5a059 80%, transparent);
+        }
+
+        .top-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .topbar-left {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex: 1;
+        }
+
+        .avatar-frame {
+            position: relative;
+            width: 64px; 
+            height: 64px; 
+            border-radius: 50%;
+            background: linear-gradient(135deg, var(--gold), #5e4a24);
+            padding: 2px;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.6);
+            flex-shrink: 0;
+        }
+
+        .avatar-frame img {
+            width: 100%;
+            height: 100%;
+            border-radius: 50%;
+            object-fit: cover;
+            border: 1px solid #0e0b08;
+        }
+
+        .level-badge {
+            position: absolute;
+            bottom: -2px;
+            right: -2px;
+            background: radial-gradient(circle, #1a1612, #000);
+            border: 2px solid var(--gold);
+            color: var(--gold-bright);
+            font-family: 'Cinzel', serif;
+            font-weight: 700;
+            font-size: 14px; 
+            width: 26px; 
+            height: 26px; 
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .player-info {
+            display: flex;
+            flex-direction: column;
+            gap: 6px; 
+            flex: 1;
+            min-width: 0;
+        }
+
+        .player-name {
+            font-family: 'Cinzel', serif;
+            font-size: 18px; 
+            color: var(--gold-bright);
+            text-shadow: 0 2px 2px rgba(0,0,0,0.8);
+            letter-spacing: 0.5px;
+        }
+
+        .stat-bar {
+            width: 100%; /* Фиксированная ширина */
+            height: 16px; /* Увеличили для читаемости */
+            background: #050505;
+            border: 1px solid #000;
+            border-radius: 8px;
+            position: relative;
+            box-shadow: inset 0 1px 3px rgba(0,0,0,0.9);
+            overflow: hidden; 
+        }
+
+        .bar-fill {
+            height: 100%;
+            border-radius: 7px;
+            position: relative;
+            z-index: 1;
+        }
+
+        .exp-normal .bar-fill { 
+            background: linear-gradient(to bottom, #43d654, #1a8024); 
+            box-shadow: 0 0 8px rgba(67, 214, 84, 0.4); 
+        }
+
+        .exp-combat .bar-fill { 
+            background: linear-gradient(to bottom, #ff9d00, #c54a00); 
+            box-shadow: 0 0 8px rgba(255, 157, 0, 0.4); 
+        }
+
+        .bar-text {
+            position: absolute;
+            width: 100%;
+            text-align: center;
+            font-size: 11px; /* Идеальный размер для экрана 9:16 */
+            line-height: 16px;
+            font-family: sans-serif;
+            font-weight: bold;
+            color: #fff;
+            text-shadow: 0 1px 2px #000;
+            white-space: nowrap;
+            z-index: 2; /* Текст всегда поверх полоски */
+            pointer-events: none;
+        }
+
+        /* --- ПРАВАЯ ЧАСТЬ (Валюты) --- */
+        .topbar-right {
+            display: flex;
+            flex-direction: column; 
+            gap: 6px;
+            align-items: flex-end;
+        }
+
+        .currency-box {
+            display: flex;
+            align-items: center;
+            background: linear-gradient(to bottom, #1a1612, #050505);
+            border: 1px solid #000;
+            border-radius: 12px;
+            padding: 6px 14px; 
+            box-shadow: inset 0 1px 3px rgba(0,0,0,0.8);
+        }
+
+        .multi-currency {
+            gap: 8px; 
+        }
+
+        .curr-item {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .curr-icon-fa { 
+            font-size: 16px; 
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .gold { color: #ffc107; }
+        .silver { color: #d9d9d9; }
+        .copper { color: #cd7f32; }
+        .fa-gem { color: #00b3ff; }
+
+        .curr-amount {
+            font-family: 'Cinzel', serif;
+            font-weight: 700;
+            font-size: 15px; 
+            color: #e0d8c5;
+            text-shadow: 0 1px 1px #000;
+        }
+
+        /* --- ВЕРХНЕЕ МЕНЮ (7 кнопок) --- */
+        .topbar-nav {
+            display: flex;
+            justify-content: space-between;
+            gap: 5px;
+            padding: 0 2px;
+        }
+
+        .nav-btn {
+            background: linear-gradient(to bottom, var(--metal-light), var(--metal));
+            border: 1px solid #000;
+            border-radius: 5px;
+            min-width: 0;
+            width: calc((100% - 30px) / 7);
+            height: 72px; 
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            box-shadow: inset 0 1px 1px rgba(255,255,255,0.1), 0 3px 5px rgba(0,0,0,0.6);
+            position: relative;
+            padding: 2px;
+        }
+
+        .nav-btn::before, .nav-btn::after {
+            content: '';
+            position: absolute;
+            width: 4px; 
+            height: 4px;
+            background: #c5a059;
+            border-radius: 50%;
+            top: 4px;
+        }
+        .nav-btn::before { left: 4px; }
+        .nav-btn::after { right: 4px; }
+
+        .nav-btn:active {
+            transform: translateY(2px);
+            background: linear-gradient(to bottom, #2a241e, #1a1612);
+            border-color: var(--gold);
+        }
+
+        .nav-icon {
+            width: 32px; 
+            height: 32px;
+            margin-bottom: 4px;
+            filter: drop-shadow(0 2px 2px rgba(0,0,0,0.8));
+            transition: all 0.15s;
+        }
+
+        .nav-btn:active .nav-icon {
+            transform: scale(0.90);
+        }
+
+        .nav-label {
+            font-size: 11px; 
+            color: #a09680;
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+            text-shadow: 0 1px 1px #000;
+            text-align: center;
+            white-space: nowrap;
+        }
+
+        .notif-badge {
+            position: absolute;
+            top: -6px;
+            right: -6px;
+            background: #8b0000;
+            border: 1px solid #ff0000;
+            color: #fff;
+            font-size: 11px; 
+            font-weight: bold;
+            width: 20px; 
+            height: 20px; 
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 0 5px rgba(255,0,0,0.6);
+            font-family: sans-serif;
+            z-index: 10;
+        }
+
+        /* --- ЦЕНТРАЛЬНАЯ ЧАСТЬ (Игра) --- */
+        .game-content {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+        }
+
+        /* --- НИЖНЕЕ МЕНЮ --- */
+        .bottom-nav {
+            display: flex;
+            justify-content: space-around;
+            align-items: center;
+            background: linear-gradient(to top, rgba(14, 11, 8, 0.98) 0%, rgba(26, 22, 18, 0.85) 100%);
+            border-top: 2px solid #000;
+            box-shadow: inset 0 2px 4px rgba(197, 160, 89, 0.15), 0 -4px 10px rgba(0,0,0,0.8);
+            padding: 12px 0; 
+            position: relative;
+        }
+
+        .bottom-nav::before {
+            content: '';
+            position: absolute;
+            top: -4px;
+            left: 0;
+            width: 100%;
+            height: 3px;
+            background: linear-gradient(to right, transparent, #c5a059 20%, #f0d98a 50%, #c5a059 80%, transparent);
+        }
+
+        .bottom-btn {
+            flex: 1;
+            background: none;
+            border: none;
+            color: #c5a059;
+            font-family: 'Cinzel', serif;
+            font-size: 15px; 
+            font-weight: 700;
+            padding: 10px 4px; 
+            cursor: pointer;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            text-shadow: 0 2px 2px rgba(0,0,0,0.8);
+            border-right: 1px solid rgba(197, 160, 89, 0.2);
+            transition: all 0.15s;
+        }
+
+        .bottom-btn:last-child {
+            border-right: none;
+        }
+
+        .bottom-btn:active {
+            color: var(--gold-bright);
+            background: rgba(197, 160, 89, 0.15);
+            text-shadow: 0 0 8px rgba(240, 217, 138, 0.6);
+        }
+    </style>
+</head>
+<body>
+
+    <div class="mobile-screen">
+        
+        <!-- ВЕРХНЯЯ ПАНЕЛЬ -->
+        <header class="game-topbar">
+            <div class="top-row">
+                <div class="topbar-left">
+                    <div class="avatar-frame">
+                        <img src="https://i.pravatar.cc/150?img=15" alt="Аватар">
+                        <div class="level-badge">10</div>
+                    </div>
+                    <div class="player-info">
+                        <div class="player-name">ИгрокA</div>
+                        
+                        <!-- Демонстрация (50% заполнение) -->
+                        <div class="stat-bar exp-normal">
+                            <div class="bar-fill" style="width: 50%;"></div>
+                            <span class="bar-text">Опыт 50/100</span>
+                        </div>
+                        
+                        <!-- Демонстрация (30% заполнение) -->
+                        <div class="stat-bar exp-combat">
+                            <div class="bar-fill" style="width: 30%;"></div>
+                            <span class="bar-text">Опыт в сражениях: 30/100</span>
+                        </div>
+                        
+                    </div>
+                </div>
+
+                <div class="topbar-right">
+                    <div class="currency-box multi-currency">
+                        <div class="curr-item">
+                            <i class="fas fa-coins curr-icon-fa gold"></i>
+                            <span class="curr-amount">250</span>
+                        </div>
+                        <div class="curr-item">
+                            <i class="fas fa-coins curr-icon-fa silver"></i>
+                            <span class="curr-amount">50</span>
+                        </div>
+                        <div class="curr-item">
+                            <i class="fas fa-coins curr-icon-fa copper"></i>
+                            <span class="curr-amount">99</span>
+                        </div>
+                    </div>
+                    
+                    <div class="currency-box">
+                        <div class="curr-item">
+                            <i class="fas fa-gem curr-icon-fa"></i>
+                            <span class="curr-amount">50</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <nav class="topbar-nav">
+                <!-- 1. Рюкзак -->
+                <button class="nav-btn" title="Рюкзак">
+                    <svg class="nav-icon" viewBox="0 0 24 24">
+                        <path fill="#8B5A2B" d="M12 2C8.13 2 5 5.13 5 9v3c0 2.38 1.19 4.47 3 5.74V21h2v-2h4v2h2v-3.26c1.81-1.27 3-3.36 3-5.74V9c0-3.87-3.13-7-7-7z" opacity="0.9"/>
+                        <path fill="#A0522D" d="M12 2v19h2v-2h2v-3.26c1.81-1.27 3-3.36 3-5.74V9c0-3.87-3.13-7-7-7z" opacity="0.9"/>
+                        <rect x="10" y="11" width="4" height="5" rx="1" fill="#FFD700" />
+                        <rect x="10" y="11" width="4" height="1.5" fill="#DAA520" />
+                    </svg>
+                    <span class="nav-label">Сумка</span>
+                </button>
+
+                <!-- 2. Задания -->
+                <button class="nav-btn" title="Задания">
+                    <svg class="nav-icon" viewBox="0 0 24 24">
+                        <path fill="#F4E4BC" d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z"/>
+                        <rect x="7" y="7" width="10" height="1.5" fill="#8B4513"/>
+                        <rect x="7" y="10" width="10" height="1.5" fill="#8B4513"/>
+                        <rect x="7" y="13" width="6" height="1.5" fill="#8B4513"/>
+                    </svg>
+                    <span class="nav-label">Задания</span>
+                </button>
+
+                <!-- 3. Банк -->
+                <button class="nav-btn" title="Банк">
+                    <svg class="nav-icon" viewBox="0 0 24 24">
+                        <path fill="#5C4033" d="M3 6h18v3H3z"/>
+                        <path fill="#8B4513" d="M4 9h16v11H4z"/>
+                        <rect x="2" y="4" width="20" height="2" fill="#FFD700"/>
+                        <rect x="2" y="8" width="20" height="1.5" fill="#FFD700"/>
+                        <path fill="#DAA520" d="M10.5 11h3v5h-3z"/>
+                        <circle cx="12" cy="13.5" r="0.8" fill="#3E2723"/>
+                    </svg>
+                    <span class="nav-label">Банк</span>
+                </button>
+
+                <!-- 4. Аукцион -->
+                <button class="nav-btn" title="Аукцион">
+                    <svg class="nav-icon" viewBox="0 0 24 24">
+                        <path fill="#8B4513" d="M21.36 8.64l-3.6-3.6c-.78-.78-2.05-.78-2.83 0l-3.6 3.6c-.78.78-.78 2.05 0 2.83l3.6 3.6c.78.78 2.05.78 2.83 0l3.6-3.6c.79-.78.79-2.05 0-2.83z"/>
+                        <path fill="#A0522D" d="M14.5 10.5l-9 9c-.78.78-.78 2.05 0 2.83.78.78 2.05.78 2.83 0l9-9-2.83-2.83z"/>
+                        <rect x="2" y="18" width="5" height="2" fill="#FFD700" transform="rotate(-45 4.5 19)"/>
+                    </svg>
+                    <span class="nav-label">Рынок</span>
+                </button>
+
+                <!-- 5. Информация -->
+                <button class="nav-btn" title="Информация">
+                    <svg class="nav-icon" viewBox="0 0 24 24">
+                        <path fill="#1565C0" d="M18 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/>
+                        <path fill="#42A5F5" d="M18 2h-6v20h6c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/>
+                        <rect x="8" y="6" width="8" height="1.5" fill="#FFFFFF"/>
+                        <rect x="8" y="9" width="8" height="1.5" fill="#FFFFFF"/>
+                        <rect x="8" y="12" width="5" height="1.5" fill="#FFFFFF"/>
+                    </svg>
+                    <span class="nav-label">Инфо</span>
+                </button>
+
+                <!-- 6. Почта -->
+                <button class="nav-btn" title="Почта">
+                    <svg class="nav-icon" viewBox="0 0 24 24">
+                        <path fill="#D2B48C" d="M2 5h20v14H2z"/>
+                        <path fill="#F4E4BC" d="M5 5h14v10H5z"/>
+                        <rect x="7" y="7" width="10" height="1" fill="#8B4513"/>
+                        <rect x="7" y="9" width="8" height="1" fill="#8B4513"/>
+                        <path fill="#A0522D" d="M2 5l10 7 10-7z"/>
+                        <circle cx="12" cy="14" r="3" fill="#8B0000" opacity="0.9"/>
+                    </svg>
+                    <span class="nav-label">Почта</span>
+                    <div class="notif-badge">3</div>
+                </button>
+
+                <!-- 7. Бои -->
+                <button class="nav-btn" title="Текущие бои">
+                    <svg class="nav-icon" viewBox="0 0 24 24">
+                        <path fill="#B0BEC5" d="M6.92 5L5 6.92l5.73 5.73L5 18.38 6.92 20l5.73-5.73L18.38 20l1.92-1.92-5.73-5.73L20.3 6.62 18.38 4.7l-5.73 5.73L6.92 5z"/>
+                        <path fill="#FFD700" d="M4 4h4v2H4zM16 4h4v2h-4zM3.5 17.5h4v2h-4zM16.5 17.5h4v2h-4z"/>
+                    </svg>
+                    <span class="nav-label">Бои</span>
+                </button>
+            </nav>
+        </header>
+
+        <!-- ИГРОВОЕ ПРОСТРАНСТВО -->
+        <div class="game-content">
+            <!-- Здесь будет сам игровой контент -->
+        </div>
+
+        <!-- НИЖНЕЕ МЕНЮ -->
+        <nav class="bottom-nav">
+            <button class="bottom-btn">Локация</button>
+            <button class="bottom-btn">Магазин</button>
+            <button class="bottom-btn">Персонаж</button>
+            <button class="bottom-btn">Карта</button>
+        </nav>
+
+    </div>
+
+</body>
+</html>

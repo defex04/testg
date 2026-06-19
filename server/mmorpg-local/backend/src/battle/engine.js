@@ -69,7 +69,7 @@ export class Engine {
       alive: hp > 0,
       block: null,                       // стойка; null в ходе снимает блок
       opponentId: null,                  // «пара» на раунд (цель удара/фокус), см. buildPairs
-      lastActiveTurn: 0,                 // раунд последнего размена — для «холода»
+      lastTargetedTurn: 0,               // раунд, когда по бойцу БИЛИ — для «холода» цели
       buffMult: 1,                       // множитель урона от «Эликсира мощи»
       buffTurns: 0,                      // на сколько своих ударов он действует
     };
@@ -150,11 +150,21 @@ export class Engine {
     return this._isActiveActor(f) ? f : null;
   }
 
-  /** Насколько боец «холодный» (раундов без размена). */
-  coldness(f) { return Math.max(0, this.turn - (f.lastActiveTurn || 0)); }
+  /** Насколько боец «холодный» (раундов без удара ПО НЕМУ). */
+  coldness(f) { return Math.max(0, this.turn - (f.lastTargetedTurn || 0)); }
 
   /** Вес выбора цели: база + приоритет «холодным» (на кого давно не нападали). */
   _targetWeight(enemy) { return 1 + this.target.coldWeight * this.coldness(enemy); }
+
+  /** Самый «холодный»/незанятый враг из списка (вес ÷ текущая нагрузка). */
+  _coldestEnemy(enemies, load) {
+    let best = null, bestW = -Infinity;
+    for (const e of enemies) {
+      const w = this._targetWeight(e) / (1 + (load.get(String(e.id)) || 0));
+      if (w > bestW) { bestW = w; best = e; }
+    }
+    return best;
+  }
 
   /**
    * Сватовство пар «кто против кого» — ОДИН раз за раунд (см. startRound).
@@ -175,33 +185,47 @@ export class Engine {
     const load = new Map();                       // enemyId -> сколько атакующих на нём
     const bump = (id) => load.set(String(id), (load.get(String(id)) || 0) + 1);
 
-    // 1) сохраняем устойчивые взаимные пары (если не «холодные» и не выпал шанс смены)
+    // есть ли у бойца «заброшенный» живой враг — по нему давно не били (coldness)
+    // и он сейчас ни с кем не сведён? Тогда устойчивую пару РАЗРЫВАЕМ, чтобы
+    // втянуть забытого в размен. Иначе в неравном бою (1×N) сторона-одиночка
+    // молотит всегда одного и того же, а второй враг не получает урона (ТЗ #3).
+    const hasNeglected = (id) => this.enemiesOf(id).some(
+      (e) => !engaged.has(e.id) && this.coldness(e) >= this.target.coldTurns);
+
+    // 1) сохраняем устойчивые взаимные пары (если не «холодные» и не выпал шанс
+    //    смены). Решение по паре принимаем РОВНО один раз (decided) — иначе второй
+    //    конец пары мог бы отменить разрыв, и забытый враг так и не вступил бы в бой.
+    const decided = new Set();
     for (const f of [...left, ...right]) {
-      if (engaged.has(f.id)) continue;
+      if (engaged.has(f.id) || decided.has(f.id)) continue;
       const p = f.opponentId ? this.fighter(f.opponentId) : null;
       const mutual = p && p.alive && p.side !== f.side
-        && String(p.opponentId) === String(f.id) && !engaged.has(p.id);
+        && String(p.opponentId) === String(f.id)
+        && !engaged.has(p.id) && !decided.has(p.id);
       if (!mutual) continue;
+      decided.add(f.id); decided.add(p.id);
       const cold = this.coldness(f) >= this.target.coldTurns
         || this.coldness(p) >= this.target.coldTurns;
-      if (cold || Math.random() < this.target.switchChance) continue;   // разъединяем
+      if (cold || hasNeglected(f.id) || hasNeglected(p.id)
+          || Math.random() < this.target.switchChance) continue;   // разъединяем
       engaged.add(f.id); engaged.add(p.id); bump(f.id); bump(p.id);
     }
 
     // 2) свободных (по инициативе) сватаем к наименее занятому/«холодному» врагу;
-    //    взаимность ставим, если враг ещё свободен — иначе это «дубль» (2-в-1)
+    //    взаимность ставим, если враг ещё свободен — но смотрит он на самого
+    //    «холодного» из СВОИХ врагов (обычно это и есть f). Так одиночка в неравном
+    //    бою смотрит на заброшенного, а не вечно на того, кто его атаковал первым.
     for (const id of this.order) {
       const f = this.fighter(id);
       if (!f || !f.alive || engaged.has(f.id)) continue;
       const enemies = this.enemiesOf(f.id);
       if (!enemies.length) continue;
-      let best = null, bestW = -Infinity;
-      for (const e of enemies) {
-        const w = this._targetWeight(e) / (1 + (load.get(String(e.id)) || 0));
-        if (w > bestW) { bestW = w; best = e; }
-      }
+      const best = this._coldestEnemy(enemies, load);
       f.opponentId = best.id; engaged.add(f.id); bump(best.id);
-      if (!engaged.has(best.id)) { best.opponentId = f.id; engaged.add(best.id); bump(f.id); }
+      if (!engaged.has(best.id)) {
+        const back = this._coldestEnemy(this.enemiesOf(best.id), load) || f;
+        best.opponentId = back.id; engaged.add(best.id); bump(back.id);
+      }
     }
   }
 
@@ -261,9 +285,10 @@ export class Engine {
   }
 
   _strike(attacker, defender, zone) {
-    // размен «согревает» обоих: учитывается «холод» при выборе целей
-    attacker.lastActiveTurn = this.turn;
-    defender.lastActiveTurn = this.turn;
+    // «холод» цели = давно ли по бойцу БИЛИ: отмечаем лишь того, по кому ударили.
+    // Боец, который сам атакует, но по нему не попадают, остаётся «холодным» —
+    // его и выберут целью; иначе в 1×N одиночка молотит всегда одного (ТЗ #3).
+    defender.lastTargetedTurn = this.turn;
     const blocked = defender.block === zone;
     const dodged = !blocked && Math.random() < defender.dodge;
     const crit = !dodged && Math.random() < attacker.crit;

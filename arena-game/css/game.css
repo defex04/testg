@@ -1258,7 +1258,7 @@ body.loc-castle.in-battle .sprite-main .sm-ico {
 .nick {
   font-family: var(--font-display);
   font-weight: 700;
-  font-size: 13px;
+  font-size: 16px;
   letter-spacing: .3px;
   color: #f6ead0;
   text-shadow: 0 1px 3px rgba(0, 0, 0, .95);
@@ -1269,45 +1269,46 @@ body.loc-castle.in-battle .sprite-main .sm-ico {
   flex: 0 1 auto;
 }
 
-/* значок «инфо» рядом с ником — золотой кружок с «i», открывает карточку игрока */
+/* значок «инфо» рядом с ником — отчеканенный золотой медальон с «i» (ТЗ #7):
+   тот же стиль, что у медальона уровня, тёмная буква на золоте — крупно и читаемо */
 .info-btn {
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 18px;
-  height: 18px;
+  width: 19px;
+  height: 19px;
   padding: 0;
-  border: 1px solid rgba(201, 168, 76, .6);
+  border: 1px solid #7a5e22;
   border-radius: 50%;
-  background: radial-gradient(circle at 40% 32%, rgba(244, 205, 111, .22), rgba(8, 10, 5, .55));
-  color: var(--gold-bright);
+  background: radial-gradient(circle at 38% 30%, #fff3cf 0%, #f0cd72 40%, #c79434 74%, #9a6f23 100%);
+  color: #2a1d06;
   cursor: pointer;
-  box-shadow: inset 0 1px 0 rgba(255, 240, 190, .18), 0 1px 2px rgba(0, 0, 0, .4);
-  transition: color .15s, border-color .15s, background .15s, transform .12s, box-shadow .15s;
+  box-shadow: 0 0 0 1px rgba(6, 8, 4, .55), 0 1px 2px rgba(0, 0, 0, .5),
+              inset 0 1px 1px rgba(255, 248, 220, .7), inset 0 -2px 3px rgba(120, 80, 18, .4);
+  transition: filter .15s, transform .12s, box-shadow .15s;
   -webkit-tap-highlight-color: transparent;
 }
-.info-btn svg { width: 11px; height: 11px; display: block; }
+.info-btn svg { width: 13px; height: 13px; display: block; filter: drop-shadow(0 1px 0 rgba(255, 248, 220, .5)); }
 .info-btn:hover {
-  color: #1c1402;
-  background: radial-gradient(circle at 40% 32%, #fff0c4, #e3b34f 70%);
-  border-color: #ffe9ab;
-  box-shadow: 0 0 9px rgba(216, 169, 63, .45);
+  filter: brightness(1.08);
+  box-shadow: 0 0 11px rgba(244, 205, 111, .6), inset 0 1px 1px rgba(255, 248, 220, .85);
   transform: scale(1.12);
 }
-.info-btn:active { transform: scale(.92); }
+.info-btn:active { transform: scale(.93); }
 
-/* «инфо» у участника в окне — чуть мельче, в одну строку с ником */
-.member .m-line { display: flex; align-items: center; gap: 6px; }
+/* «инфо» у участника в окне — в одной строке с ником, ВПЛОТНУЮ к нему (#6.3):
+   ник не растягивается на всю ширину, поэтому значок сидит сразу за именем */
+.member .m-line { display: flex; align-items: center; justify-content: center; gap: 5px; }
 .member .m-name {
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.member .m-info { width: 16px; height: 16px; }
-.member .m-info svg { width: 10px; height: 10px; }
+.member .m-info { width: 17px; height: 17px; }
+.member .m-info svg { width: 12px; height: 12px; }
 
 /* полосы HP (красная) и энергии (синяя): иконка + трек со «следом урона» */
 .bar-group {
@@ -1516,16 +1517,18 @@ body.loc-castle.in-battle .sprite-main .sm-ico {
   display: block;
 }
 
+/* заставка загрузки бойцов закрывает ВЕСЬ экран НЕПРОЗРАЧНО (#4): пока бой не
+   собран, не видно ни фона арены, ни 3D-канваса — потом всё проявляется разом */
 .arena-loading {
-  position: absolute;
+  position: fixed;
   inset: 0;
-  z-index: 30;
+  z-index: 120;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 14px;
-  background: rgba(8, 10, 5, .92);
+  background: #0a0e07;
   font-family: var(--font-display);
   font-size: 16px;
   color: var(--gold-bright);
@@ -1626,6 +1629,38 @@ body.in-battle .castle-main-menu { transition: opacity .34s ease; }
 .swedge.blk.on { fill: url(#swBlkOn); opacity: 1; }
 .swedge.aim { animation: swAim .9s ease-out; }
 @keyframes swAim { 0% { opacity: .95; } 100% { opacity: var(--rest, .32); } }
+
+/* ---- подсказки на колесе (мой ход), ТЗ #2 ----
+   Пока БРОНЯ не выбрана — три синих сектора блока вспыхивают ПО ОЧЕРЕДИ
+   («выбери защиту»); сектора атаки (мечи) мягко пульсируют постоянно («бей сюда»).
+   Классы hint-block / hint-attack ставит BattleUI в свой ход. */
+.strike-wheel.hint-block .swedge.blk { animation: blkHint 2.1s ease-in-out infinite; }
+.strike-wheel.hint-block .swedge.blk.z-high { animation-delay: 0s; }
+.strike-wheel.hint-block .swedge.blk.z-mid  { animation-delay: .3s; }
+.strike-wheel.hint-block .swedge.blk.z-low  { animation-delay: .6s; }
+@keyframes blkHint {
+  0%, 42%, 100% { opacity: .32; fill: #16222f; }
+  16%           { opacity: .95; fill: #2f7fe0; }
+}
+/* щиты подсвечиваются тем же ритмом — взгляд цепляется за защиту */
+.strike-wheel.hint-block .sw-sprite.shield:not(.on) { animation: shieldHint 2.1s ease-in-out infinite; }
+.strike-wheel.hint-block .sw-sprite.shield.z-high { animation-delay: 0s; }
+.strike-wheel.hint-block .sw-sprite.shield.z-mid  { animation-delay: .3s; }
+.strike-wheel.hint-block .sw-sprite.shield.z-low  { animation-delay: .6s; }
+@keyframes shieldHint {
+  0%, 42%, 100% { transform: var(--base); filter: drop-shadow(0 3px 5px rgba(0, 0, 0, .6)); }
+  16%           { transform: var(--base) scale(1.1);
+                  filter: drop-shadow(0 0 9px rgba(110, 170, 255, .95)) drop-shadow(0 3px 5px rgba(0, 0, 0, .6)); }
+}
+
+/* зона атаки: мягкая постоянная пульсация секторов и мечей */
+.strike-wheel.hint-attack .swedge.atk { animation: atkHint 1.9s ease-in-out infinite; }
+@keyframes atkHint { 0%, 100% { opacity: .5; } 50% { opacity: .85; } }
+.strike-wheel.hint-attack .sw-sprite.sword:not(.thrust):not(.clang) { animation: swordHint 1.9s ease-in-out infinite; }
+@keyframes swordHint {
+  0%, 100% { filter: drop-shadow(0 3px 5px rgba(0, 0, 0, .6)); }
+  50%      { filter: drop-shadow(0 0 8px rgba(255, 120, 80, .9)) drop-shadow(0 3px 5px rgba(0, 0, 0, .6)); }
+}
 
 /* кольцо-таймер хода — тонкая дуга по внутреннему ободу */
 .sw-timer {
@@ -1755,31 +1790,22 @@ body.in-battle .castle-main-menu { transition: opacity .34s ease; }
   overflow: hidden;
   text-overflow: ellipsis;
 }
-/* строка статуса: значок (как в шапке боя) + полоса (#6) */
-.member .m-stat {
+/* две полосы статуса ВПЛОТНУЮ, без значков жизни/энергии (#6.2):
+   жизнь (красная) сверху, энергия (синяя) сразу под ней */
+.member .m-bars {
   display: flex;
-  align-items: center;
-  gap: 5px;
-  margin-top: 3px;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 4px;
 }
-.member .m-ico {
-  flex: 0 0 auto;
-  width: 13px;
-  height: 13px;
-  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, .65));
-}
-.member .m-ico.hp { color: #e8665a; }
-.member .m-ico.en { color: #5cb8f0; }
-.member .m-ico svg { display: block; width: 100%; height: 100%; fill: currentColor; }
 .member .m-bar {
-  flex: 1 1 auto;
+  width: 100%;
   height: 7px;
   border: 1px solid var(--line-dim);
   border-radius: 4px;
   background: rgba(0, 0, 0, .45);
   overflow: hidden;
 }
-.member .m-stat:last-child { margin-top: 2px; }
 .member .m-bar.m-en { height: 5px; }
 .member .m-fill { height: 100%; transition: width .4s; }
 /* жизни — красные, энергия — синяя */
@@ -1896,19 +1922,18 @@ body.in-battle .castle-main-menu { transition: opacity .34s ease; }
 
 /* ---------- конец боя ---------- */
 
-/* экран итога боя — по центру ОКНА БОЯ (сцены), а не всего вьюпорта (#1):
-   .bui-end лежит внутри .arena-stage, поэтому absolute центрирует баннер ровно
-   над ареной, выше нижних окон. */
+/* экран итога боя затемняет ВЕСЬ экран, а не только окно боя (#5): fixed/inset:0
+   поверх шапки, нижних окон и меню — победа/поражение по центру вьюпорта. */
 .bui-end {
-  position: absolute;
+  position: fixed;
   inset: 0;
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 10px;
-  background: radial-gradient(ellipse at center, rgba(5, 7, 3, .72), rgba(5, 7, 3, .88));
-  backdrop-filter: blur(2px);
-  z-index: 60;
+  background: radial-gradient(ellipse at center, rgba(5, 7, 3, .78), rgba(5, 7, 3, .92));
+  backdrop-filter: blur(3px);
+  z-index: 120;
 }
 
 .bui-end-card {
@@ -2054,6 +2079,10 @@ body.loc-castle.in-battle .bottom-dock.dock-open .dock-body {
 }
 .members-search:focus { border-color: var(--gold); box-shadow: 0 0 8px rgba(216, 169, 63, .2); }
 .members-search::placeholder { color: rgba(205, 189, 141, .5); }
+/* лупа (#6.1): когда поле поиска спрятано, кнопки сортировки/убитых уезжают
+   вправо (margin-left:auto), лупа остаётся слева; развёрнутое поле само их сдвинет */
+.mtool-actions-start { margin-left: auto; }
+svg.mtool-ico { width: 15px; height: 15px; display: block; }
 .mtool-btn {
   flex: 0 0 auto;
   display: inline-flex;
@@ -2889,7 +2918,7 @@ button.belt-slot { padding: 0; font: inherit; color: inherit; -webkit-tap-highli
   /* сцене гарантируется высота, при которой оверлеи (пояс эликсиров,
      штурвал) не наезжают на шапку и слоты скиллов */
   .arena-stage { min-height: 230px; }
-  .nick { font-size: 11.5px; }
+  .nick { font-size: 14.5px; }
   .nick-lvl { font-size: 10px; }
   .bar-track { height: 16px; }
   .bar-val { font-size: 9px; }
