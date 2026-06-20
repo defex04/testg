@@ -129,6 +129,9 @@ function syncTgInsets() {
   s.setProperty('--tg-inset-bottom', px(sa.bottom, ca.bottom));
   s.setProperty('--tg-inset-left', px(sa.left, ca.left));
   s.setProperty('--tg-inset-right', px(sa.right, ca.right));
+  s.setProperty('--tg-safe-top', px(sa.top, 0));   // только устройство — для строки сети
+  // строка сети показывается только в полноэкранном режиме (есть верхняя полоса)
+  document.body.classList.toggle('tg-fullscreen', !!tg.isFullscreen);
 }
 
 if (tg) {
@@ -192,6 +195,49 @@ function confirmExit() {
     } catch {}
     location.reload();
   });
+})();
+
+// --- Строка сети: пинг до сервера + полоска загрузки данных ------------------
+// Видна в полноэкранном режиме (CSS: body.tg-fullscreen) — по центру вверху,
+// между кнопками Telegram «Закрыть» и «свернуть». Полоска загорается, пока есть
+// активные сетевые запросы (REST-данные); пинг меряем лёгким /api/health.
+(() => {
+  const apiBase = window.API_URL || 'http://localhost:8080';
+  const dot = $('net-dot');
+  const val = $('net-ping-val');
+  const bar = $('net-loadbar');
+  const rawFetch = window.fetch.bind(window);
+
+  // индикатор загрузки: считаем активные запросы, оборачивая fetch
+  let pending = 0;
+  const isHealth = (u) => /\/api\/health(\?|$)/.test(u);
+  window.fetch = (input, init) => {
+    const u = typeof input === 'string' ? input : (input && input.url) || '';
+    if (isHealth(u)) return rawFetch(input, init);   // пинг бар не мигает
+    pending++;
+    bar?.classList.add('busy');
+    return rawFetch(input, init).finally(() => {
+      if (--pending <= 0) { pending = 0; bar?.classList.remove('busy'); }
+    });
+  };
+
+  const show = (ms) => {
+    if (!dot || !val) return;
+    if (ms == null) { val.textContent = '—'; dot.dataset.q = 'bad'; return; }
+    val.textContent = ms + ' мс';
+    dot.dataset.q = ms < 120 ? 'good' : ms < 300 ? 'ok' : 'bad';
+  };
+  const ping = async () => {
+    const t0 = performance.now();
+    const ctrl = new AbortController();
+    const to = setTimeout(() => ctrl.abort(), 4000);
+    try {
+      await rawFetch(apiBase + '/api/health', { cache: 'no-store', signal: ctrl.signal });
+      show(Math.round(performance.now() - t0));
+    } catch { show(null); } finally { clearTimeout(to); }
+  };
+  ping();
+  setInterval(ping, 5000);
 })();
 
 // ---------------------------------------------------------------------------

@@ -58,7 +58,7 @@
   --tg-inset-bottom: 0px;
   --tg-inset-left: 0px;
   --tg-inset-right: 0px;
-  --safe-h: calc(var(--app-h, 100dvh) - var(--tg-inset-top) - var(--tg-inset-bottom));
+  --tg-safe-top: 0px;     /* только device safe-area сверху (статус-бар) — для строки сети */
 
   /* собранные тени рамок — мягкие, без жёстких контуров */
   --frame-shadow:
@@ -170,17 +170,19 @@ body.loc-castle .castle-main-menu { display: flex; }
 
 body.loc-castle .game {
   position: relative;
-  /* размер — по БЕЗОПАСНОЙ высоте (--safe-h = --app-h минус зоны Telegram): игра
-     не масштабируется при открытии клавиатуры, а в полноэкранном Telegram бокс
-     9:16 целиком помещается в безопасную область (отступы --tg-inset-* в margin),
-     не уезжая под статус-бар и кнопки ✕/⋯. Вне Telegram зоны = 0 → как раньше.
-     Сам экран при клавиатуре не двигается — её накрывает нижнее меню, а поле
-     ввода чата поднимает над собой только док (см. .bottom-dock ниже). */
-  width: min(100vw, calc(var(--safe-h) * 9 / 16));
-  height: var(--safe-h);
+  /* На десктопе — центрированный бокс 9:16. На телефоне (медиазапросы ниже) бокс
+     заполняет ВЕСЬ экран (height = --app-h): фон-картинка full-bleed уходит под
+     статус-бар и плавающие кнопки Telegram, а сам UI (шапка/нижнее меню) отступает
+     внутрь на безопасные зоны (--tg-inset-* в padding шапки и меню). Так нет ни
+     чёрных полей, ни «съехавшей» панели, а блоки (шапка · середина · низ) гибко
+     тянутся, как в бою. Размер по ПОЛНОЙ высоте (--app-h) — игра не масштабируется
+     при клавиатуре; её накрывает нижнее меню, а поле ввода чата поднимает только
+     док (см. .bottom-dock). */
+  width: min(100vw, calc(var(--app-h, 100dvh) * 9 / 16));
+  height: var(--app-h, 100dvh);
   max-height: calc(100vw * 16 / 9);
   max-width: none;
-  margin: var(--tg-inset-top) auto var(--tg-inset-bottom);
+  margin: 0 auto;
   padding: 0;
   gap: 0;
   overflow: hidden;
@@ -221,7 +223,10 @@ body.loc-castle .castle-bottom {
 }
 
 body.loc-castle .hud-top {
-  padding: max(6px, env(safe-area-inset-top)) 6px 0;
+  /* отступ сверху = безопасная зона: env() в браузере ИЛИ зоны Telegram в
+     полноэкранном режиме (статус-бар + кнопки ✕/⋯). Один max() — без двойного
+     отступа: панель садится сразу под кнопками Telegram, без лишнего зазора. */
+  padding: max(6px, env(safe-area-inset-top), var(--tg-inset-top)) 6px 0;
 }
 
 body.loc-castle .player-plate {
@@ -357,7 +362,7 @@ body.loc-castle .loc-actions {
   justify-content: center;
   width: 100%;
   gap: 6px;
-  padding: 7px 8px max(8px, env(safe-area-inset-bottom));
+  padding: 7px 8px max(8px, env(safe-area-inset-bottom), var(--tg-inset-bottom));
   background: linear-gradient(0deg, rgba(5, 7, 3, .94) 62%, rgba(5, 7, 3, .55) 88%, transparent);
   border-top: 1px solid rgba(212, 175, 90, .22);
   box-shadow: inset 0 1px 0 rgba(255, 222, 150, .08);
@@ -546,7 +551,7 @@ body.loc-castle.in-battle .screen-battle {
    (плашку убрали по просьбе; читаемость держат тени на тексте/полосах). */
 body.loc-castle.in-battle .battle-head {
   flex: 0 0 auto;
-  margin: max(4px, env(safe-area-inset-top)) 8px 0;
+  margin: max(4px, env(safe-area-inset-top), var(--tg-inset-top)) 8px 0;
   padding: 2px 6px 4px;
   background: none;
   border: none;
@@ -636,7 +641,7 @@ body.loc-castle.in-battle .ghost-btn {
 
 /* меню внизу — один ряд */
 body.loc-castle.in-battle .castle-main-menu {
-  padding: 2px 6px max(4px, env(safe-area-inset-bottom));
+  padding: 2px 6px max(4px, env(safe-area-inset-bottom), var(--tg-inset-bottom));
   background: linear-gradient(0deg, rgba(5, 7, 3, .9) 65%, transparent);
 }
 
@@ -3077,13 +3082,14 @@ button.belt-slot { padding: 0; font: inherit; color: inherit; -webkit-tap-highli
 /* первая локация на телефоне 9:16 */
 @media (max-width: 700px) {
   body.loc-castle .game {
-    /* размер по БЕЗОПАСНОЙ высоте (--safe-h) — игра не масштабируется под
-       клавиатуру; вместо этого сдвигается вверх на --kb (см. базовое правило).
-       Отступы безопасной зоны Telegram — в margin базового правила. */
-    width: min(100vw, calc(var(--safe-h) * 9 / 16));
-    height: min(var(--safe-h), calc(100vw * 16 / 9));
+    /* телефон: бокс на ВСЮ высоту экрана (full-bleed), без рамки 9:16 — иначе
+       сверху/снизу чёрные поля. Безопасные зоны Telegram уходят в padding шапки
+       и нижнего меню (--tg-inset-*), а не в размер бокса. */
+    width: 100vw;
+    height: var(--app-h, 100dvh);
+    max-height: var(--app-h, 100dvh);
   }
-  body.loc-castle .hud-top { padding: max(4px, env(safe-area-inset-top)) 4px 0; }
+  body.loc-castle .hud-top { padding: max(4px, env(safe-area-inset-top), var(--tg-inset-top)) 4px 0; }
   .castle-perimeter { padding: 0 6px; }
   .castle-perimeter-side { gap: 4px; }
   .menu-icon img { height: clamp(48px, 13.2vmin, 60px); }  /* высотой, не шириной — см. базовое правило */
@@ -3108,10 +3114,10 @@ button.belt-slot { padding: 0; font: inherit; color: inherit; -webkit-tap-highli
 
 @media (max-aspect-ratio: 9/16) {
   body.loc-castle .game {
+    /* экран выше 9:16 — заполняем по высоте, фон тянется (cover), без чёрных полей */
     width: 100vw;
-    height: calc(100vw * 16 / 9);
-    /* потолок высоты — безопасная область (минус зоны Telegram и клавиатуру) */
-    max-height: var(--safe-h);
+    height: var(--app-h, 100dvh);
+    max-height: var(--app-h, 100dvh);
   }
 }
 
@@ -3293,4 +3299,72 @@ button.belt-slot { padding: 0; font: inherit; color: inherit; -webkit-tap-highli
 @media (max-width: 700px) {
   .pp-settings { width: 30px; height: 30px; }
   .pp-settings svg { width: 17px; height: 17px; }
+}
+
+/* ============================================================
+   Строка сети: пинг + полоска загрузки данных.
+   В полноэкранном Telegram садится в верхнюю безопасную полосу —
+   по центру между кнопками «Закрыть» (слева) и «свернуть/⋯» (справа).
+   ============================================================ */
+
+.net-status {
+  position: fixed;
+  top: max(4px, env(safe-area-inset-top), var(--tg-safe-top));
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 60;
+  display: none;                 /* видна только в полноэкранном режиме */
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  width: min(170px, 44vw);
+  pointer-events: none;
+}
+body.tg-fullscreen .net-status { display: flex; }
+
+.net-ping {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: rgba(6, 9, 4, .55);
+  backdrop-filter: blur(3px);
+  border: 1px solid rgba(138, 111, 60, .35);
+  font: 600 11px var(--font-display);
+  color: var(--text);
+  text-shadow: 0 1px 2px #000;
+  white-space: nowrap;
+}
+.net-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #888;
+  box-shadow: 0 0 6px currentColor;
+}
+.net-dot[data-q="good"] { background: #58c167; color: #58c167; }
+.net-dot[data-q="ok"]   { background: #d8b23f; color: #d8b23f; }
+.net-dot[data-q="bad"]  { background: #d6452e; color: #d6452e; }
+
+.net-loadbar {
+  width: 100%;
+  height: 3px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .12);
+  overflow: hidden;
+  opacity: 0;
+  transition: opacity .2s;
+}
+.net-loadbar.busy { opacity: 1; }
+.net-loadbar-fill {
+  width: 38%;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, transparent, var(--gold-bright), transparent);
+}
+.net-loadbar.busy .net-loadbar-fill { animation: netload 1.05s ease-in-out infinite; }
+@keyframes netload {
+  0% { transform: translateX(-120%); }
+  100% { transform: translateX(330%); }
 }

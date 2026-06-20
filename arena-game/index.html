@@ -266,6 +266,15 @@
 
   </div>
 
+  <!-- строка сети: пинг + полоска загрузки (видна в полноэкранном Telegram,
+       по центру между кнопками «Закрыть» и «свернуть») -->
+  <div class="net-status" id="net-status" aria-hidden="true">
+    <span class="net-ping" title="Пинг до сервера">
+      <span class="net-dot" id="net-dot"></span><span id="net-ping-val">—</span>
+    </span>
+    <div class="net-loadbar" id="net-loadbar"><div class="net-loadbar-fill"></div></div>
+  </div>
+
   <!-- гардероб (примерочная) -->
   <div class="dressing hidden" id="dressing">
     <div class="dressing-card">
