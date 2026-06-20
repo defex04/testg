@@ -992,6 +992,31 @@ body.loc-castle.in-battle .sprite-main .sm-ico {
 .combat-slot.elixir.filled:not(:disabled):hover { transform: translateY(-2px); }
 .combat-slot.elixir.spent { opacity: .35; filter: grayscale(.6); cursor: default; }
 .combat-slot.elixir:disabled { cursor: default; }
+/* эликсир мощи на «перезарядке», пока его усиление действует (#3) */
+.combat-slot.elixir.cooldown { opacity: .5; filter: grayscale(.45); cursor: default; }
+
+/* счётчик зарядов в уголке ячейки (#1): мощь — стопкой ×N, жизнь — 1 */
+.combat-slot .bs-qty,
+.belt-slot .bs-qty {
+  position: absolute;
+  right: -3px;
+  bottom: -3px;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: linear-gradient(180deg, #2a3416, #11160a);
+  border: 1px solid rgba(244, 205, 111, .55);
+  color: #f4cd6f;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, .6);
+  pointer-events: none;
+}
 
 /* главная панель */
 
@@ -1233,26 +1258,45 @@ body.loc-castle.in-battle .sprite-main .sm-ico {
 }
 .fighter-col.right .fighter-head { flex-direction: row-reverse; }
 
-/* уровень — аккуратный золотой медальон-кружок перед ником (вместо «[N ур.]») */
+/* уровень бойца — золотой шестигранный самоцвет с цифрой (ТЗ #4): огранка
+   рисуется псевдо-слоями, число лежит сверху. Эстетичнее плоского кружка. */
 .lvl-badge {
   flex: 0 0 auto;
+  position: relative;
+  z-index: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 21px;
-  height: 21px;
-  border-radius: 50%;
-  border: 1px solid #6b521d;
-  background: radial-gradient(circle at 38% 30%, #fff0c4 0%, #ecc564 38%, #b88a30 72%, #855f1c 100%);
+  width: 25px;
+  height: 27px;
   color: #2a1d06;
   font-family: var(--font-display);
   font-weight: 700;
-  font-size: 11px;
+  font-size: 12.5px;
   line-height: 1;
   font-variant-numeric: tabular-nums;
-  text-shadow: 0 1px 0 rgba(255, 245, 205, .6);
-  box-shadow: 0 0 0 1.5px rgba(6, 8, 4, .8), 0 1px 3px rgba(0, 0, 0, .5),
-              inset 0 -2px 3px rgba(90, 60, 12, .45), inset 0 1px 1px rgba(255, 248, 220, .55);
+  text-shadow: 0 1px 0 rgba(255, 250, 225, .75);
+}
+/* тёмная огранка-подложка — чуть больше тела самоцвета, даёт «оправу» */
+.lvl-badge::after {
+  content: '';
+  position: absolute;
+  inset: -1.5px;
+  z-index: -2;
+  clip-path: polygon(50% 0%, 100% 27%, 100% 73%, 50% 100%, 0% 73%, 0% 27%);
+  background: linear-gradient(160deg, #5a431a, #211504);
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, .6));
+}
+/* тело самоцвета: блик сверху-слева + золотой объём */
+.lvl-badge::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  clip-path: polygon(50% 0%, 100% 27%, 100% 73%, 50% 100%, 0% 73%, 0% 27%);
+  background:
+    radial-gradient(120% 85% at 36% 20%, rgba(255, 251, 230, .95), transparent 48%),
+    linear-gradient(158deg, #ffe9a8 0%, #eecb6a 36%, #c2902f 72%, #8a601d 100%);
 }
 
 .nick {
@@ -1276,8 +1320,8 @@ body.loc-castle.in-battle .sprite-main .sm-ico {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 19px;
-  height: 19px;
+  width: 16px;
+  height: 16px;
   padding: 0;
   border: 1px solid #7a5e22;
   border-radius: 50%;
@@ -1289,7 +1333,7 @@ body.loc-castle.in-battle .sprite-main .sm-ico {
   transition: filter .15s, transform .12s, box-shadow .15s;
   -webkit-tap-highlight-color: transparent;
 }
-.info-btn svg { width: 13px; height: 13px; display: block; filter: drop-shadow(0 1px 0 rgba(255, 248, 220, .5)); }
+.info-btn svg { width: 10px; height: 10px; display: block; filter: drop-shadow(0 1px 0 rgba(255, 248, 220, .5)); }
 .info-btn:hover {
   filter: brightness(1.08);
   box-shadow: 0 0 11px rgba(244, 205, 111, .6), inset 0 1px 1px rgba(255, 248, 220, .85);
@@ -1307,8 +1351,8 @@ body.loc-castle.in-battle .sprite-main .sm-ico {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.member .m-info { width: 17px; height: 17px; }
-.member .m-info svg { width: 12px; height: 12px; }
+.member .m-info { width: 14px; height: 14px; }
+.member .m-info svg { width: 9px; height: 9px; }
 
 /* полосы HP (красная) и энергии (синяя): иконка + трек со «следом урона» */
 .bar-group {

@@ -29,6 +29,10 @@ const STATEMENTS = [
      template_id  INT      NOT NULL REFERENCES item_templates(id),
      PRIMARY KEY (character_id, slot)
    )`,
+  // Заряды в ячейке: эликсиры мощи копятся стопкой в одном слоте (quantity>1),
+  // эликсиры жизни — по 1 на слот (но можно занять несколько слотов). Расход в
+  // бою и надевание держат инвариант SUM(quantity по шаблону) ≤ «есть в рюкзаке».
+  `ALTER TABLE character_belt ADD COLUMN IF NOT EXISTS quantity SMALLINT NOT NULL DEFAULT 1`,
   // таблица создана админ-ролью в рантайме → выдаём права игровой роли явно
   // (схемный GRANT ON ALL TABLES к новым таблицам не применяется). Пояс —
   // изменяемый конфиг, а не аудит, поэтому DELETE здесь уместен (очистка ячейки).

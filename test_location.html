@@ -1,0 +1,847 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Город Надежды — Летопись Героя</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700;900&family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&family=Marcellus&display=swap" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  :root {
+    --bg-void: #05030a;
+    --bg-deep: #0a0814;
+    --bg-mid: #15101e;
+    --bg-card: rgba(28, 22, 36, 0.78);
+    --bg-card-hover: rgba(42, 32, 52, 0.88);
+    --border-dim: rgba(107, 80, 36, 0.35);
+    --border-gold: #6b5024;
+    --border-gold-bright: #a8803a;
+    --accent-gold: #d4a04a;
+    --accent-gold-bright: #f0c875;
+    --accent-gold-glow: rgba(240, 200, 117, 0.4);
+    --text-primary: #ebe0c4;
+    --text-secondary: #b8a888;
+    --text-muted: #7a6c50;
+    --accent-blood: #c44545;
+    --accent-emerald: #5aa56a;
+    --accent-arcane: #6a8aaa;
+  }
+
+  html, body {
+    background: radial-gradient(ellipse at center, #1a1020 0%, #05030a 70%);
+    font-family: 'Cormorant Garamond', serif;
+    color: var(--text-primary);
+    min-height: 100vh;
+    overflow: hidden;
+  }
+
+  body {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+  }
+
+  .game-frame {
+    position: relative;
+    width: min(440px, 95vw);
+    aspect-ratio: 9 / 16;
+    max-height: 96vh;
+  }
+
+  .game-container {
+    position: absolute;
+    inset: 0;
+    background:
+      radial-gradient(ellipse 80% 50% at 50% 0%, rgba(80, 50, 100, 0.28) 0%, transparent 70%),
+      radial-gradient(ellipse 100% 60% at 50% 100%, rgba(140, 80, 30, 0.22) 0%, transparent 70%),
+      linear-gradient(180deg, #0a0814 0%, #15101e 40%, #0e0a18 80%, #08060e 100%);
+    overflow: hidden;
+    border: 1px solid var(--border-gold);
+    border-radius: 8px;
+    box-shadow:
+      0 0 80px rgba(212, 160, 74, 0.12),
+      0 20px 60px rgba(0, 0, 0, 0.8),
+      inset 0 0 120px rgba(0, 0, 0, 0.7);
+    display: flex;
+    flex-direction: column;
+  }
+
+  .noise {
+    position: absolute; inset: 0;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3'/><feColorMatrix values='0 0 0 0 0.8 0 0 0 0 0.6 0 0 0 0 0.3 0 0 0 0.5 0'/></filter><rect width='100%' height='100%' filter='url(%23n)' opacity='0.4'/></svg>");
+    opacity: 0.08;
+    mix-blend-mode: overlay;
+    pointer-events: none;
+    z-index: 1;
+    border-radius: inherit;
+  }
+
+  .vignette {
+    position: absolute; inset: 0;
+    background: radial-gradient(ellipse at center, transparent 40%, rgba(0,0,0,0.7) 100%);
+    pointer-events: none;
+    z-index: 3;
+    border-radius: inherit;
+  }
+
+  .embers { position: absolute; inset: 0; pointer-events: none; z-index: 2; overflow: hidden; border-radius: inherit; }
+  .ember {
+    position: absolute;
+    border-radius: 50%;
+    background: radial-gradient(circle, var(--accent-gold-bright), rgba(212, 160, 74, 0.3) 50%, transparent 70%);
+    box-shadow: 0 0 6px var(--accent-gold-glow);
+    animation: rise linear infinite;
+  }
+  @keyframes rise {
+    0% { transform: translateY(20px) translateX(0) scale(0.5); opacity: 0; }
+    10% { opacity: 1; }
+    50% { transform: translateY(-50vh) translateX(var(--drift, 20px)) scale(1); }
+    90% { opacity: 0.5; }
+    100% { transform: translateY(-100vh) translateX(calc(var(--drift, 20px) * 2)) scale(0.3); opacity: 0; }
+  }
+
+  .corner-orn {
+    position: absolute; width: 56px; height: 56px;
+    z-index: 5; pointer-events: none;
+    color: var(--accent-gold); opacity: 0.75;
+  }
+  .corner-orn.tl { top: 8px; left: 8px; }
+  .corner-orn.tr { top: 8px; right: 8px; transform: scaleX(-1); }
+  .corner-orn.bl { bottom: 8px; left: 8px; transform: scaleY(-1); }
+  .corner-orn.br { bottom: 8px; right: 8px; transform: scale(-1); }
+
+  .content {
+    position: relative; z-index: 10;
+    height: 100%;
+    overflow-y: auto; overflow-x: hidden;
+    display: flex; flex-direction: column;
+    scrollbar-width: thin;
+    scrollbar-color: var(--accent-gold) rgba(0, 0, 0, 0.3);
+  }
+  
+  /* === НОВЫЙ СТИЛЬ ПОЛЗУНКА === */
+  .content::-webkit-scrollbar {
+    width: 6px;
+  }
+  .content::-webkit-scrollbar-track {
+    background: rgba(0, 0, 0, 0.3);
+    margin: 15px 0;
+    border-radius: 10px;
+  }
+  .content::-webkit-scrollbar-thumb {
+    background: linear-gradient(180deg, #f0c875 0%, #d4a04a 50%, #8b6020 100%);
+    border-radius: 10px;
+    border: 1px solid rgba(0, 0, 0, 0.4);
+    box-shadow: 
+      inset 0 1px 0 rgba(255, 230, 180, 0.4),
+      inset 0 -1px 0 rgba(0, 0, 0, 0.3);
+    transition: all 0.3s ease;
+  }
+  .content::-webkit-scrollbar-thumb:hover {
+    background: linear-gradient(180deg, #ffe0a0 0%, #f0c875 50%, #d4a04a 100%);
+    box-shadow: 
+      0 0 8px rgba(212, 160, 74, 0.8),
+      inset 0 1px 0 rgba(255, 230, 180, 0.5);
+  }
+  .content::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+  /* ============================== */
+
+  .header { padding: 40px 24px 14px; text-align: center; position: relative; }
+
+  .header h1 {
+    font-family: 'Cinzel', serif;
+    font-size: 24px;
+    font-weight: 900;
+    letter-spacing: 6px;
+    color: var(--accent-gold-bright);
+    text-shadow: 0 0 20px rgba(240, 200, 117, 0.5), 0 2px 4px rgba(0, 0, 0, 0.8);
+    text-transform: uppercase;
+    line-height: 1.2;
+  }
+
+  .divider {
+    height: 1px;
+    background: linear-gradient(90deg, transparent, var(--border-gold-bright), transparent);
+    margin: 6px 24px 10px;
+    position: relative;
+  }
+  .divider::after {
+    content: '◆';
+    position: absolute;
+    left: 50%; top: 50%;
+    transform: translate(-50%, -50%);
+    color: var(--accent-gold);
+    background: var(--bg-deep);
+    padding: 0 8px;
+    font-size: 8px;
+  }
+
+  .scene {
+    height: 140px;
+    position: relative;
+    overflow: hidden;
+    border-bottom: 1px solid var(--border-dim);
+  }
+  .scene svg { width: 100%; height: 100%; display: block; }
+
+  .moon-glow {
+    position: absolute;
+    top: 15px; right: 30px;
+    width: 50px; height: 50px;
+    background: radial-gradient(circle, rgba(240, 230, 200, 0.55) 0%, rgba(240, 200, 117, 0.18) 40%, transparent 70%);
+    border-radius: 50%;
+    animation: pulse 4s ease-in-out infinite;
+    pointer-events: none;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 0.8; transform: scale(1); }
+    50% { opacity: 1; transform: scale(1.08); }
+  }
+  .scene-caption {
+    position: absolute;
+    bottom: 8px; left: 16px; right: 16px;
+    font-style: italic;
+    font-size: 11px;
+    color: var(--text-muted);
+    text-align: center;
+    text-shadow: 0 1px 3px rgba(0,0,0,0.9);
+  }
+
+  .menu-section { padding: 14px 18px 6px; }
+
+  .section-title {
+    font-family: 'Cinzel', serif;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 5px;
+    color: var(--accent-gold);
+    text-transform: uppercase;
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    text-shadow: 0 0 10px rgba(212, 160, 74, 0.3);
+  }
+  .section-title::before, .section-title::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, var(--border-gold-bright), transparent);
+  }
+
+  .menu-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    margin-bottom: 7px;
+    background: var(--bg-card);
+    border: 1px solid var(--border-dim);
+    border-left: 2px solid var(--border-gold);
+    cursor: pointer;
+    transition: all 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+    position: relative;
+    overflow: hidden;
+    backdrop-filter: blur(4px);
+    border-radius: 4px;
+  }
+  .menu-item::before {
+    content: '';
+    position: absolute;
+    top: 0; left: -100%;
+    width: 100%; height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(212, 160, 74, 0.14), transparent);
+    transition: left 0.6s ease;
+    pointer-events: none;
+  }
+  .menu-item:hover:not(.loading) {
+    background: var(--bg-card-hover);
+    border-left-color: var(--accent-gold-bright);
+    border-left-width: 3px;
+    transform: translateX(3px);
+    box-shadow: 0 0 20px rgba(212, 160, 74, 0.15), inset 0 0 20px rgba(212, 160, 74, 0.05);
+  }
+  .menu-item:hover:not(.loading)::before { left: 100%; }
+  .menu-item:active:not(.loading) { transform: translateX(3px) scale(0.99); }
+
+  .menu-item .icon-wrap {
+    width: 38px; height: 38px;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, rgba(0,0,0,0.5), rgba(20,15,25,0.7));
+    border: 1px solid var(--border-dim);
+    color: var(--accent-gold);
+    position: relative;
+    border-radius: 3px;
+    z-index: 2;
+  }
+  .menu-item .icon-wrap svg { width: 22px; height: 22px; }
+
+  .menu-item .item-content { flex: 1; min-width: 0; z-index: 2; }
+  .menu-item .item-title {
+    font-family: 'Marcellus', serif;
+    font-size: 14px;
+    color: var(--text-primary);
+    letter-spacing: 1px;
+    margin-bottom: 1px;
+    line-height: 1.2;
+  }
+  .menu-item .item-desc {
+    font-size: 11px;
+    color: var(--text-muted);
+    font-style: italic;
+    line-height: 1.2;
+  }
+
+  .marker {
+    width: 20px; height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    z-index: 2;
+  }
+  .marker::before { content: ''; display: block; }
+  .marker.cross::before {
+    width: 12px; height: 12px;
+    background:
+      linear-gradient(45deg, transparent 44%, var(--accent-blood) 44%, var(--accent-blood) 56%, transparent 56%),
+      linear-gradient(-45deg, transparent 44%, var(--accent-blood) 44%, var(--accent-blood) 56%, transparent 56%);
+    filter: drop-shadow(0 0 4px rgba(196, 69, 69, 0.6));
+  }
+  .marker.diamond::before {
+    width: 10px; height: 10px;
+    background: var(--accent-emerald);
+    transform: rotate(45deg);
+    box-shadow: 0 0 8px rgba(90, 165, 106, 0.7);
+  }
+  .marker.dot::before {
+    width: 9px; height: 9px;
+    background: var(--accent-arcane);
+    border-radius: 50%;
+    box-shadow: 0 0 8px rgba(106, 138, 170, 0.7);
+  }
+
+  /* === ОВЕРЛЕЙ ЗАГРУЗКИ === */
+  .progress-overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(10, 8, 16, 0.88);
+    backdrop-filter: blur(2px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.3s ease;
+    z-index: 5;
+    border-radius: 4px;
+    overflow: hidden;
+  }
+  .menu-item.loading .progress-overlay {
+    opacity: 1;
+    pointer-events: all;
+  }
+  .progress-fill {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    height: 3px;
+    width: 0%;
+    background: linear-gradient(90deg, #8b6020, #f0c875, #d4a04a);
+    box-shadow: 0 0 12px rgba(240, 200, 117, 0.9);
+  }
+  .menu-item.loading .progress-fill {
+    animation: fillProgress var(--duration, 5s) linear forwards;
+  }
+  @keyframes fillProgress {
+    0% { width: 0%; }
+    100% { width: 100%; }
+  }
+  .progress-text {
+    font-family: 'Marcellus', serif;
+    font-size: 13px;
+    color: var(--accent-gold);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .progress-text::before {
+    content: '';
+    width: 6px;
+    height: 6px;
+    background: var(--accent-gold-bright);
+    border-radius: 50%;
+    box-shadow: 0 0 8px var(--accent-gold);
+    animation: pulse 1.5s ease-in-out infinite;
+  }
+
+  .residents-grid { display: flex; flex-direction: column; gap: 6px; }
+  .resident {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid var(--border-dim);
+    cursor: pointer;
+    transition: all 0.3s ease;
+    border-radius: 4px;
+  }
+  .resident:hover {
+    border-color: var(--accent-gold);
+    background: rgba(212, 160, 74, 0.08);
+    transform: translateX(2px);
+  }
+  .resident .avatar {
+    width: 32px; height: 32px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 30% 30%, var(--border-gold-bright), var(--border-gold) 50%, var(--bg-mid));
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Cinzel', serif;
+    color: var(--bg-deep);
+    font-weight: 900;
+    font-size: 14px;
+    border: 1px solid var(--accent-gold);
+    box-shadow: 0 0 8px rgba(212, 160, 74, 0.3);
+    flex-shrink: 0;
+  }
+  .resident .resident-info { flex: 1; min-width: 0; }
+  .resident .resident-name {
+    font-family: 'Marcellus', serif;
+    font-size: 13px;
+    color: var(--text-primary);
+    letter-spacing: 0.5px;
+    line-height: 1.2;
+  }
+  .resident .resident-role {
+    font-size: 10px;
+    color: var(--text-muted);
+    font-style: italic;
+    letter-spacing: 0.5px;
+  }
+  .resident .relation {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .relation.friendly { background: var(--accent-emerald); box-shadow: 0 0 6px var(--accent-emerald); }
+  .relation.neutral { background: var(--accent-gold); box-shadow: 0 0 6px var(--accent-gold); }
+  .relation.cold { background: var(--accent-arcane); box-shadow: 0 0 6px var(--accent-arcane); }
+
+  .footer {
+    margin-top: auto;
+    padding: 12px 20px 16px;
+    text-align: center;
+    background: linear-gradient(180deg, transparent, rgba(0,0,0,0.5));
+    border-top: 1px solid var(--border-dim);
+  }
+  .footer .quote {
+    font-style: italic;
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-bottom: 6px;
+    line-height: 1.4;
+  }
+  .footer .meta {
+    font-family: 'Cinzel', serif;
+    font-size: 9px;
+    color: var(--text-muted);
+    letter-spacing: 3px;
+    text-transform: uppercase;
+  }
+
+  .toast {
+    position: absolute;
+    bottom: 80px;
+    left: 50%;
+    transform: translateX(-50%) translateY(20px);
+    background: rgba(20, 15, 25, 0.95);
+    border: 1px solid var(--accent-gold);
+    color: var(--accent-gold-bright);
+    padding: 10px 18px;
+    font-family: 'Marcellus', serif;
+    font-size: 12px;
+    letter-spacing: 1px;
+    z-index: 100;
+    opacity: 0;
+    pointer-events: none;
+    transition: all 0.35s ease;
+    box-shadow: 0 0 24px rgba(212, 160, 74, 0.4);
+    max-width: 90%;
+    text-align: center;
+    border-radius: 4px;
+  }
+  .toast.show {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+
+  @media (max-width: 480px) {
+    .game-frame { width: 100vw; max-height: 100vh; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .ember, .moon-glow { animation: none !important; }
+  }
+</style>
+</head>
+<body>
+  <div class="game-frame">
+    <div class="game-container">
+      <div class="noise"></div>
+      <div class="embers" id="embers"></div>
+      <div class="vignette"></div>
+
+      <!-- Угловые орнаменты -->
+      <svg class="corner-orn tl" viewBox="0 0 56 56" fill="none" stroke="currentColor" stroke-width="1">
+        <path d="M 4 30 Q 4 4 30 4"/>
+        <path d="M 4 20 Q 4 4 20 4" opacity="0.5"/>
+        <circle cx="4" cy="4" r="2" fill="currentColor"/>
+        <path d="M 10 10 L 18 10 M 10 10 L 10 18" opacity="0.7"/>
+        <path d="M 14 4 L 14 8 M 4 14 L 8 14" opacity="0.6"/>
+        <circle cx="22" cy="4" r="1" fill="currentColor" opacity="0.7"/>
+        <circle cx="4" cy="22" r="1" fill="currentColor" opacity="0.7"/>
+      </svg>
+      <svg class="corner-orn tr" viewBox="0 0 56 56" fill="none" stroke="currentColor" stroke-width="1">
+        <path d="M 4 30 Q 4 4 30 4"/>
+        <path d="M 4 20 Q 4 4 20 4" opacity="0.5"/>
+        <circle cx="4" cy="4" r="2" fill="currentColor"/>
+        <path d="M 10 10 L 18 10 M 10 10 L 10 18" opacity="0.7"/>
+        <path d="M 14 4 L 14 8 M 4 14 L 8 14" opacity="0.6"/>
+        <circle cx="22" cy="4" r="1" fill="currentColor" opacity="0.7"/>
+        <circle cx="4" cy="22" r="1" fill="currentColor" opacity="0.7"/>
+      </svg>
+      <svg class="corner-orn bl" viewBox="0 0 56 56" fill="none" stroke="currentColor" stroke-width="1">
+        <path d="M 4 30 Q 4 4 30 4"/>
+        <path d="M 4 20 Q 4 4 20 4" opacity="0.5"/>
+        <circle cx="4" cy="4" r="2" fill="currentColor"/>
+        <path d="M 10 10 L 18 10 M 10 10 L 10 18" opacity="0.7"/>
+        <path d="M 14 4 L 14 8 M 4 14 L 8 14" opacity="0.6"/>
+      </svg>
+      <svg class="corner-orn br" viewBox="0 0 56 56" fill="none" stroke="currentColor" stroke-width="1">
+        <path d="M 4 30 Q 4 4 30 4"/>
+        <path d="M 4 20 Q 4 4 20 4" opacity="0.5"/>
+        <circle cx="4" cy="4" r="2" fill="currentColor"/>
+        <path d="M 10 10 L 18 10 M 10 10 L 10 18" opacity="0.7"/>
+        <path d="M 14 4 L 14 8 M 4 14 L 8 14" opacity="0.6"/>
+      </svg>
+
+      <div class="content">
+        <header class="header">
+          <h1>Город Надежды</h1>
+        </header>
+
+        <div class="divider"></div>
+
+        <div class="scene">
+          <div class="moon-glow"></div>
+          <svg viewBox="0 0 400 130" preserveAspectRatio="xMidYMid slice">
+            <defs>
+              <linearGradient id="fogGrad" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="#1a1525" stop-opacity="0"/>
+                <stop offset="100%" stop-color="#1a1525" stop-opacity="0.7"/>
+              </linearGradient>
+              <radialGradient id="moonG" cx="50%" cy="50%" r="50%">
+                <stop offset="0%" stop-color="#f8eccc"/>
+                <stop offset="80%" stop-color="#d4b87a"/>
+                <stop offset="100%" stop-color="#a89050"/>
+              </radialGradient>
+            </defs>
+            <!-- Звёзды -->
+            <g fill="#f0e0b0">
+              <circle cx="40" cy="20" r="0.8" opacity="0.9"/>
+              <circle cx="80" cy="35" r="0.6" opacity="0.7"/>
+              <circle cx="120" cy="15" r="0.7" opacity="0.8"/>
+              <circle cx="180" cy="25" r="0.5" opacity="0.6"/>
+              <circle cx="240" cy="18" r="0.8" opacity="0.9"/>
+              <circle cx="60" cy="50" r="0.5" opacity="0.6"/>
+              <circle cx="200" cy="50" r="0.6" opacity="0.7"/>
+              <circle cx="100" cy="60" r="0.4" opacity="0.5"/>
+              <circle cx="160" cy="40" r="0.5" opacity="0.6"/>
+              <circle cx="220" cy="65" r="0.4" opacity="0.5"/>
+            </g>
+            <!-- Луна -->
+            <circle cx="320" cy="35" r="13" fill="url(#moonG)" opacity="0.95"/>
+            <circle cx="324" cy="32" r="12" fill="#15101e"/>
+            <!-- Дальние горы -->
+            <path d="M 0 80 L 30 60 L 60 75 L 100 55 L 140 70 L 180 50 L 220 65 L 260 55 L 300 70 L 340 60 L 400 75 L 400 130 L 0 130 Z"
+                  fill="#1a1525" opacity="0.7"/>
+            <!-- Здания -->
+            <path d="M 0 100 L 0 130 L 400 130 L 400 100 L 380 100 L 380 85 L 370 85 L 370 95 L 360 95 L 360 80 L 350 80 L 350 90 L 340 90 L 340 100 L 320 100 L 320 70 L 310 70 L 310 65 L 305 65 L 305 70 L 300 70 L 300 100 L 280 100 L 280 75 L 270 75 L 270 60 L 260 60 L 260 75 L 250 75 L 250 100 L 220 100 L 220 80 L 200 80 L 200 100 L 180 100 L 180 65 L 170 65 L 170 60 L 165 60 L 165 65 L 160 65 L 160 100 L 140 100 L 140 85 L 130 85 L 130 75 L 120 75 L 120 85 L 110 85 L 110 100 L 80 100 L 80 70 L 70 70 L 70 65 L 65 65 L 65 70 L 60 70 L 60 100 L 40 100 L 40 85 L 30 85 L 30 75 L 20 75 L 20 85 L 10 85 L 10 100 L 0 100 Z"
+                  fill="#0a0814"/>
+            <!-- Башня с флагом -->
+            <rect x="195" y="48" width="10" height="32" fill="#0a0814"/>
+            <path d="M 200 48 L 200 38 M 200 38 L 212 40 L 200 44 Z" fill="#a84545" opacity="0.85"/>
+            <!-- Окна со светом -->
+            <g fill="#f0c875">
+              <rect x="65" y="80" width="2" height="3" opacity="0.8"/>
+              <rect x="125" y="90" width="2" height="3" opacity="0.7"/>
+              <rect x="175" y="80" width="2" height="3" opacity="0.8"/>
+              <rect x="265" y="85" width="2" height="3" opacity="0.7"/>
+              <rect x="305" y="85" width="2" height="3" opacity="0.8"/>
+              <rect x="365" y="95" width="2" height="3" opacity="0.7"/>
+              <rect x="85" y="100" width="2" height="3" opacity="0.5"/>
+              <rect x="225" y="100" width="2" height="3" opacity="0.5"/>
+              <rect x="345" y="100" width="2" height="3" opacity="0.5"/>
+            </g>
+            <!-- Туман снизу -->
+            <rect x="0" y="100" width="400" height="30" fill="url(#fogGrad)"/>
+          </svg>
+          <div class="scene-caption">— Туман ползёт по крышам, факелы дрожат на ветру —</div>
+        </div>
+
+        <section class="menu-section">
+          <div class="section-title">Переходы</div>
+
+          <div class="menu-item" data-action="castle" data-time="5000">
+            <div class="icon-wrap">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round">
+                <path d="M 3 20 L 3 10 L 6 10 L 6 7 L 9 7 L 9 10 L 12 10 L 12 4 L 15 4 L 15 10 L 18 10 L 18 7 L 21 7 L 21 10 L 21 20 Z"/>
+                <line x1="3" y1="14" x2="21" y2="14"/>
+                <rect x="10" y="16" width="4" height="4" fill="currentColor" opacity="0.5"/>
+              </svg>
+            </div>
+            <div class="item-content">
+              <div class="item-title">Подняться в замок</div>
+              <div class="item-desc">Резиденция лорда · 10 мин пути</div>
+            </div>
+            <div class="marker dot"></div>
+            <div class="progress-overlay">
+              <div class="progress-fill"></div>
+              <span class="progress-text">В пути</span>
+            </div>
+          </div>
+
+          <div class="menu-item" data-action="village" data-time="5000">
+            <div class="icon-wrap">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round">
+                <path d="M 4 20 L 4 12 L 8 8 L 12 12 L 12 20 Z"/>
+                <path d="M 12 20 L 12 14 L 16 10 L 20 14 L 20 20 Z"/>
+                <path d="M 8 8 L 8 4 L 10 4 L 10 6"/>
+                <path d="M 16 10 L 16 6 L 18 6 L 18 8"/>
+                <rect x="6" y="15" width="2" height="3" fill="currentColor" opacity="0.5"/>
+                <rect x="14" y="16" width="2" height="3" fill="currentColor" opacity="0.5"/>
+              </svg>
+            </div>
+            <div class="item-content">
+              <div class="item-title">Поселение Зелёное</div>
+              <div class="item-desc">Соседняя деревня · 1 час пути</div>
+            </div>
+            <div class="marker dot"></div>
+            <div class="progress-overlay">
+              <div class="progress-fill"></div>
+              <span class="progress-text">В пути</span>
+            </div>
+          </div>
+
+          <div class="menu-item" data-action="forest" data-time="5000">
+            <div class="icon-wrap">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round">
+                <path d="M 12 2 L 6 10 L 9 10 L 4 17 L 8 17 L 4 22 L 20 22 L 16 17 L 20 17 L 15 10 L 18 10 Z"/>
+                <line x1="12" y1="17" x2="12" y2="22"/>
+              </svg>
+            </div>
+            <div class="item-content">
+              <div class="item-title">Тёмный лес</div>
+              <div class="item-desc">Опасные тропы · 2 часа пути</div>
+            </div>
+            <div class="marker cross"></div>
+            <div class="progress-overlay">
+              <div class="progress-fill"></div>
+              <span class="progress-text">В пути</span>
+            </div>
+          </div>
+        </section>
+
+        <section class="menu-section">
+          <div class="section-title">Действия</div>
+
+          <div class="menu-item" data-action="hunt" data-time="5000">
+            <div class="icon-wrap">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+                <path d="M 3 3 L 9 9 M 9 3 L 3 9"/>
+                <path d="M 15 3 L 21 9 M 21 3 L 15 9"/>
+                <path d="M 9 13 L 15 21 M 15 13 L 9 21"/>
+                <circle cx="12" cy="17" r="6" stroke-dasharray="2 2"/>
+              </svg>
+            </div>
+            <div class="item-content">
+              <div class="item-title">Охота на разбойника</div>
+              <div class="item-desc">Бой · награда 80 злт · риск</div>
+            </div>
+            <div class="marker cross"></div>
+            <div class="progress-overlay">
+              <div class="progress-fill"></div>
+              <span class="progress-text">Выполняется</span>
+            </div>
+          </div>
+
+          <div class="menu-item" data-action="water" data-time="5000">
+            <div class="icon-wrap">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round">
+                <path d="M 12 3 L 7 13 Q 7 19 12 19 Q 17 19 17 13 Z" fill="rgba(90,165,106,0.15)"/>
+                <path d="M 10 14 Q 12 16 14 14" stroke-width="1"/>
+                <circle cx="12" cy="10" r="1" fill="currentColor"/>
+              </svg>
+            </div>
+            <div class="item-content">
+              <div class="item-title">Испить живой воды</div>
+              <div class="item-desc">Восстановить 30 HP · 1 заряд</div>
+            </div>
+            <div class="marker diamond"></div>
+            <div class="progress-overlay">
+              <div class="progress-fill"></div>
+              <span class="progress-text">Выполняется</span>
+            </div>
+          </div>
+
+          <div class="menu-item" data-action="pray" data-time="5000">
+            <div class="icon-wrap">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round">
+                <path d="M 12 2 L 14 9 L 21 9 L 15.5 13.5 L 17.5 20.5 L 12 16.5 L 6.5 20.5 L 8.5 13.5 L 3 9 L 10 9 Z" fill="rgba(240,200,117,0.1)"/>
+              </svg>
+            </div>
+            <div class="item-content">
+              <div class="item-title">Помолиться у алтаря</div>
+              <div class="item-desc">+5 к удаче до заката · бесплатно</div>
+            </div>
+            <div class="marker diamond"></div>
+            <div class="progress-overlay">
+              <div class="progress-fill"></div>
+              <span class="progress-text">Выполняется</span>
+            </div>
+          </div>
+        </section>
+
+        <section class="menu-section">
+          <div class="section-title">Жители</div>
+
+          <div class="residents-grid">
+            <div class="resident" data-action="borin">
+              <div class="avatar">Б</div>
+              <div class="resident-info">
+                <div class="resident-name">Кузнец Борин</div>
+                <div class="resident-role">Гном · торговец оружием</div>
+              </div>
+              <div class="relation friendly" title="Расположен дружелюбно"></div>
+            </div>
+
+            <div class="resident" data-action="milava">
+              <div class="avatar">М</div>
+              <div class="resident-info">
+                <div class="resident-name">Травница Милава</div>
+                <div class="resident-role">Человек · зелья и снадобья</div>
+              </div>
+              <div class="relation friendly" title="Расположен дружелюбно"></div>
+            </div>
+
+            <div class="resident" data-action="dobrynya">
+              <div class="avatar">Д</div>
+              <div class="resident-info">
+                <div class="resident-name">Староста Добрыня</div>
+                <div class="resident-role">Человек · старейшина города</div>
+              </div>
+              <div class="relation neutral" title="Нейтральное отношение"></div>
+            </div>
+
+            <div class="resident" data-action="finrod">
+              <div class="avatar">Ф</div>
+              <div class="resident-info">
+                <div class="resident-name">Чародей Финрод</div>
+                <div class="resident-role">Эльф · наставник магии</div>
+              </div>
+              <div class="relation cold" title="Холоден, но беседует"></div>
+            </div>
+          </div>
+        </section>
+
+        <div class="footer">
+          <div class="quote">«Где есть надежда, там горит и факел»</div>
+          <div class="meta">Сказания Северного Предела</div>
+        </div>
+      </div>
+
+      <div class="toast" id="toast">Действие выбрано</div>
+    </div>
+  </div>
+
+  <script>
+    // Генерация угольков-искр
+    const embersContainer = document.getElementById('embers');
+    const emberCount = 28;
+    for (let i = 0; i < emberCount; i++) {
+      const ember = document.createElement('div');
+      ember.className = 'ember';
+      const size = 1 + Math.random() * 2.5;
+      ember.style.width = size + 'px';
+      ember.style.height = size + 'px';
+      ember.style.left = Math.random() * 100 + '%';
+      ember.style.bottom = (Math.random() * 20 - 5) + '%';
+      ember.style.animationDuration = (6 + Math.random() * 8) + 's';
+      ember.style.animationDelay = (Math.random() * 12) + 's';
+      ember.style.setProperty('--drift', (Math.random() * 80 - 40) + 'px');
+      embersContainer.appendChild(ember);
+    }
+
+    // Тосты-уведомления при клике
+    const toast = document.getElementById('toast');
+    let toastTimer;
+
+    const actionMessages = {
+      castle: 'Вы поднимаетесь к замку лорда...',
+      village: 'Дорога ведёт в Поселение Зелёное',
+      forest: 'Тёмный лес встречает вас шёпотом',
+      hunt: 'Вы отправляетесь на охоту за разбойником',
+      water: 'Живая вода струится по губам · +30 HP',
+      pray: 'Боги услышали вашу молитву · +5 удачи',
+      borin: 'Борин: «Чего изволишь, путник?»',
+      milava: 'Милава: «Свежие травы собирали при луне...»',
+      dobrynya: 'Добрыня: «Слушаю тебя, герой»',
+      finrod: 'Финрод: «Сила магии познаётся через тишину»'
+    };
+
+    document.querySelectorAll('[data-action]').forEach(el => {
+      el.addEventListener('click', () => {
+        // Защита от повторного нажатия во время загрузки
+        if (el.classList.contains('loading')) return;
+
+        const action = el.dataset.action;
+        const msg = actionMessages[action] || 'Действие выбрано';
+        
+        // Показываем тост
+        toast.textContent = msg;
+        toast.classList.add('show');
+        clearTimeout(toastTimer);
+        toastTimer = setTimeout(() => {
+          toast.classList.remove('show');
+        }, 2600);
+
+        // Если это житель — ничего не загружаем
+        if (el.classList.contains('resident')) return;
+
+        // Запускаем полоску загрузки
+        const time = parseInt(el.dataset.time) || 5000;
+        el.style.setProperty('--duration', (time / 1000) + 's');
+        el.classList.add('loading');
+
+        // Снимаем загрузку по истечении времени
+        setTimeout(() => {
+          el.classList.remove('loading');
+        }, time);
+      });
+    });
+  </script>
+</body>
+</html>

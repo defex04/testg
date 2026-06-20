@@ -533,18 +533,28 @@ export async function useElixir(charId, msg = {}) {
     p?.send({ type: 'error', error: 'not_your_turn' });
     return false;
   }
-  // шаблон эликсира из ячейки пояса (параметры эффекта — с сервера, не с клиента)
+  // ячейка пояса: шаблон + заряды (quantity). Параметры эффекта — из шаблона на
+  // сервере (анти-чит), не из клиента.
   const slot = Number(msg.slot);
   const belt = (await game.query(
-    `SELECT b.template_id, t.base_stats FROM character_belt b
+    `SELECT b.template_id, b.quantity, t.base_stats FROM character_belt b
        JOIN item_templates t ON t.id = b.template_id
       WHERE b.character_id = $1 AND b.slot = $2`, [charId, slot])).rows[0];
   const params = belt && elixirParams(belt.base_stats);
-  if (!params) { p?.send({ type: 'error', error: 'belt_empty' }); return false; }
+  if (!params || Number(belt.quantity) <= 0) {
+    p?.send({ type: 'error', error: 'belt_empty' }); return false;
+  }
+  // нельзя пить эликсир мощи, пока его усиление ещё действует (тот же эффект)
+  if (params.kind === 'power' && me.buffTurns > 0) {
+    p?.send({ type: 'error', error: 'elixir_active' }); return false;
+  }
 
-  // авторитетно списываем 1 заряд из инвентаря; без предмета — отказ
+  // авторитетно списываем 1 заряд из инвентаря И из ячейки пояса (в одной tx).
+  // Возвращаем остаток в ячейке (для клиента). Нет предмета — отказ и очистка
+  // ячейки: пояс не должен «висеть» зарядами, которых уже нет в рюкзаке.
+  let slotQty;
   try {
-    await tx(async (c) => {
+    slotQty = await tx(async (c) => {
       const it = (await c.query(
         `SELECT id, quantity FROM item_instances
           WHERE owner_type = 1 AND owner_id = $1 AND template_id = $2 AND status = 1
@@ -562,8 +572,22 @@ export async function useElixir(charId, msg = {}) {
             quantity, from_owner_type, from_owner_id, reason, ref_type, ref_id)
          VALUES ($1, $2, $3, 1, 1, $4, 7, 1, $5)`,
         [randomUUID(), it.id, belt.template_id, charId, b.id]);
+      // заряд из ячейки пояса; на нуле — освобождаем ячейку (слот пустеет)
+      const left = Number(belt.quantity) - 1;
+      if (left > 0) {
+        await c.query(`UPDATE character_belt SET quantity = $3
+            WHERE character_id = $1 AND slot = $2`, [charId, slot, left]);
+      } else {
+        await c.query(`DELETE FROM character_belt WHERE character_id = $1 AND slot = $2`,
+          [charId, slot]);
+      }
+      return left;
     });
   } catch (e) {
+    if (e.message === 'no_elixir') {              // рюкзак пуст — освобождаем ячейку
+      await game.query(`DELETE FROM character_belt WHERE character_id = $1 AND slot = $2`,
+        [charId, slot]).catch(() => {});
+    }
     p?.send({ type: 'error', error: e.message || 'no_elixir' });
     return false;
   }
@@ -586,12 +610,7 @@ export async function useElixir(charId, msg = {}) {
   }
   await snapshot(b.id, b);
 
-  // остаток заряда в ячейке после списания (для клиента пьющего)
-  const slotQty = Number((await game.query(
-    `SELECT COALESCE(SUM(quantity), 0) AS qty FROM item_instances
-      WHERE owner_id = $1 AND owner_type = 1 AND status = 1 AND template_id = $2`,
-    [charId, belt.template_id])).rows[0].qty);
-
+  // slotQty (остаток заряда в ячейке пояса после списания) уже посчитан выше в tx
   broadcast(b, (q) => {
     const qme = b.engine.fighter(q.charId);
     return { type: 'elixir',

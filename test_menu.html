@@ -1,0 +1,1156 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Хроники Битв — PvP Арена</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700;900&family=Cormorant+Garamond:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg-deep: #0a0503;
+  --bg-base: #1a0d08;
+  --bg-card: #2a1810;
+  --bg-elevated: #3a2418;
+  --gold: #d4af37;
+  --gold-bright: #f4d76e;
+  --gold-dark: #8b6f1a;
+  --gold-glow: rgba(244, 215, 110, 0.4);
+  --bronze: #c87533;
+  --crimson: #9b2020;
+  --crimson-dark: #4a0e0e;
+  --crimson-bright: #c83838;
+  --emerald: #3d8b5e;
+  --silver: #c0c0c8;
+  --copper: #b87333;
+  --diamond: #7adfff;
+  --parchment: #ede0c0;
+  --parchment-muted: #a89878;
+  --border-gold: rgba(212, 175, 55, 0.35);
+  --border-gold-strong: rgba(212, 175, 55, 0.7);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  min-height: 100vh;
+  background: 
+    radial-gradient(ellipse at 30% 20%, rgba(139, 26, 26, 0.18) 0%, transparent 55%),
+    radial-gradient(ellipse at 70% 80%, rgba(212, 175, 55, 0.1) 0%, transparent 55%),
+    radial-gradient(ellipse at center, #1a0d08 0%, #0a0503 70%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Cormorant Garamond', serif;
+  color: var(--parchment);
+  padding: 16px;
+  overflow: hidden;
+}
+
+/* Фоновые амбиент-частицы */
+.ambient {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  overflow: hidden;
+}
+.ambient::before, .ambient::after {
+  content: '';
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(80px);
+  opacity: 0.4;
+}
+.ambient::before {
+  width: 400px; height: 400px;
+  background: radial-gradient(circle, var(--crimson) 0%, transparent 70%);
+  top: -100px; left: -100px;
+  animation: drift 18s ease-in-out infinite;
+}
+.ambient::after {
+  width: 500px; height: 500px;
+  background: radial-gradient(circle, var(--gold-dark) 0%, transparent 70%);
+  bottom: -150px; right: -150px;
+  animation: drift 22s ease-in-out infinite reverse;
+}
+@keyframes drift {
+  0%, 100% { transform: translate(0,0) scale(1); }
+  50% { transform: translate(50px, 30px) scale(1.1); }
+}
+
+.phone-frame {
+  position: relative;
+  aspect-ratio: 9/16;
+  height: min(96vh, 900px);
+  max-width: 100%;
+  background: 
+    radial-gradient(ellipse at top, rgba(139, 26, 26, 0.25) 0%, transparent 60%),
+    linear-gradient(180deg, #1a0d08 0%, #0a0503 100%);
+  border-radius: 28px;
+  overflow: hidden;
+  box-shadow: 
+    0 0 0 1px rgba(212, 175, 55, 0.25),
+    0 0 0 6px rgba(20, 10, 5, 0.7),
+    0 0 0 7px rgba(212, 175, 55, 0.18),
+    0 30px 80px rgba(0,0,0,0.9),
+    inset 0 0 120px rgba(139, 26, 26, 0.12);
+  z-index: 1;
+}
+
+/* Декоративные углы */
+.corner-orn {
+  position: absolute;
+  width: 70px;
+  height: 70px;
+  pointer-events: none;
+  z-index: 5;
+  opacity: 0.7;
+}
+.corner-orn.tl { top: 14px; left: 14px; }
+.corner-orn.tr { top: 14px; right: 14px; transform: scaleX(-1); }
+.corner-orn.bl { bottom: 14px; left: 14px; transform: scaleY(-1); }
+.corner-orn.br { bottom: 14px; right: 14px; transform: scale(-1, -1); }
+
+/* Фоновый силуэт замка */
+.castle-silhouette {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 40%;
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0.25;
+  background: linear-gradient(180deg, transparent 0%, rgba(0,0,0,0.6) 100%);
+}
+.castle-silhouette svg {
+  position: absolute;
+  bottom: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.game-ui {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  padding: 26px 16px 16px;
+  position: relative;
+  z-index: 2;
+}
+
+/* === ВЕРХНИЙ БАР === */
+.top-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+  position: relative;
+  z-index: 3;
+}
+
+.level-medallion {
+  position: relative;
+  width: 62px;
+  height: 62px;
+  flex-shrink: 0;
+}
+
+.level-medallion .medal-svg {
+  width: 100%;
+  height: 100%;
+  filter: drop-shadow(0 0 14px var(--gold-glow));
+  animation: medallionPulse 3.5s ease-in-out infinite;
+}
+
+@keyframes medallionPulse {
+  0%, 100% { filter: drop-shadow(0 0 12px var(--gold-glow)); transform: rotate(0deg); }
+  50% { filter: drop-shadow(0 0 22px var(--gold-glow)) drop-shadow(0 0 8px var(--gold-bright)); }
+}
+
+.level-number {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-family: 'Cinzel', serif;
+  font-weight: 900;
+  font-size: 22px;
+  color: var(--gold-bright);
+  text-shadow: 0 0 8px rgba(0,0,0,0.9), 0 1px 2px rgba(0,0,0,1);
+  letter-spacing: 0.5px;
+}
+
+.level-label {
+  position: absolute;
+  bottom: -2px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-family: 'Cinzel', serif;
+  font-size: 8px;
+  font-weight: 600;
+  color: var(--parchment-muted);
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+}
+
+.hero-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.hero-name {
+  font-family: 'Cinzel', serif;
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--parchment);
+  letter-spacing: 0.5px;
+  margin-bottom: 5px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.valor-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  background: linear-gradient(135deg, var(--crimson) 0%, var(--crimson-dark) 100%);
+  padding: 2px 7px 2px 5px;
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--gold-bright);
+  border: 1px solid var(--border-gold);
+  box-shadow: 0 0 8px rgba(139, 26, 26, 0.5), inset 0 1px 0 rgba(244, 215, 110, 0.2);
+  font-family: 'Cinzel', serif;
+  flex-shrink: 0;
+}
+.valor-badge svg { width: 9px; height: 9px; }
+
+.exp-bar {
+  position: relative;
+  height: 16px;
+  background: linear-gradient(180deg, #1a0a05 0%, #0d0503 100%);
+  border: 1px solid var(--border-gold);
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: inset 0 2px 4px rgba(0,0,0,0.8), 0 0 0 1px rgba(0,0,0,0.5);
+}
+
+.exp-fill {
+  height: 100%;
+  width: 68%;
+  background: linear-gradient(90deg, var(--gold-dark) 0%, var(--gold) 50%, var(--gold-bright) 100%);
+  border-radius: 8px 0 0 8px;
+  position: relative;
+  box-shadow: 0 0 12px var(--gold-glow);
+}
+
+.exp-fill::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.5) 50%, transparent 100%);
+  animation: shimmer 2.8s linear infinite;
+}
+
+@keyframes shimmer {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+.exp-text {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--parchment);
+  text-shadow: 0 1px 2px rgba(0,0,0,1), 0 0 4px rgba(0,0,0,0.9);
+  letter-spacing: 0.5px;
+  font-family: 'Cinzel', serif;
+  z-index: 1;
+  white-space: nowrap;
+}
+
+/* === ВАЛЮТЫ === */
+.currencies {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px;
+  margin-bottom: 14px;
+  padding: 8px 6px;
+  background: 
+    linear-gradient(180deg, rgba(42, 24, 16, 0.85) 0%, rgba(26, 13, 8, 0.85) 100%);
+  border: 1px solid var(--border-gold);
+  border-radius: 12px;
+  position: relative;
+  box-shadow: inset 0 1px 0 rgba(212, 175, 55, 0.12), 0 4px 14px rgba(0,0,0,0.6);
+}
+
+.currencies::before {
+  content: '';
+  position: absolute;
+  inset: 2px;
+  border: 1px solid rgba(212, 175, 55, 0.1);
+  border-radius: 10px;
+  pointer-events: none;
+}
+
+.currency {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 5px;
+  border-radius: 6px;
+  transition: all 0.25s;
+  cursor: pointer;
+  position: relative;
+  justify-content: center;
+}
+
+.currency:hover {
+  background: rgba(212, 175, 55, 0.1);
+  transform: translateY(-1px);
+}
+
+.currency:hover .currency-icon {
+  transform: scale(1.15) rotate(8deg);
+}
+
+.currency-icon {
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  filter: drop-shadow(0 1px 2px rgba(0,0,0,0.8));
+  transition: transform 0.3s;
+}
+
+.currency-amount {
+  font-family: 'Cinzel', serif;
+  font-weight: 600;
+  font-size: 11px;
+  color: var(--parchment);
+  white-space: nowrap;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.8);
+  letter-spacing: 0.3px;
+}
+
+/* === КАТЕГОРИИ МЕНЮ === */
+.menu-categories {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.category-tab {
+  position: relative;
+  padding: 9px 6px 7px;
+  background: linear-gradient(180deg, rgba(58, 36, 24, 0.7) 0%, rgba(26, 13, 8, 0.85) 100%);
+  border: 1px solid var(--border-gold);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  text-align: center;
+  font-family: 'Cinzel', serif;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--parchment-muted);
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  overflow: hidden;
+}
+
+.category-tab::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(212, 175, 55, 0.15) 0%, transparent 50%);
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+
+.category-tab:hover {
+  border-color: var(--border-gold-strong);
+  color: var(--gold-bright);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px rgba(212, 175, 55, 0.18);
+}
+.category-tab:hover::before { opacity: 1; }
+
+.category-tab.active {
+  background: linear-gradient(180deg, rgba(155, 32, 32, 0.5) 0%, rgba(74, 14, 14, 0.7) 100%);
+  border-color: var(--gold-bright);
+  color: var(--gold-bright);
+  box-shadow: 0 0 18px rgba(244, 215, 110, 0.25), inset 0 1px 0 rgba(244, 215, 110, 0.25);
+}
+
+.category-tab.active::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 60%;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--gold-bright), transparent);
+  box-shadow: 0 0 8px var(--gold-bright);
+}
+
+.category-tab svg {
+  width: 20px;
+  height: 20px;
+  margin-bottom: 3px;
+  display: block;
+  margin-left: auto;
+  margin-right: auto;
+  transition: transform 0.3s;
+}
+
+.category-tab:hover svg { transform: scale(1.1); }
+
+/* === ПАНЕЛЬ МЕНЮ === */
+.menu-panel {
+  flex: 1;
+  background: 
+    linear-gradient(180deg, rgba(42, 24, 16, 0.7) 0%, rgba(13, 6, 3, 0.5) 100%);
+  border: 1px solid var(--border-gold);
+  border-radius: 14px;
+  padding: 14px 10px 12px;
+  position: relative;
+  overflow: hidden;
+  min-height: 0;
+}
+
+.menu-panel::before {
+  content: '';
+  position: absolute;
+  inset: 3px;
+  border: 1px solid rgba(212, 175, 55, 0.08);
+  border-radius: 11px;
+  pointer-events: none;
+}
+
+.menu-panel-header {
+  font-family: 'Cinzel', serif;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--gold-bright);
+  text-align: center;
+  margin-bottom: 12px;
+  text-transform: uppercase;
+  letter-spacing: 2.5px;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
+
+.menu-panel-header::before,
+.menu-panel-header::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--gold), transparent);
+  max-width: 50px;
+}
+
+.menu-panel-header .ornament-dot {
+  width: 5px;
+  height: 5px;
+  background: var(--gold-bright);
+  border-radius: 50%;
+  box-shadow: 0 0 6px var(--gold-bright);
+}
+
+.menu-items {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 9px;
+}
+
+.menu-item {
+  background: linear-gradient(180deg, rgba(58, 36, 24, 0.85) 0%, rgba(26, 13, 8, 0.95) 100%);
+  border: 1px solid var(--border-gold);
+  border-radius: 12px;
+  padding: 12px 4px 8px;
+  cursor: pointer;
+  text-align: center;
+  transition: all 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+  overflow: hidden;
+}
+
+.menu-item::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at 50% 0%, rgba(212, 175, 55, 0.2) 0%, transparent 65%);
+  opacity: 0;
+  transition: opacity 0.3s;
+  pointer-events: none;
+}
+
+.menu-item::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--gold), transparent);
+  opacity: 0.4;
+}
+
+.menu-item:hover {
+  border-color: var(--gold-bright);
+  transform: translateY(-3px);
+  box-shadow: 0 8px 22px rgba(0,0,0,0.6), 0 0 22px rgba(212, 175, 55, 0.22);
+}
+
+.menu-item:hover::before { opacity: 1; }
+
+.menu-item:active {
+  transform: translateY(-1px) scale(0.98);
+}
+
+.menu-item-icon {
+  width: 32px;
+  height: 32px;
+  margin: 0 auto 5px;
+  color: var(--gold);
+  transition: all 0.3s;
+  display: block;
+}
+
+.menu-item:hover .menu-item-icon {
+  color: var(--gold-bright);
+  filter: drop-shadow(0 0 10px var(--gold-glow));
+  transform: scale(1.15) translateY(-1px);
+}
+
+.menu-item-label {
+  font-family: 'Cinzel', serif;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--parchment);
+  letter-spacing: 0.5px;
+  display: block;
+}
+
+.menu-item:hover .menu-item-label {
+  color: var(--gold-bright);
+}
+
+/* Бейдж уведомлений */
+.badge {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  background: linear-gradient(135deg, var(--crimson-bright) 0%, var(--crimson-dark) 100%);
+  color: var(--gold-bright);
+  font-size: 9px;
+  font-weight: 700;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  border-radius: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border-gold);
+  box-shadow: 0 0 10px rgba(200, 56, 56, 0.7);
+  font-family: 'Cinzel', serif;
+  z-index: 2;
+  animation: badgePulse 2s ease-in-out infinite;
+}
+
+@keyframes badgePulse {
+  0%, 100% { box-shadow: 0 0 10px rgba(200, 56, 56, 0.7); }
+  50% { box-shadow: 0 0 16px rgba(200, 56, 56, 1), 0 0 4px rgba(244, 215, 110, 0.5); }
+}
+
+/* Анимация появления */
+.menu-items-anim .menu-item {
+  animation: itemAppear 0.5s cubic-bezier(0.4, 0, 0.2, 1) backwards;
+}
+.menu-items-anim .menu-item:nth-child(1) { animation-delay: 0.05s; }
+.menu-items-anim .menu-item:nth-child(2) { animation-delay: 0.13s; }
+.menu-items-anim .menu-item:nth-child(3) { animation-delay: 0.21s; }
+
+@keyframes itemAppear {
+  from { opacity: 0; transform: translateY(20px) scale(0.85); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* Декоративный фон панели */
+.ornament-bg {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0.04;
+  background-image: url("data:image/svg+xml,%3Csvg width='80' height='80' viewBox='0 0 80 80' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M40 5 L48 32 L75 32 L52 48 L60 75 L40 58 L20 75 L28 48 L5 32 L32 32 Z' fill='%23d4af37'/%3E%3C/svg%3E");
+  background-size: 100px;
+}
+
+/* === НИЖНИЙ БЛОК: персонаж === */
+.hero-preview {
+  margin-top: 12px;
+  padding: 12px;
+  background: 
+    linear-gradient(135deg, rgba(42, 24, 16, 0.7) 0%, rgba(13, 6, 3, 0.5) 100%);
+  border: 1px solid var(--border-gold);
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  position: relative;
+  overflow: hidden;
+}
+
+.hero-preview::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at left, rgba(155, 32, 32, 0.15) 0%, transparent 60%);
+  pointer-events: none;
+}
+
+.hero-avatar {
+  width: 56px;
+  height: 56px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: 
+    radial-gradient(circle at 35% 35%, var(--bg-elevated) 0%, var(--bg-deep) 100%);
+  border: 2px solid var(--gold);
+  position: relative;
+  box-shadow: 0 0 14px var(--gold-glow), inset 0 0 12px rgba(0,0,0,0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.hero-avatar svg {
+  width: 70%;
+  height: 70%;
+  color: var(--gold);
+}
+
+.hero-stats {
+  flex: 1;
+  min-width: 0;
+}
+
+.hero-stats-title {
+  font-family: 'Cinzel', serif;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--gold-bright);
+  margin-bottom: 5px;
+  letter-spacing: 0.5px;
+}
+
+.hero-stats-row {
+  display: flex;
+  gap: 10px;
+  font-size: 11px;
+  font-family: 'Cinzel', serif;
+  color: var(--parchment-muted);
+}
+
+.hero-stats-row span {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.hero-stats-row b {
+  color: var(--parchment);
+  font-weight: 600;
+}
+
+.hero-stats-row svg {
+  width: 10px;
+  height: 10px;
+  color: var(--crimson-bright);
+}
+
+/* === TOAST === */
+.toast {
+  position: absolute;
+  bottom: 100px;
+  left: 50%;
+  transform: translateX(-50%) translateY(100px);
+  background: linear-gradient(135deg, var(--bg-elevated) 0%, var(--bg-card) 100%);
+  border: 1px solid var(--gold);
+  border-radius: 10px;
+  padding: 9px 16px;
+  font-family: 'Cinzel', serif;
+  font-size: 11px;
+  color: var(--gold-bright);
+  letter-spacing: 1px;
+  z-index: 100;
+  transition: transform 0.45s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.7), 0 0 22px rgba(212, 175, 55, 0.25);
+  white-space: nowrap;
+  text-transform: uppercase;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.toast.show {
+  transform: translateX(-50%) translateY(0);
+  opacity: 1;
+}
+
+/* Парящие искры внутри фрейма */
+.sparkle {
+  position: absolute;
+  width: 3px;
+  height: 3px;
+  background: var(--gold-bright);
+  border-radius: 50%;
+  box-shadow: 0 0 6px var(--gold-bright), 0 0 12px var(--gold);
+  pointer-events: none;
+  z-index: 1;
+  animation: floatSparkle linear infinite;
+}
+
+@keyframes floatSparkle {
+  0% {
+    transform: translateY(0) translateX(0);
+    opacity: 0;
+  }
+  10% { opacity: 1; }
+  90% { opacity: 1; }
+  100% {
+    transform: translateY(-100vh) translateX(20px);
+    opacity: 0;
+  }
+}
+
+/* === АДАПТИВНОСТЬ === */
+@media (max-width: 480px) {
+  .phone-frame {
+    height: 100vh;
+    border-radius: 0;
+  }
+}
+
+@media (max-height: 700px) {
+  .level-medallion { width: 52px; height: 52px; }
+  .level-number { font-size: 18px; }
+  .currencies { padding: 6px 4px; margin-bottom: 10px; }
+  .currency-amount { font-size: 10px; }
+  .menu-panel { padding: 10px 8px; }
+  .menu-item { padding: 8px 4px 6px; }
+  .menu-item-icon { width: 28px; height: 28px; }
+  .hero-preview { padding: 8px; }
+  .hero-avatar { width: 44px; height: 44px; }
+}
+</style>
+</head>
+<body>
+
+<div class="ambient"></div>
+
+<div class="phone-frame">
+  <!-- Декоративные углы -->
+  <svg class="corner-orn tl" viewBox="0 0 70 70" fill="none">
+    <path d="M5 25 L5 5 L25 5" stroke="#d4af37" stroke-width="1.5" stroke-linecap="round"/>
+    <path d="M10 18 L10 10 L18 10" stroke="#d4af37" stroke-width="1" opacity="0.6"/>
+    <circle cx="5" cy="5" r="2" fill="#d4af37"/>
+    <path d="M14 14 L20 20 M20 14 L14 20" stroke="#d4af37" stroke-width="0.8" opacity="0.5"/>
+  </svg>
+  <svg class="corner-orn tr" viewBox="0 0 70 70" fill="none">
+    <path d="M5 25 L5 5 L25 5" stroke="#d4af37" stroke-width="1.5" stroke-linecap="round"/>
+    <path d="M10 18 L10 10 L18 10" stroke="#d4af37" stroke-width="1" opacity="0.6"/>
+    <circle cx="5" cy="5" r="2" fill="#d4af37"/>
+    <path d="M14 14 L20 20 M20 14 L14 20" stroke="#d4af37" stroke-width="0.8" opacity="0.5"/>
+  </svg>
+  <svg class="corner-orn bl" viewBox="0 0 70 70" fill="none">
+    <path d="M5 25 L5 5 L25 5" stroke="#d4af37" stroke-width="1.5" stroke-linecap="round"/>
+    <path d="M10 18 L10 10 L18 10" stroke="#d4af37" stroke-width="1" opacity="0.6"/>
+    <circle cx="5" cy="5" r="2" fill="#d4af37"/>
+  </svg>
+  <svg class="corner-orn br" viewBox="0 0 70 70" fill="none">
+    <path d="M5 25 L5 5 L25 5" stroke="#d4af37" stroke-width="1.5" stroke-linecap="round"/>
+    <path d="M10 18 L10 10 L18 10" stroke="#d4af37" stroke-width="1" opacity="0.6"/>
+    <circle cx="5" cy="5" r="2" fill="#d4af37"/>
+  </svg>
+
+  <!-- Фоновый силуэт замка -->
+  <div class="castle-silhouette">
+    <svg viewBox="0 0 400 200" preserveAspectRatio="xMidYMax slice">
+      <path d="M0 200 L0 140 L20 140 L20 120 L40 120 L40 140 L60 140 L60 100 L80 100 L80 80 L100 80 L100 100 L120 100 L120 120 L140 120 L140 90 L160 90 L160 70 L180 70 L180 60 L200 60 L200 50 L220 50 L220 60 L240 60 L240 70 L260 70 L260 90 L280 90 L280 120 L300 120 L300 100 L320 100 L320 80 L340 80 L340 100 L360 100 L360 140 L380 140 L380 120 L400 120 L400 200 Z" fill="#0a0503"/>
+      <circle cx="200" cy="40" r="3" fill="#9b2020" opacity="0.6"/>
+      <circle cx="100" cy="100" r="2" fill="#d4af37" opacity="0.4"/>
+      <circle cx="300" cy="100" r="2" fill="#d4af37" opacity="0.4"/>
+    </svg>
+  </div>
+
+  <div class="ornament-bg"></div>
+
+  <div class="game-ui">
+    
+    <!-- ВЕРХНЯЯ ПАНЕЛЬ: уровень + опыт + доблесть -->
+    <div class="top-bar">
+      <div class="level-medallion">
+        <svg class="medal-svg" viewBox="0 0 100 100">
+          <defs>
+            <radialGradient id="medalGrad" cx="50%" cy="40%">
+              <stop offset="0%" stop-color="#3a2418"/>
+              <stop offset="100%" stop-color="#1a0d08"/>
+            </radialGradient>
+            <linearGradient id="ringGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stop-color="#f4d76e"/>
+              <stop offset="50%" stop-color="#d4af37"/>
+              <stop offset="100%" stop-color="#8b6f1a"/>
+            </linearGradient>
+          </defs>
+          <!-- Внешнее кольцо с зубцами -->
+          <g>
+            <circle cx="50" cy="50" r="46" fill="none" stroke="url(#ringGrad)" stroke-width="2"/>
+            <g fill="#d4af37">
+              <rect x="48" y="2" width="4" height="6"/>
+              <rect x="48" y="92" width="4" height="6"/>
+              <rect x="2" y="48" width="6" height="4"/>
+              <rect x="92" y="48" width="6" height="4"/>
+              <rect x="14" y="14" width="4" height="5" transform="rotate(-45 16 16)"/>
+              <rect x="82" y="14" width="4" height="5" transform="rotate(45 84 16)"/>
+              <rect x="14" y="81" width="4" height="5" transform="rotate(45 16 84)"/>
+              <rect x="82" y="81" width="4" height="5" transform="rotate(-45 84 84)"/>
+            </g>
+          </g>
+          <!-- Внутренний круг -->
+          <circle cx="50" cy="50" r="38" fill="url(#medalGrad)" stroke="#9b2020" stroke-width="1.5"/>
+          <circle cx="50" cy="50" r="34" fill="none" stroke="#d4af37" stroke-width="0.5" opacity="0.6"/>
+          <!-- Декоративные звезды -->
+          <g fill="#d4af37" opacity="0.5">
+            <path d="M50 18 L51.5 22 L55.5 22 L52.5 24.5 L53.5 28.5 L50 26 L46.5 28.5 L47.5 24.5 L44.5 22 L48.5 22 Z"/>
+            <path d="M50 82 L51.5 78 L55.5 78 L52.5 75.5 L53.5 71.5 L50 74 L46.5 71.5 L47.5 75.5 L44.5 78 L48.5 78 Z"/>
+            <path d="M18 50 L22 48.5 L22 52.5 L18 50 Z M82 50 L78 48.5 L78 52.5 Z"/>
+          </g>
+        </svg>
+        <div class="level-number">42</div>
+        <div class="level-label">LVL</div>
+      </div>
+      
+      <div class="hero-info">
+        <div class="hero-name">
+          <span>Лорд Каэлион</span>
+          <span class="valor-badge" title="Доблесть">
+            <svg viewBox="0 0 24 24" fill="currentColor">
+              <path d="M12 2L4 5v6c0 5.5 3.8 10.7 8 12 4.2-1.3 8-6.5 8-12V5l-8-3zm0 6l1.5 3.5L17 11l-3 2.5 1 3.5-3-2-3 2 1-3.5-3-2.5 3.5-1.5L12 8z"/>
+            </svg>
+            1 248
+          </span>
+        </div>
+        <div class="exp-bar">
+          <div class="exp-fill"></div>
+          <div class="exp-text">6 840 / 10 000 XP</div>
+        </div>
+      </div>
+    </div>
+    
+    <!-- ВАЛЮТЫ -->
+    <div class="currencies">
+      <div class="currency" data-tip="Золото">
+        <svg class="currency-icon" viewBox="0 0 32 32">
+          <defs>
+            <radialGradient id="goldGrad" cx="35%" cy="35%">
+              <stop offset="0%" stop-color="#fff5b0"/>
+              <stop offset="45%" stop-color="#f4d76e"/>
+              <stop offset="100%" stop-color="#8b6f1a"/>
+            </radialGradient>
+          </defs>
+          <circle cx="16" cy="16" r="14" fill="url(#goldGrad)" stroke="#5a4410" stroke-width="1"/>
+          <circle cx="16" cy="16" r="10" fill="none" stroke="#8b6f1a" stroke-width="0.7" opacity="0.7"/>
+          <circle cx="16" cy="16" r="7" fill="none" stroke="#8b6f1a" stroke-width="0.5" opacity="0.5"/>
+          <text x="16" y="20.5" text-anchor="middle" font-family="Cinzel" font-size="11" font-weight="900" fill="#5a4410">G</text>
+        </svg>
+        <span class="currency-amount">8 540</span>
+      </div>
+      
+      <div class="currency" data-tip="Серебро">
+        <svg class="currency-icon" viewBox="0 0 32 32">
+          <defs>
+            <radialGradient id="silverGrad" cx="35%" cy="35%">
+              <stop offset="0%" stop-color="#ffffff"/>
+              <stop offset="45%" stop-color="#c0c0c8"/>
+              <stop offset="100%" stop-color="#6a6a72"/>
+            </radialGradient>
+          </defs>
+          <circle cx="16" cy="16" r="14" fill="url(#silverGrad)" stroke="#3a3a42" stroke-width="1"/>
+          <circle cx="16" cy="16" r="10" fill="none" stroke="#6a6a72" stroke-width="0.7" opacity="0.7"/>
+          <circle cx="16" cy="16" r="7" fill="none" stroke="#6a6a72" stroke-width="0.5" opacity="0.5"/>
+          <text x="16" y="20.5" text-anchor="middle" font-family="Cinzel" font-size="11" font-weight="900" fill="#3a3a42">S</text>
+        </svg>
+        <span class="currency-amount">2 394</span>
+      </div>
+      
+      <div class="currency" data-tip="Медь">
+        <svg class="currency-icon" viewBox="0 0 32 32">
+          <defs>
+            <radialGradient id="copperGrad" cx="35%" cy="35%">
+              <stop offset="0%" stop-color="#ffd9a0"/>
+              <stop offset="45%" stop-color="#c87533"/>
+              <stop offset="100%" stop-color="#5a3010"/>
+            </radialGradient>
+          </defs>
+          <circle cx="16" cy="16" r="14" fill="url(#copperGrad)" stroke="#3a1a08" stroke-width="1"/>
+          <circle cx="16" cy="16" r="10" fill="none" stroke="#5a3010" stroke-width="0.7" opacity="0.7"/>
+          <circle cx="16" cy="16" r="7" fill="none" stroke="#5a3010" stroke-width="0.5" opacity="0.5"/>
+          <text x="16" y="20.5" text-anchor="middle" font-family="Cinzel" font-size="11" font-weight="900" fill="#3a1a08">C</text>
+        </svg>
+        <span class="currency-amount">15 720</span>
+      </div>
+      
+      <div class="currency" data-tip="Бриллианты">
+        <svg class="currency-icon" viewBox="0 0 32 32">
+          <defs>
+            <linearGradient id="diamondGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stop-color="#cdf5ff"/>
+              <stop offset="50%" stop-color="#7adfff"/>
+              <stop offset="100%" stop-color="#2a8db8"/>
+            </linearGradient>
+          </defs>
+          <path d="M16 3 L26 12 L16 29 L6 12 Z" fill="url(#diamondGrad)" stroke="#1a5070" stroke-width="0.8"/>
+          <path d="M16 3 L26 12 L16 14 L6 12 Z" fill="url(#diamondGrad)" stroke="#1a5070" stroke-width="0.6"/>
+          <path d="M6 12 L16 14 L16 29 Z" fill="rgba(255,255,255,0.15)"/>
+          <path d="M11 7 L16 3 L21 7 L16 12 Z" fill="rgba(255,255,255,0.4)"/>
+        </svg>
+        <span class="currency-amount">347</span>
+      </div>
+    </div>
+    
+    <!-- КАТЕГОРИИ МЕНЮ -->
+    <div class="menu-categories">
+      <div class="category-tab active" data-category="hero">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round">
+          <path d="M4 14 L4 9 Q4 5 12 4 Q20 5 20 9 L20 14 L17 14 L17 11 L7 11 L7 14 Z"/>
+          <path d="M9 14 L9 17 L7 17 L7 14 M15 14 L15 17 L17 17 L17 14"/>
+          <path d="M10 7 L14 7" stroke-linecap="round"/>
+        </svg>
+        Герой
+      </div>
+      <div class="category-tab" data-category="battle">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round">
+          <path d="M5 3 L9 7 L7 9 L3 5 L3 3 Z"/>
+          <path d="M9 7 L14 12 L12 14 L7 9 Z"/>
+          <path d="M14 12 L19 17 L21 21 L17 19 L12 14"/>
+          <path d="M19 3 L15 7 L17 9 L21 5 L21 3 Z"/>
+          <path d="M15 7 L10 12 L12 14 L17 9 Z"/>
+        </svg>
+        Бой
+      </div>
+      <div class="category-tab" data-category="city">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round">
+          <path d="M3 21 L3 11 L7 11 L7 8 L12 5 L17 8 L17 11 L21 11 L21 21 Z"/>
+          <path d="M10 21 L10 16 L14 16 L14 21"/>
+          <path d="M3 11 L3 9 L21 9 L21 11" opacity="0.5"/>
+        </svg>
+        Город
+      </div>
+    </div>
+    
+    <!-- ПАНЕЛЬ МЕНЮ -->
+    <div class="menu-panel">
+      <div class="menu-panel-header">
+        <span class="ornament-dot"></span>
+        <span id="categoryTitle">Герой</span>
+        <span class="ornament-dot"></span>
+      </div>
+      <div class="menu-items menu-items-anim" id="menuItems">
+        <!-- Заполняется JS -->
+      </div>
+    </div>
+    
+    <!-- ПРЕВЬЮ ПЕРСОНАЖА -->
+    <div class="hero-preview">
+      <div class="hero-avatar">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round">
+          <path d="M12 3 L7 7 L7 12 Q7 17 12 21 Q17 17 17 12 L17 7 Z"/>
+          <path d="M9 10 L11 12 L15 8" stroke-linecap="round"/>
+          <path d="M12 3 L12 5" opacity="0.5"/>
+        </svg>
+      </div>
+      <div class="hero-stats">
+        <div class="hero-stats-title">Чемпион Арены</div>
+        <div class="hero-stats-row">
+          <span>
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2L4 5v6c0 5.5 3.8 10.7 8 12 4.2-1.3 8-6.5 8-12V5l-8-3z"/></svg>
+            Ранг: <b>Маршал</b>
+          </span>
+          <span>·</span>
+          <span>Побед: <b>847</b></span>
+        </div>
+        <div class="hero-stats-row" style="margin-top:3px;">
+          <span style="color:var(--gold-bright);">Сезон #7</span>
+          <span>·</span>
+          <span>Топ <b style="color:var(--gold-bright);">12</b></span>
+        </div>
+      </div>
+    </div>
+    
+  </div>
+  
+  <div class="toast" id="toast">Открываю рюкзак</div>
+</div>
+
+<script>
+// Данные меню по категориям
+const menuData = {
+  hero: {
+    title: 'Герой',
+    items: [
+      { id: 'backpack', label: 'Рюкзак', badge: null,
+        icon: '<path d="M5 8 Q5 5 8 5 L16 5 Q19 5 19 8 L19 10 L20 10 Q21 10 21 11 L21 19 Q21 21 19 21 L5 21 Q3 21 3 19 L3 11 Q3 10 4 10 L5 10 Z M8 5 Q8 3 12 3 Q16 3 16 5 M9 14 L15 14" stroke-linejoin="round" stroke-linecap="round"/>' },
+      { id: 'info', label: 'Информация', badge: null,
+        icon: '<path d="M4 5 Q4 3 6 3 L18 3 Q20 3 20 5 L20 19 Q20 21 18 21 L6 21 Q4 21 4 19 Z M4 5 L4 19 Q4 21 6 21 M20 5 L20 19 Q20 21 18 21 M8 8 L16 8 M8 12 L16 12 M8 16 L13 16" stroke-linejoin="round" stroke-linecap="round"/>' },
+      { id: 'quests', label: 'Квесты', badge: '3',
+        icon: '<path d="M6 3 L18 3 L18 17 Q18 19 16 19 L8 19 Q6 19 6 17 Z M6 17 Q6 19 8 19 L18 19 M10 8 L14 8 M10 12 L13 12 M9 3 L9 1 L15 1 L15 3" stroke-linejoin="round" stroke-linecap="round"/><circle cx="16" cy="6" r="3" fill="currentColor" stroke="none"/>' },
+    ]
+  },
+  battle: {
+    title: 'Бой',
+    items: [
+      { id: 'fights', label: 'Бои', badge: null,
+        icon: '<path d="M5 3 L9 7 L7 9 L3 5 L3 3 Z M9 7 L14 12 L12 14 L7 9 Z M14 12 L19 17 L21 21 L17 19 L12 14 M19 3 L15 7 L17 9 L21 5 L21 3 Z M15 7 L10 12 L12 14 L17 9 Z" stroke-linejoin="round" stroke-linecap="round"/>' },
+      { id: 'battles', label: 'Сражения', badge: null,
+        icon: '<path d="M12 2 L20 5 L20 12 Q20 18 12 22 Q4 18 4 12 L4 5 Z M9 11 L11 13 L15 9" stroke-linejoin="round" stroke-linecap="round"/>' },
+      { id: 'hunt', label: 'Охота', badge: '!',
+        icon: '<path d="M4 4 Q14 12 4 20 M4 12 L18 12 M15 9 L18 12 L15 15 M10 6 L12 4 L13 6 M10 18 L12 20 L13 18" stroke-linejoin="round" stroke-linecap="round"/>' },
+    ]
+  },
+  city: {
+    title: 'Город',
+    items: [
+      { id: 'bank', label: 'Банк', badge: null,
+        icon: '<path d="M4 9 L4 8 Q4 6 6 6 L18 6 Q20 6 20 8 L20 9 M3 9 L21 9 L21 13 Q21 14 20 14 L4 14 Q3 14 3 13 Z M5 14 L5 20 L19 20 L19 14 M11 9 L11 14 M11 17 L13 17" stroke-linejoin="round" stroke-linecap="round"/>' },
+      { id: 'auction', label: 'Аукцион', badge: null,
+        icon: '<path d="M4 7 L20 7 L20 9 Q20 10 19 10 L5 10 Q4 10 4 9 Z M6 10 L6 20 L18 20 L18 10 M10 14 L14 14 M9 7 Q9 4 12 4 Q15 4 15 7 M12 14 L12 17" stroke-linejoin="round" stroke-linecap="round"/>' },
+      { id: 'mail', label: 'Почта', badge: '5',
+        icon: '<path d="M4 6 L4 18 Q4 19 5 19 L19 19 Q20 19 20 18 L20 6 Q20 5 19 5 L5 5 Q4 5 4 6 Z M4 7 L12 13 L20 7" stroke-linejoin="round" stroke-linecap="round"/>' },
+    ]
+  }
+};
+
+const menuItemsEl = document.getElementById('menuItems');
+const categoryTitleEl = document.getElementById('categoryTitle');
+const tabs = document.querySelectorAll('.category-tab');
+const toast = document.getElementById('toast');
+
+function renderCategory(cat) {
+  const data = menuData[cat];
+  categoryTitleEl.textContent = data.title;
+  
+  // Снимаем анимацию перед рендером
+  menuItemsEl.classList.remove('menu-items-anim');
+  void menuItemsEl.offsetWidth; // форсим reflow
+  
+  menuItemsEl.innerHTML = data.items.map(item => `
+    <div class="menu-item" data-id="${item.id}" data-label="${item.label}">
+      ${item.badge ? `<span class="badge">${item.badge}</span>` : ''}
+      <svg class="menu-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+        ${item.icon}
+      </svg>
+      <span class="menu-item-label">${item.label}</span>
+    </div>
+  `).join('');
+  
+  menuItemsEl.classList.add('menu-items-anim');
+  
+  // Привязываем клики
+  menuItemsEl.querySelectorAll('.menu-item').forEach(el => {
+    el.addEventListener('click', () => {
+      const label = el.dataset.label;
+      showToast(`Открываю: ${label}`);
+      
+      // Лёгкая визуальная вспышка
+      el.style.transform = 'translateY(-3px) scale(0.96)';
+      setTimeout(() => { el.style.transform = ''; }, 150);
+    });
+  });
+}
+
+// Переключение категорий
+tabs.forEach(tab => {
+  tab.addEventListener('click', () => {
+    tabs.forEach(t => t.classList.remove('active'));
+    tab.classList.add('active');
+    renderCategory(tab.dataset.category);
+  });
+});
+
+// Toast
+let toastTimer = null;
+function showToast(msg) {
+  toast.textContent = msg;
+  toast.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => {
+    toast.classList.remove('show');
+  }, 1800);
+}
+
+// Стартовая категория
+renderCategory('hero');
+
+// Ховер-тултипы для валют
+document.querySelectorAll('.currency').forEach(c => {
+  c.addEventListener('click', () => {
+    showToast(c.dataset.tip);
+  });
+});
+
+// Парящие искры
+function createSparkle() {
+  const frame = document.querySelector('.phone-frame');
+  const sparkle = document.createElement('div');
+  sparkle.className = 'sparkle';
+  sparkle.style.left = Math.random() * 100 + '%';
+  sparkle.style.bottom = '0';
+  sparkle.style.animationDuration = (8 + Math.random() * 6) + 's';
+  sparkle.style.opacity = 0.4 + Math.random() * 0.6;
+  const size = 1 + Math.random() * 2.5;
+  sparkle.style.width = size + 'px';
+  sparkle.style.height = size + 'px';
+  frame.appendChild(sparkle);
+  
+  setTimeout(() => sparkle.remove(), 14000);
+}
+setInterval(createSparkle, 800);
+for (let i = 0; i < 6; i++) {
+  setTimeout(createSparkle, i * 300);
+}
+
+// Анимированные числа валют (декоративный "живой" эффект)
+const amounts = document.querySelectorAll('.currency-amount');
+setInterval(() => {
+  amounts.forEach(a => {
+    if (Math.random() < 0.15) {
+      a.style.color = 'var(--gold-bright)';
+      a.style.textShadow = '0 0 8px var(--gold-glow)';
+      setTimeout(() => {
+        a.style.color = '';
+        a.style.textShadow = '';
+      }, 600);
+    }
+  });
+}, 2000);
+</script>
+
+</body>
+</html>
