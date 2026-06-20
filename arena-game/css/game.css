@@ -3256,6 +3256,25 @@ button.belt-slot { padding: 0; font: inherit; color: inherit; -webkit-tap-highli
 }
 .switch input:checked + .switch-track .switch-knob { transform: translateX(22px); }
 
+.settings-action {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  text-align: left;
+  appearance: none;
+  cursor: pointer;
+  padding: 12px 16px;
+  border-radius: 11px;
+  border: 1px solid var(--line-soft);
+  background: linear-gradient(180deg, var(--panel-2), var(--panel-lo));
+  transition: border-color .15s, transform .1s;
+}
+.settings-action:hover { border-color: var(--gold-bright); }
+.settings-action:active { transform: translateY(1px); }
+.settings-action[disabled] { opacity: .6; cursor: default; }
+.settings-action-name { font: 600 15px var(--font-display); color: var(--gold-bright); }
+.settings-action-desc { font-size: 12px; color: var(--muted); }
+
 .settings-exit {
   appearance: none;
   cursor: pointer;

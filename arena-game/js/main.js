@@ -171,6 +171,27 @@ function confirmExit() {
   el.addEventListener('click', (e) => { if (e.target === el) close(); });
   fsInput?.addEventListener('change', () => setFullscreenPref(fsInput.checked));
   $('settings-exit')?.addEventListener('click', confirmExit);
+
+  // Принудительный сброс кэша: Telegram WebView держит старые index.html/js/css
+  // и ES-модули. Перекачиваем все app-файлы мимо кэша (cache:'reload') и
+  // перезагружаемся — после обновления игрок видит свежую версию без чистки
+  // кэша в настройках Telegram. vendor/ (three.js) и картинки не трогаем.
+  const refreshBtn = $('settings-refresh');
+  refreshBtn?.addEventListener('click', async () => {
+    if (refreshBtn.disabled) return;
+    refreshBtn.disabled = true;
+    const nameEl = refreshBtn.querySelector('.settings-action-name');
+    if (nameEl) nameEl.textContent = 'Обновление…';
+    try {
+      const urls = performance.getEntriesByType('resource').map((e) => e.name)
+        .filter((u) => u.startsWith(location.origin)
+          && /\.(m?js|css)(\?|$)/.test(u)
+          && !/\/vendor\//.test(u));
+      urls.push(location.href);
+      await Promise.allSettled(urls.map((u) => fetch(u, { cache: 'reload' })));
+    } catch {}
+    location.reload();
+  });
 })();
 
 // ---------------------------------------------------------------------------
