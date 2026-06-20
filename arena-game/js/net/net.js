@@ -37,6 +37,24 @@ export const api = {
   /** Вход: Telegram initData в Mini App, иначе dev-вход по имени. */
   async login(devName = 'ИгрокА') {
     const tg = window.Telegram && window.Telegram.WebApp;
+    // После F5/обновления страницы (в т.ч. кнопкой «Обновить игру») Telegram
+    // отдаёт ТОТ ЖЕ initData, а сервер отклоняет повторный как replay
+    // (auth.js: nonceOnce — одноразовый). Из-за этого игра уходила в оффлайн.
+    // Поэтому если остался валидный токен прошлого входа (sessionStorage) —
+    // входим по нему через /api/me, без повторной авторизации.
+    if (token) {
+      try {
+        const character = await rest('/api/me');
+        api.isAdmin = false;        // на обновлении страницы админ-выбор не переспрашиваем
+        await connectSocket();
+        await checkResumeBattle();
+        return character;
+      } catch (e) {
+        console.warn('Сохранённый токен не подошёл — обычный вход:', e);
+        token = null;
+        sessionStorage.removeItem('token');
+      }
+    }
     const res = (tg && tg.initData)
       ? await rest('/api/auth/telegram', { initData: tg.initData })
       : await rest('/api/auth/dev', { name: devName });
@@ -44,16 +62,7 @@ export const api = {
     sessionStorage.setItem('token', token);
     api.isAdmin = !!res.isAdmin;          // вход из Telegram админом → предложить выбор
     await connectSocket();
-    // страховка к push battleResume: сами спрашиваем сервер про идущий бой
-    try {
-      const cur = await rest('/api/battle/current');
-      if (cur && cur.battleId) {
-        console.log('Идущий бой с сервера (REST):', cur.battleId);
-        socketHandlers.get('battleResume')(cur);
-      }
-    } catch (e) {
-      console.warn('Проверка идущего боя:', e);
-    }
+    await checkResumeBattle();
     return res.character;
   },
   me:        () => rest('/api/me'),
@@ -76,6 +85,19 @@ export const api = {
   /** Регистрировать ДО login: cb получит ServerBattle, если бой ещё идёт. */
   onBattleResume: (fn) => { resumeCb = fn; },
 };
+
+/** Страховка к push battleResume: сами спрашиваем сервер про идущий бой. */
+async function checkResumeBattle() {
+  try {
+    const cur = await rest('/api/battle/current');
+    if (cur && cur.battleId) {
+      console.log('Идущий бой с сервера (REST):', cur.battleId);
+      socketHandlers.get('battleResume')(cur);
+    }
+  } catch (e) {
+    console.warn('Проверка идущего боя:', e);
+  }
+}
 
 function connectSocket() {
   wireBattleHandlers();
