@@ -113,6 +113,7 @@ function applyFullscreen(on) {
 function setFullscreenPref(on) {
   try { localStorage.setItem(FS_KEY, on ? '1' : '0'); } catch {}
   applyFullscreen(on);
+  window.dispatchEvent(new Event('arena:viewportModeChanged'));
 }
 
 // Безопасные зоны: device (safeAreaInset: вырез/статус-бар) + контентная
@@ -1162,10 +1163,27 @@ $('chat-form').addEventListener('submit', (e) => {
     root.style.setProperty('--menu-h', menuH + 'px');
   };
   const schedule = () => { if (!raf) raf = requestAnimationFrame(apply); };
+  const resetStableHeight = () => {
+    const resetAndSchedule = () => {
+      baseFull = 0;
+      schedule();
+    };
+    resetAndSchedule();
+    setTimeout(resetAndSchedule, 60);
+    setTimeout(resetAndSchedule, 260);
+    setTimeout(resetAndSchedule, 600);
+  };
 
   if (tgApp && tgApp.onEvent) tgApp.onEvent('viewportChanged', schedule);
+  if (tgApp && tgApp.onEvent) {
+    ['fullscreenChanged', 'safeAreaChanged', 'contentSafeAreaChanged'].forEach((ev) => {
+      try { tgApp.onEvent(ev, resetStableHeight); } catch {}
+    });
+  }
   if (vv) { vv.addEventListener('resize', schedule); vv.addEventListener('scroll', schedule); }
   window.addEventListener('resize', schedule);
+  window.addEventListener('orientationchange', resetStableHeight);
+  window.addEventListener('arena:viewportModeChanged', resetStableHeight);
   apply();
 
   // фокус/расфокус поля чата: пересчитать после анимации клавиатуры и подвести
