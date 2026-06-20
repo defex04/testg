@@ -581,6 +581,7 @@ body.loc-castle.in-battle .battle-head {
 /* СЦЕНА — фиксированный прямоугольник: бойцы стоят на круге фона. Под ней —
    строка слотов, ниже — зона, куда всплывают окна. */
 body.loc-castle.in-battle .arena-stage {
+  z-index: 1;
   flex: 2.4 1 0%;
   min-height: 0;
   background: transparent;   /* видно общий фон арены (.castle-bg) */
@@ -591,14 +592,57 @@ body.loc-castle.in-battle .arena-stage::after {
 }
 
 /* нижний прямоугольник (камень фона) — зона всплывающих окон, ниже слотов. */
-body.loc-castle.in-battle .battle-foreground { flex: 1.55 1 0%; min-height: 0; }
-
-body.tg-fullscreen.loc-castle.in-battle .arena-stage {
-  flex: 2.12 1 0%;
+body.loc-castle.in-battle .battle-foreground {
+  position: relative;
+  z-index: 0;
+  flex: 1.55 1 0%;
+  min-height: 0;
 }
 
-body.tg-fullscreen.loc-castle.in-battle .battle-foreground {
-  flex: 1.9 1 0%;
+body.loc-castle.in-battle.battle-dock-open .arena-stage {
+  flex: 2.7 1 0%;
+}
+
+body.loc-castle.in-battle.battle-dock-open .battle-foreground {
+  flex: 1.3 1 0%;
+}
+
+body.loc-castle.in-battle.battle-dock-closed .arena-stage {
+  flex: 3.25 1 0%;
+}
+
+body.loc-castle.in-battle.battle-dock-closed .battle-foreground {
+  flex: .75 1 0%;
+}
+
+body.loc-castle.in-battle.battle-dock-closed .battle-foreground::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -54px;
+  bottom: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(78% 62% at 50% 0%, rgba(216, 169, 63, .16), rgba(216, 169, 63, .05) 34%, transparent 62%),
+    linear-gradient(180deg, rgba(5, 7, 3, .08), rgba(5, 7, 3, .32) 76%, rgba(5, 7, 3, .54));
+  border-top: 1px solid rgba(212, 175, 90, .16);
+}
+
+body.tg-fullscreen.loc-castle.in-battle.battle-dock-open .arena-stage {
+  flex: 2.85 1 0%;
+}
+
+body.tg-fullscreen.loc-castle.in-battle.battle-dock-open .battle-foreground {
+  flex: 1.15 1 0%;
+}
+
+body.tg-fullscreen.loc-castle.in-battle.battle-dock-closed .arena-stage {
+  flex: 3.55 1 0%;
+}
+
+body.tg-fullscreen.loc-castle.in-battle.battle-dock-closed .battle-foreground {
+  flex: .65 1 0%;
 }
 
 /* нижняя боевая панель — по центру у низа сцены, под боевым кругом.
@@ -631,6 +675,12 @@ body.loc-castle.in-battle .bottom-dock {
 }
 
 body.tg-fullscreen.loc-castle.in-battle .bottom-dock.dock-open {
+  --dock-h: clamp(135px, calc(var(--app-h, 100dvh) * .18), 178px);
+}
+
+body.tg-fullscreen.loc-castle.in-battle .bottom-dock.dock-open[data-pane="chat"],
+body.tg-fullscreen.loc-castle.in-battle .bottom-dock.dock-open[data-pane="battlelog"],
+body.tg-fullscreen.loc-castle.in-battle .bottom-dock.dock-open[data-pane="players"] {
   --dock-h: clamp(165px, calc(var(--app-h, 100dvh) * .22), 220px);
 }
 
@@ -1771,7 +1821,7 @@ body.in-battle .castle-main-menu { transition: opacity .34s ease; }
 .strike-wheel.hint-block .sw-sprite.shield.z-low  { animation-delay: .6s; }
 @keyframes shieldHint {
   0%, 42%, 100% { transform: var(--base); filter: drop-shadow(0 3px 5px rgba(0, 0, 0, .6)); }
-  16%           { transform: var(--base) scale(1.1);
+  16%           { transform: var(--base);
                   filter: drop-shadow(0 0 9px rgba(110, 170, 255, .95)) drop-shadow(0 3px 5px rgba(0, 0, 0, .6)); }
 }
 
@@ -1804,12 +1854,24 @@ body.in-battle .castle-main-menu { transition: opacity .34s ease; }
   transition: transform .2s cubic-bezier(.3, 1.4, .5, 1), filter .18s;
   filter: drop-shadow(0 3px 5px rgba(0, 0, 0, .6));
 }
-.sw-sprite img { display: block; width: 100%; height: auto; transform: translateZ(0); }
-.sw-sprite.sword { width: calc(var(--d) * .12); }
-.sw-sprite.shield { width: calc(var(--d) * .145); }
+.sw-sprite img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  transform: translateZ(0);
+}
+.sw-sprite.sword {
+  width: calc(var(--d) * .12);
+  aspect-ratio: 137 / 379;
+}
+.sw-sprite.shield {
+  width: calc(var(--d) * .145);
+  aspect-ratio: 223 / 319;
+}
 .sw-sprite.hot { filter: drop-shadow(0 0 7px var(--glow)) drop-shadow(0 3px 5px rgba(0, 0, 0, .6)); }
 .sw-sprite.sword.hot { --glow: rgba(255, 120, 80, .9); transform: var(--base) scale(1.07); }
-.sw-sprite.shield.on { --glow: rgba(110, 170, 255, 1); transform: var(--base) scale(1.06); }
+.sw-sprite.shield.on { --glow: rgba(110, 170, 255, 1); transform: var(--base); }
 .sw-sprite.shield.hot { --glow: rgba(110, 170, 255, .7); }
 
 /* выпад: замах назад, затем рывок остриём по направлению удара и возврат.

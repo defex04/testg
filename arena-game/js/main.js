@@ -369,6 +369,7 @@ function openCastleDock(pane) {
   dockExpanded = false;
   activateTab(pane);
   updateCastleMainMenu();
+  updateBattleDockState();
   // запоминаем выбранное окно боя — чтобы восстановить его после F5/реконнекта
   if (mode === 'battle') saveBattlePane(pane);
 }
@@ -390,11 +391,21 @@ function closeCastleDock() {
   dockEl.style.height = '';
   dockExpanded = false;
   updateCastleMainMenu();
+  updateBattleDockState();
 }
 
 // какое окно открыть при входе в бой: свежий бой — всегда «Участники»;
 // возврат в идущий бой (F5/реконнект) — последнее выбранное окно (см. enterBattle)
 let battleEntryPane = 'members';
+
+function updateBattleDockState() {
+  const battleMode = mode === 'battle';
+  const open = battleMode && dockEl.classList.contains('dock-open');
+  document.body.classList.toggle('battle-dock-open', open);
+  document.body.classList.toggle('battle-dock-closed', battleMode && !open);
+  document.body.classList.toggle('battle-dock-expanded', open && dockExpanded);
+  window.dispatchEvent(new Event('arena:layoutChanged'));
+}
 
 /** Переключение «локация» ⇄ «бой». */
 function setMode(next) {
@@ -413,6 +424,7 @@ function setMode(next) {
   if (battle) openCastleDock(BATTLE_ONLY_PANES.has(battleEntryPane)
     || CASTLE_DOCK_PANES.has(battleEntryPane) ? battleEntryPane : 'members');
   else closeCastleDock();
+  updateBattleDockState();
   applyUILayout();
   renderCombatBar();
 }
@@ -910,6 +922,7 @@ function dockSnap(expand) {
   dockExpanded = expand;
   dockEl.classList.add('dock-anim');
   dockEl.style.height = expand ? dockMaxHeight() + 'px' : '';
+  updateBattleDockState();
 }
 
 function dockPointerDown(e) {
