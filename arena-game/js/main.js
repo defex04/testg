@@ -116,6 +116,28 @@ function setFullscreenPref(on) {
   window.dispatchEvent(new Event('arena:viewportModeChanged'));
 }
 
+// --- Подсказки в бою (по умолчанию включены) --------------------------------
+// Класс body.hints-off гасит мигание секторов/щитов на колесе (см. game.css).
+const HINTS_KEY = 'arena.hints';
+const hintsPref = () => {
+  try { return localStorage.getItem(HINTS_KEY) !== '0'; } catch { return true; }
+};
+function applyHints(on) { document.body.classList.toggle('hints-off', !on); }
+function setHintsPref(on) {
+  try { localStorage.setItem(HINTS_KEY, on ? '1' : '0'); } catch {}
+  applyHints(on);
+}
+applyHints(hintsPref());
+
+// --- Показывать «Участников» при старте боя (по умолчанию да) ----------------
+const MEMBERS_START_KEY = 'arena.membersOnStart';
+const membersOnStartPref = () => {
+  try { return localStorage.getItem(MEMBERS_START_KEY) !== '0'; } catch { return true; }
+};
+function setMembersOnStartPref(on) {
+  try { localStorage.setItem(MEMBERS_START_KEY, on ? '1' : '0'); } catch {}
+}
+
 // Безопасные зоны: device (safeAreaInset: вырез/статус-бар) + контентная
 // (contentSafeAreaInset: место под плавающими кнопками Telegram ✕/⋯ сверху).
 // Кладём суммой в CSS-переменные --tg-inset-* — по ним бокс игры вписывается в
@@ -168,12 +190,21 @@ function confirmExit() {
   const el = $('settings');
   if (!el) return;
   const fsInput = $('set-fullscreen');
-  const open = () => { if (fsInput) fsInput.checked = fullscreenPref(); el.classList.remove('hidden'); };
+  const hintsInput = $('set-hints');
+  const membersStartInput = $('set-members-start');
+  const open = () => {
+    if (fsInput) fsInput.checked = fullscreenPref();
+    if (hintsInput) hintsInput.checked = hintsPref();
+    if (membersStartInput) membersStartInput.checked = membersOnStartPref();
+    el.classList.remove('hidden');
+  };
   const close = () => el.classList.add('hidden');
   $('pp-settings')?.addEventListener('click', open);
   $('settings-close')?.addEventListener('click', close);
   el.addEventListener('click', (e) => { if (e.target === el) close(); });
   fsInput?.addEventListener('change', () => setFullscreenPref(fsInput.checked));
+  hintsInput?.addEventListener('change', () => setHintsPref(hintsInput.checked));
+  membersStartInput?.addEventListener('change', () => setMembersOnStartPref(membersStartInput.checked));
   $('settings-exit')?.addEventListener('click', confirmExit);
 
   // Принудительный сброс кэша: Telegram WebView держит старые index.html/js/css
@@ -262,6 +293,7 @@ const castleBg = $('castle-bg');
 const castlePerimeter = $('castle-perimeter');
 const castleMainMenu = $('castle-main-menu');
 const dockEl = $('bottom-dock');
+const battleForeground = $('battle-foreground');
 
 let mode = 'location';   // 'location' | 'battle'
 let currentLoc = 'village';
@@ -404,7 +436,65 @@ function updateBattleDockState() {
   document.body.classList.toggle('battle-dock-open', open);
   document.body.classList.toggle('battle-dock-closed', battleMode && !open);
   document.body.classList.toggle('battle-dock-expanded', open && dockExpanded);
+  updateBattleInfo();            // освежить «Сводку боя» (видна, когда окна скрыты)
   window.dispatchEvent(new Event('arena:layoutChanged'));
+}
+
+// --- «Сводка боя»: пассивная инфо-панель в нижней зоне, когда все окна скрыты --
+// Стоит на месте окон — поэтому скрытие/показ окна не двигает сцену и слоты.
+const BATTLE_TIPS = [
+  'Выберите щит — заблокируете удар в эту зону.',
+  'Бейте в зону, которую враг не закрыл щитом.',
+  'Эликсир мощи усиливает удары на несколько ходов.',
+  'Эликсир здоровья восстанавливает HP прямо в бою.',
+  'Тапните по участнику — выберете цель для эликсира.',
+  'Окна боя открываются кнопками в нижнем меню.',
+];
+let biEls = null;
+function ensureBattleInfo() {
+  if (!battleForeground) return null;
+  if (biEls && battleForeground.contains(biEls.root)) return biEls;
+  battleForeground.innerHTML = `
+    <div class="binfo-panel" aria-hidden="true">
+      <div class="binfo-panel-head">Сводка боя</div>
+      <div class="binfo-stats">
+        <div class="bis"><span class="bis-k">Ход</span><span class="bis-v" data-bi="turn">1</span></div>
+        <div class="bis"><span class="bis-k">Урон</span><span class="bis-v" data-bi="dmg">0</span></div>
+        <div class="bis ally"><span class="bis-k">Союзники</span><span class="bis-v" data-bi="ally">—</span></div>
+        <div class="bis enemy"><span class="bis-k">Противники</span><span class="bis-v" data-bi="enemy">—</span></div>
+      </div>
+      <div class="binfo-tip" data-bi="tip"></div>
+    </div>`;
+  const q = (s) => battleForeground.querySelector(s);
+  biEls = {
+    root: battleForeground.firstElementChild,
+    turn: q('[data-bi="turn"]'), dmg: q('[data-bi="dmg"]'),
+    ally: q('[data-bi="ally"]'), enemy: q('[data-bi="enemy"]'), tip: q('[data-bi="tip"]'),
+  };
+  return biEls;
+}
+function aliveCount(side) {
+  const list = (battle && battle.roster && battle.roster[side]) || [];
+  let alive = 0;
+  for (const f of list) if (f.alive !== false && (f.hp == null || f.hp > 0)) alive++;
+  return { alive, total: list.length };
+}
+function updateBattleInfo() {
+  if (mode !== 'battle') return;
+  const e = ensureBattleInfo();
+  if (!e) return;
+  const turn = lastTurnShown || 1;
+  e.turn.textContent = turn;
+  e.dmg.textContent = totalDamage;
+  const a = aliveCount('left');
+  const en = aliveCount('right');
+  e.ally.textContent = `${a.alive}/${a.total}`;
+  e.enemy.textContent = `${en.alive}/${en.total}`;
+  e.tip.textContent = BATTLE_TIPS[(turn - 1) % BATTLE_TIPS.length];
+}
+function clearBattleInfo() {
+  if (battleForeground) battleForeground.innerHTML = '';
+  biEls = null;
 }
 
 /** Переключение «локация» ⇄ «бой». */
@@ -421,12 +511,18 @@ function setMode(next) {
   if (battle) arena.start(); else arena.stop();
   closeLocPanel();
   closeBattlesPanel();
-  if (battle) openCastleDock(BATTLE_ONLY_PANES.has(battleEntryPane)
-    || CASTLE_DOCK_PANES.has(battleEntryPane) ? battleEntryPane : 'members');
-  else closeCastleDock();
+  // в бою открываем стартовое окно, если оно задано (настройка «Участники при
+  // старте боя» может его отключить → battleEntryPane=null → док закрыт)
+  if (battle && battleEntryPane
+      && (BATTLE_ONLY_PANES.has(battleEntryPane) || CASTLE_DOCK_PANES.has(battleEntryPane))) {
+    openCastleDock(battleEntryPane);
+  } else {
+    closeCastleDock();
+  }
   updateBattleDockState();
   applyUILayout();
   renderCombatBar();
+  if (!battle) clearBattleInfo();   // вышли из боя — убрать «Сводку боя»
 }
 
 // ---------------------------------------------------------------------------
@@ -570,9 +666,11 @@ async function enterBattle({ starter = null, resumed = null, notice = null, pvpT
     dressingEl.classList.add('hidden');
     dressing.stop();
   }
-  // свежий бой всегда открывает «Участники»; возврат в идущий бой (F5/реконнект) —
-  // последнее выбранное окно (точки 6 и 7 ТЗ)
-  battleEntryPane = resumed ? loadBattlePane() : 'members';
+  // свежий бой открывает «Участники», если включена настройка (по умолчанию да);
+  // возврат в идущий бой (F5/реконнект) — последнее выбранное окно (точки 6 и 7 ТЗ)
+  battleEntryPane = resumed
+    ? loadBattlePane()
+    : (membersOnStartPref() ? 'members' : null);
   setMode('battle');
   // фон арены боя — assets/fight/background.webp (задаётся в CSS .in-battle .arena-stage);
   // отдельная картинка локации в бою не используется
@@ -678,6 +776,7 @@ async function initBattle(resumedBattle = null, starter = null, pvpTarget = null
   // энергия пока без серверной механики — показываем пустые полосы
   ui.setEnergy('left', 0, 0);
   ui.setEnergy('right', 0, 0);
+  updateBattleInfo();              // наполнить «Сводку боя» начальными данными
 
   // колесо ставим ровно между бойцами и пересчитываем при каждом ресайзе сцены;
   // заодно пересчитываем нижнюю панель (страницы эликсиров под ширину экрана)
@@ -691,6 +790,7 @@ async function initBattle(resumedBattle = null, starter = null, pvpTarget = null
     if (d.turn !== lastTurnShown) { ui.setTurn(d.turn); lastTurnShown = d.turn; }
     ui.setTimer(d.timeLeft);
     if (d.roster) ui.setRoster(d.roster);
+    updateBattleInfo();
     if (d.canAct) {                // мой ход
       applyFocus(d.focus);
       ui.setTargets();             // сохранить ручную цель эффекта (если есть)
@@ -711,6 +811,7 @@ async function initBattle(resumedBattle = null, starter = null, pvpTarget = null
 
   battle.addEventListener('rosterUpdate', (e) => {
     if (e.detail.roster) ui.setRoster(e.detail.roster);
+    updateBattleInfo();
   });
 
   battle.addEventListener('resolve', async (e) => {
@@ -719,6 +820,7 @@ async function initBattle(resumedBattle = null, starter = null, pvpTarget = null
     ui.showResolving();            // колесо скрыто, баннер убран — видна анимация
     if (d.roster) ui.setRoster(d.roster);
     if (d.focus) applyFocus(d.focus);
+    updateBattleInfo();
     // в журнал — только удары (#10): пропуски ход не логируем
     try {
       for (const s of d.strikes || []) {
@@ -746,6 +848,7 @@ async function initBattle(resumedBattle = null, starter = null, pvpTarget = null
   battle.addEventListener('elixir', (e) => {
     const d = e.detail;
     if (d.roster) ui.setRoster(d.roster);
+    updateBattleInfo();
     // остаток заряда в моей ячейке (пил я) — пояс авторитетно с сервера
     if (d.isUser && d.slot != null && elixirBelt[d.slot]) {
       if (d.slotQty != null && d.slotQty <= 0) elixirBelt[d.slot] = null;  // слот опустел (#2)
@@ -859,6 +962,7 @@ async function playStrike(s, sides) {
     if (s.attacker === 'left' && !s.dodged) {
       totalDamage += dmg;
       ui.setDamage(totalDamage);
+      updateBattleInfo();
     }
 
     const who = esc(sides[s.attacker].name);
@@ -1448,8 +1552,8 @@ async function renderBattleInfo(id) {
     const joinBar = canJoin ? `
       <div class="bi-join">
         <span>Вмешаться:</span>
-        <button class="bi-join-btn" data-side="left">за 1ю команду</button>
-        <button class="bi-join-btn" data-side="right">за 2ю команду</button>
+        <button class="bi-join-btn" data-side="left">за союзников</button>
+        <button class="bi-join-btn" data-side="right">за противников</button>
       </div>` : (d.status === 'active' && !d.allowJoin
       ? '<div class="bi-join-closed">Вмешательство в этот бой закрыто (охота или настройка сервера).</div>'
       : (mode === 'battle'
@@ -1457,9 +1561,9 @@ async function renderBattleInfo(id) {
         : ''));
     binfoBody.innerHTML = `
       <div class="bi-teams">
-        <div class="bi-team"><div class="bi-team-title">1я команда</div>
+        <div class="bi-team bi-team-ally"><div class="bi-team-title">Союзники</div>
           ${d.teams.left.map(member).join('')}</div>
-        <div class="bi-team"><div class="bi-team-title">2я команда</div>
+        <div class="bi-team bi-team-enemy"><div class="bi-team-title">Противники</div>
           ${d.teams.right.map(member).join('')}</div>
       </div>${joinBar}`;
     for (const btn of binfoBody.querySelectorAll('.bi-join-btn')) {
@@ -1733,7 +1837,7 @@ function showFighterInfo(side) {
   const info = side === 'right' && battle.focus ? battle.focus : base;
   fighterCard(info.name ?? base.name, info.level ?? base.level,
     info.hp != null ? info.hp : base.hp, info.maxHp ?? base.maxHp,
-    side === 'left' ? '1я команда' : '2я команда');
+    side === 'left' ? 'Союзники' : 'Противники');
 }
 
 /** «Инфо» у участника в окне «Участники боя» — ищем бойца в ростере по id. */
@@ -1742,7 +1846,7 @@ function showMemberInfo(id) {
   for (const side of ['left', 'right']) {
     const f = (battle.roster[side] || []).find((x) => String(x.id) === String(id));
     if (f) {
-      fighterCard(f.name, f.level, f.hp, f.maxHp, side === 'left' ? '1я команда' : '2я команда');
+      fighterCard(f.name, f.level, f.hp, f.maxHp, side === 'left' ? 'Союзники' : 'Противники');
       return;
     }
   }

@@ -590,9 +590,18 @@ export class BattleUI {
   /** Поставить колесо ровно между бойцами и задать его диаметр (px). */
   placeWheel(layout) {
     if (!layout || !this.wheel) return;
+    // На время (пере)раскладки гасим transition спрайтов: смена --d на WebKit
+    // переразрешает translate(-50%) щита/меча, и спрайт «уезжает» на новую
+    // позицию с overshoot-кривой — верхний щит особенно заметно (#1). Снимаем
+    // 'placing' спустя кадр после оседания раскладки — hover-анимации вернутся.
+    this.wheel.classList.add('placing');
     this.wheel.style.left = layout.x + 'px';
     this.wheel.style.top = layout.y + 'px';
     this.wheel.style.setProperty('--d', Math.round(layout.diameter) + 'px');
+    clearTimeout(this._placeT);
+    this._placeT = setTimeout(() => {
+      if (this.wheel) this.wheel.classList.remove('placing');
+    }, 120);
   }
 
   /**

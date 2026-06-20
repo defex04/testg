@@ -189,12 +189,12 @@
           <div class="dock-pane" id="pane-members">
             <!-- составы команд — сверху (основная область) -->
             <div class="members-grid hide-dead" id="members-grid">
-              <div class="team">
-                <div class="team-title">1я команда</div>
+              <div class="team team-ally">
+                <div class="team-title">Союзники</div>
                 <div class="team-list" id="team-left"></div>
               </div>
-              <div class="team">
-                <div class="team-title">2я команда</div>
+              <div class="team team-enemy">
+                <div class="team-title">Противники</div>
                 <div class="team-list" id="team-right"></div>
               </div>
             </div>
@@ -321,6 +321,26 @@
           </span>
           <span class="switch">
             <input type="checkbox" id="set-fullscreen" checked>
+            <span class="switch-track"><span class="switch-knob"></span></span>
+          </span>
+        </label>
+        <label class="settings-row" for="set-hints">
+          <span class="settings-row-main">
+            <span class="settings-row-name">Подсказки в бою</span>
+            <span class="settings-row-desc">Подсвечивать синим, куда нажать (щит/удар)</span>
+          </span>
+          <span class="switch">
+            <input type="checkbox" id="set-hints" checked>
+            <span class="switch-track"><span class="switch-knob"></span></span>
+          </span>
+        </label>
+        <label class="settings-row" for="set-members-start">
+          <span class="settings-row-main">
+            <span class="settings-row-name">Участники при старте боя</span>
+            <span class="settings-row-desc">Открывать окно «Участники» в начале боя</span>
+          </span>
+          <span class="switch">
+            <input type="checkbox" id="set-members-start" checked>
             <span class="switch-track"><span class="switch-knob"></span></span>
           </span>
         </label>

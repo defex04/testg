@@ -607,12 +607,14 @@ body.loc-castle.in-battle.battle-dock-open .battle-foreground {
   flex: 1.3 1 0%;
 }
 
+/* окна скрыты — НЕ двигаем сцену и слоты: те же доли, что при открытом окне
+   (в пустой зоне снизу показываем «Сводку боя» .binfo-panel) */
 body.loc-castle.in-battle.battle-dock-closed .arena-stage {
-  flex: 3.25 1 0%;
+  flex: 2.7 1 0%;
 }
 
 body.loc-castle.in-battle.battle-dock-closed .battle-foreground {
-  flex: .75 1 0%;
+  flex: 1.3 1 0%;
 }
 
 body.loc-castle.in-battle.battle-dock-closed .battle-foreground::before {
@@ -638,11 +640,66 @@ body.tg-fullscreen.loc-castle.in-battle.battle-dock-open .battle-foreground {
 }
 
 body.tg-fullscreen.loc-castle.in-battle.battle-dock-closed .arena-stage {
-  flex: 3.55 1 0%;
+  flex: 2.85 1 0%;
 }
 
 body.tg-fullscreen.loc-castle.in-battle.battle-dock-closed .battle-foreground {
-  flex: .65 1 0%;
+  flex: 1.15 1 0%;
+}
+
+/* «Сводка боя» — пассивная стеклянная панель в нижней зоне; видна, когда все
+   окна боя скрыты (док закрыт). Стоит на месте окон → скрытие/показ окна не
+   двигает сцену и слоты. Содержимое наполняет updateBattleInfo() в main.js. */
+.binfo-panel { display: none; }
+body.loc-castle.in-battle.battle-dock-closed .binfo-panel {
+  display: flex;
+  flex-direction: column;
+  position: absolute;
+  left: 6px; right: 6px; bottom: 0; top: 4px;
+  z-index: 1;
+  padding: 9px 14px 8px;
+  gap: 7px;
+  overflow: hidden;
+  pointer-events: none;
+  background: linear-gradient(180deg, rgba(12, 15, 8, .72), rgba(7, 9, 4, .64));
+  border: 1px solid rgba(201, 168, 76, .42);
+  border-bottom: none;
+  border-radius: 18px 18px 0 0;
+  box-shadow: 0 -6px 22px rgba(0, 0, 0, .4), inset 0 1px 0 rgba(201, 168, 76, .12);
+  backdrop-filter: blur(8px);
+}
+.binfo-panel-head {
+  font-family: var(--font-display);
+  font-size: 12px;
+  letter-spacing: .4px;
+  color: var(--gold-bright);
+  text-shadow: 0 1px 2px #000;
+  text-align: center;
+}
+.binfo-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 5px 10px; }
+.bis {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 3px 8px;
+  border-radius: 7px;
+  border-left: 3px solid rgba(201, 168, 76, .4);
+  background: rgba(255, 255, 255, .03);
+}
+.bis.ally  { border-left-color: rgba(111, 180, 255, .7); }
+.bis.enemy { border-left-color: rgba(255, 120, 90, .7); }
+.bis-k { font-size: 11px; color: rgba(239, 227, 194, .72); white-space: nowrap; }
+.bis-v { font-size: 14px; font-weight: 700; color: #f3e6c4; text-shadow: 0 1px 2px #000; }
+.bis.ally  .bis-v { color: #9fccff; }
+.bis.enemy .bis-v { color: #ff9b86; }
+.binfo-tip {
+  margin-top: auto;
+  font-size: 11px;
+  line-height: 1.3;
+  color: rgba(239, 227, 194, .66);
+  text-align: center;
+  font-style: italic;
 }
 
 /* нижняя боевая панель — по центру у низа сцены, под боевым кругом.
@@ -674,14 +731,17 @@ body.loc-castle.in-battle .bottom-dock {
   padding: 0 6px;
 }
 
-body.tg-fullscreen.loc-castle.in-battle .bottom-dock.dock-open {
-  --dock-h: clamp(135px, calc(var(--app-h, 100dvh) * .18), 178px);
+/* В обычном (НЕ полноэкранном) режиме все боевые окна — невысокие и всегда
+   ниже ряда слотов: видно хотя бы одного бойца и слоты заклинаний на любом
+   телефоне. Кто захочет — развернёт окно вверх жестом за ручку (#2). */
+body.loc-castle.in-battle:not(.tg-fullscreen) .bottom-dock.dock-open {
+  --dock-h: clamp(128px, calc(var(--app-h, 100dvh) * .24), 200px);
 }
 
-body.tg-fullscreen.loc-castle.in-battle .bottom-dock.dock-open[data-pane="chat"],
-body.tg-fullscreen.loc-castle.in-battle .bottom-dock.dock-open[data-pane="battlelog"],
-body.tg-fullscreen.loc-castle.in-battle .bottom-dock.dock-open[data-pane="players"] {
-  --dock-h: clamp(165px, calc(var(--app-h, 100dvh) * .22), 220px);
+/* В полноэкранном режиме все окна — той же высоты, что и «Участники» (#3):
+   единое правило без отдельной высоты для чата/лога/игроков. */
+body.tg-fullscreen.loc-castle.in-battle .bottom-dock.dock-open {
+  --dock-h: clamp(135px, calc(var(--app-h, 100dvh) * .18), 178px);
 }
 
 /* нижний прямоугольник: окна участников/лога/чата/игроков — стеклянные плашки
@@ -712,6 +772,13 @@ body.loc-castle.in-battle .team-title {
   letter-spacing: .4px;
   color: var(--gold-bright);
   text-shadow: 0 1px 2px #000;
+}
+/* Союзники — синие, противники — красные (#4) */
+body.loc-castle.in-battle .team-ally  .team-title {
+  color: #6fb4ff; text-shadow: 0 1px 2px #000, 0 0 7px rgba(90, 150, 255, .45);
+}
+body.loc-castle.in-battle .team-enemy .team-title {
+  color: #ff6f5c; text-shadow: 0 1px 2px #000, 0 0 7px rgba(255, 90, 70, .4);
 }
 
 body.loc-castle.in-battle .member {
@@ -1833,6 +1900,12 @@ body.in-battle .castle-main-menu { transition: opacity .34s ease; }
   0%, 100% { filter: drop-shadow(0 3px 5px rgba(0, 0, 0, .6)); }
   50%      { filter: drop-shadow(0 0 8px rgba(255, 120, 80, .9)) drop-shadow(0 3px 5px rgba(0, 0, 0, .6)); }
 }
+/* настройка «Подсказки в бою» выключена (body.hints-off) — колесо не мигает и не
+   подсвечивает, куда нажать; выпад меча по удару (.thrust/.clang) сохраняется */
+body.hints-off .strike-wheel.hint-block .swedge.blk,
+body.hints-off .strike-wheel.hint-block .sw-sprite.shield:not(.on),
+body.hints-off .strike-wheel.hint-attack .swedge.atk,
+body.hints-off .strike-wheel.hint-attack .sw-sprite.sword:not(.thrust):not(.clang) { animation: none; }
 
 /* кольцо-таймер хода — тонкая дуга по внутреннему ободу */
 .sw-timer {
@@ -1854,6 +1927,9 @@ body.in-battle .castle-main-menu { transition: opacity .34s ease; }
   transition: transform .2s cubic-bezier(.3, 1.4, .5, 1), filter .18s;
   filter: drop-shadow(0 3px 5px rgba(0, 0, 0, .6));
 }
+/* во время раскладки колеса (placeWheel меняет --d) не анимируем спрайты —
+   иначе щиты «съезжают» к новой позиции при старте боя (#1) */
+.strike-wheel.placing .sw-sprite { transition: none; }
 .sw-sprite img {
   display: block;
   width: 100%;
@@ -2307,6 +2383,8 @@ svg.mtool-ico { width: 15px; height: 15px; display: block; }
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.team-ally  .team-title { color: #6fb4ff; }
+.team-enemy .team-title { color: #ff6f5c; }
 .member {
   font-size: clamp(11px, 3.4vw, 13.5px);
   margin: 5px 0;
@@ -2332,22 +2410,22 @@ svg.mtool-ico { width: 15px; height: 15px; display: block; }
   border-radius: 8px;
   transition: border-color .15s, background .15s, box-shadow .15s;
 }
-/* постоянная отметка стороны для ВСЕХ участников (#3): союзники — зелёным,
+/* постоянная отметка стороны для ВСЕХ участников (#3): союзники — синим,
    враги — красным, даже без выбора цели */
-.member.targetable[data-side="left"]  { border-left-color: rgba(120, 220, 120, .6); background: rgba(80, 200, 100, .06); }
+.member.targetable[data-side="left"]  { border-left-color: rgba(111, 180, 255, .6); background: rgba(90, 150, 255, .06); }
 .member.targetable[data-side="right"] { border-left-color: rgba(255, 150, 90, .6);  background: rgba(216, 120, 63, .07); }
 .member.targetable:hover { border-color: rgba(244, 205, 111, .6); background: rgba(255, 255, 255, .05); }
-/* враги (2я команда) — красно-бордовая отметка */
+/* противники (правая команда) — красно-бордовая отметка */
 .member.targeted[data-side="right"] {
   border-color: rgba(255, 150, 90, .85);
   background: rgba(216, 120, 63, .14);
   box-shadow: 0 0 10px rgba(216, 120, 63, .3);
 }
-/* союзники (1я команда) — зелёная отметка */
+/* союзники (левая команда) — синяя отметка */
 .member.targeted[data-side="left"] {
-  border-color: rgba(120, 220, 120, .9);
-  background: rgba(80, 200, 100, .14);
-  box-shadow: 0 0 10px rgba(80, 200, 100, .35);
+  border-color: rgba(111, 180, 255, .9);
+  background: rgba(90, 150, 255, .16);
+  box-shadow: 0 0 10px rgba(90, 150, 255, .35);
 }
 
 .ghost-btn {
@@ -2995,6 +3073,8 @@ button.belt-slot { padding: 0; font: inherit; color: inherit; -webkit-tap-highli
   margin-bottom: 8px;
   text-align: center;
 }
+.bi-team-ally  .bi-team-title { color: #6fb4ff; }
+.bi-team-enemy .bi-team-title { color: #ff6f5c; }
 .bi-member {
   padding: 10px;
   background: rgba(244, 205, 111, .04);
