@@ -295,7 +295,10 @@ body.loc-castle .pp-money-cell { font-size: 11px; }
 .menu-icon[data-castle="mail"] img,
 .menu-icon[data-castle="auction"] img { transform: scale(1.1) translateY(1px); }
 
-.menu-icon[data-castle="battle"] img { transform: scale(1.04) translateY(-1px); }
+.menu-icon[data-castle="battles"] {
+  width: clamp(76px, 19vmin, 86px);
+}
+.menu-icon[data-castle="battles"] img { transform: scale(1.04) translateY(-1px); }
 
 /* подпись под иконкой — чтобы назначение читалось без угадывания */
 .mi-label {
@@ -590,6 +593,14 @@ body.loc-castle.in-battle .arena-stage::after {
 /* нижний прямоугольник (камень фона) — зона всплывающих окон, ниже слотов. */
 body.loc-castle.in-battle .battle-foreground { flex: 1.55 1 0%; min-height: 0; }
 
+body.tg-fullscreen.loc-castle.in-battle .arena-stage {
+  flex: 2.12 1 0%;
+}
+
+body.tg-fullscreen.loc-castle.in-battle .battle-foreground {
+  flex: 1.9 1 0%;
+}
+
 /* нижняя боевая панель — по центру у низа сцены, под боевым кругом.
    Теперь занимает всю доступную ширину (левого пояса эликсиров больше нет). */
 body.loc-castle.in-battle .screen-battle .combat-bar {
@@ -604,6 +615,10 @@ body.loc-castle.in-battle .screen-battle .combat-bar {
   max-width: 100%;
 }
 
+body.tg-fullscreen.loc-castle.in-battle .screen-battle .combat-bar {
+  bottom: 8px;
+}
+
 /* ОКНА в бою — всплывают над каменным низом (высота — общее правило .dock-open) */
 body.loc-castle.in-battle .castle-bottom { position: relative; }
 body.loc-castle.in-battle .bottom-dock {
@@ -613,6 +628,10 @@ body.loc-castle.in-battle .bottom-dock {
   bottom: 100%;
   z-index: 7;
   padding: 0 6px;
+}
+
+body.tg-fullscreen.loc-castle.in-battle .bottom-dock.dock-open {
+  --dock-h: clamp(165px, calc(var(--app-h, 100dvh) * .22), 220px);
 }
 
 /* нижний прямоугольник: окна участников/лога/чата/игроков — стеклянные плашки
@@ -926,7 +945,10 @@ body.loc-castle.in-battle .sprite-main .sm-ico {
 .cb-elixirs-view {
   flex: 0 1 auto;
   min-width: 0;
+  box-sizing: border-box;
   overflow: hidden;
+  padding: 2px;
+  margin: -2px 0;
 }
 /* «лента» из всех 6 слотов — сдвигается на страницу при листании */
 .cb-track {
@@ -1032,7 +1054,27 @@ body.loc-castle.in-battle .sprite-main .sm-ico {
 .combat-slot.elixir.cooldown { opacity: .5; filter: grayscale(.45); cursor: default; }
 
 /* счётчик зарядов в уголке ячейки (#1): мощь — стопкой ×N, жизнь — 1 */
-.combat-slot .bs-qty,
+.combat-slot .bs-qty {
+  position: absolute;
+  right: 1px;
+  bottom: 1px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: linear-gradient(180deg, #2a3416, #11160a);
+  border: 1px solid rgba(244, 205, 111, .55);
+  color: #f4cd6f;
+  font-size: 9.5px;
+  font-weight: 700;
+  line-height: 1;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, .6);
+  pointer-events: none;
+}
+
 .belt-slot .bs-qty {
   position: absolute;
   right: -3px;
@@ -1758,10 +1800,11 @@ body.in-battle .castle-main-menu { transition: opacity .34s ease; }
 .sw-sprite {
   position: absolute; left: 50%; top: 50%;
   transform: var(--base);
+  transform-origin: 50% 50%;
   transition: transform .2s cubic-bezier(.3, 1.4, .5, 1), filter .18s;
   filter: drop-shadow(0 3px 5px rgba(0, 0, 0, .6));
 }
-.sw-sprite img { display: block; width: 100%; height: auto; }
+.sw-sprite img { display: block; width: 100%; height: auto; transform: translateZ(0); }
 .sw-sprite.sword { width: calc(var(--d) * .12); }
 .sw-sprite.shield { width: calc(var(--d) * .145); }
 .sw-sprite.hot { filter: drop-shadow(0 0 7px var(--glow)) drop-shadow(0 3px 5px rgba(0, 0, 0, .6)); }

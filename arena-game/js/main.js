@@ -1167,6 +1167,7 @@ $('chat-form').addEventListener('submit', (e) => {
     const resetAndSchedule = () => {
       baseFull = 0;
       schedule();
+      window.dispatchEvent(new Event('arena:layoutChanged'));
     };
     resetAndSchedule();
     setTimeout(resetAndSchedule, 60);
@@ -1847,14 +1848,16 @@ function layoutCombatBar() {
   const slotW = slots[0].offsetWidth;
   if (!slotW) { requestAnimationFrame(layoutCombatBar); return; }  // ещё без размера
   const cs = getComputedStyle(elixirSlotsEl);
+  const viewCs = getComputedStyle(elixirViewEl);
   const gap = parseFloat(cs.columnGap || cs.gap) || 6;
+  const viewPadX = (parseFloat(viewCs.paddingLeft) || 0) + (parseFloat(viewCs.paddingRight) || 0);
   const step = slotW + gap;
   const fullTrack = ELIXIR_SLOTS * step - gap;   // ширина всех 6 слотов
 
   // 1) пробуем без стрелок: помещаются ли все эликсиры?
   combatBarEl.classList.remove('paged');
   elixirViewEl.style.width = '';
-  const availAll = elixirViewEl.clientWidth;
+  const availAll = Math.max(0, elixirViewEl.clientWidth - viewPadX);
   if (availAll + 0.5 >= fullTrack) {             // влезают все — стрелки не нужны
     elixirPerPage = ELIXIR_SLOTS;
     elixirPages = 1;
@@ -1865,12 +1868,12 @@ function layoutCombatBar() {
 
   // 2) нужны страницы: добавляем стрелки и считаем, сколько слотов в окне
   combatBarEl.classList.add('paged');
-  const avail = elixirViewEl.clientWidth;        // место уже с учётом стрелок
+  const avail = Math.max(0, elixirViewEl.clientWidth - viewPadX); // место уже с учётом стрелок
   let perPage = Math.max(1, Math.floor((avail + gap) / step));
   perPage = Math.min(perPage, ELIXIR_SLOTS - 1); // в режиме страниц < 6
   elixirPerPage = perPage;
   elixirPages = Math.ceil(ELIXIR_SLOTS / perPage);
-  elixirViewEl.style.width = (perPage * step - gap) + 'px';
+  elixirViewEl.style.width = Math.ceil(perPage * step - gap + viewPadX + 1) + 'px';
   applyElixirPage();
 }
 
@@ -1891,6 +1894,21 @@ function applyElixirPage() {
   if (elixirPrevBtn) elixirPrevBtn.disabled = elixirPage <= 0;
   if (elixirNextBtn) elixirNextBtn.disabled = elixirPage >= elixirPages - 1;
 }
+
+function relayoutBattleChrome() {
+  if (mode !== 'battle') return;
+  const run = () => {
+    arena.resize();
+    if (ui) ui.placeWheel(arena.wheelLayout());
+    layoutCombatBar();
+  };
+  run();
+  requestAnimationFrame(run);
+  setTimeout(run, 90);
+  setTimeout(run, 300);
+}
+
+window.addEventListener('arena:layoutChanged', relayoutBattleChrome);
 
 /** Использовать эликсир из ячейки i (только в свой ход, по разу на ячейку).
  *  Эффект применяет СЕРВЕР (battle.useElixir) и присылает событие 'elixir'. */
