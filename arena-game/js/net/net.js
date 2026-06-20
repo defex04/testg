@@ -33,6 +33,7 @@ async function rest(path, body) {
 }
 
 export const api = {
+  isAdmin: false,        // выставляется в login() из ответа сервера (Telegram-админ)
   /** Вход: Telegram initData в Mini App, иначе dev-вход по имени. */
   async login(devName = 'ИгрокА') {
     const tg = window.Telegram && window.Telegram.WebApp;
@@ -41,6 +42,7 @@ export const api = {
       : await rest('/api/auth/dev', { name: devName });
     token = res.token;
     sessionStorage.setItem('token', token);
+    api.isAdmin = !!res.isAdmin;          // вход из Telegram админом → предложить выбор
     await connectSocket();
     // страховка к push battleResume: сами спрашиваем сервер про идущий бой
     try {

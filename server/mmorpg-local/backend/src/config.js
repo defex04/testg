@@ -13,3 +13,11 @@ export const cfg = {
   adminDb: process.env.ADMIN_DB              // правка шаблонов: отдельная роль,
     || 'postgres://postgres:postgres@postgres:5432/mmo_game', // локально — суперюзер
 };
+
+/** Является ли Telegram-пользователь админом (по id или @username из списка). */
+export function isTelegramAdmin(user) {
+  if (!user || !cfg.adminTelegramIds.length) return false;
+  const allow = cfg.adminTelegramIds.map((s) => s.replace(/^@/, '').toLowerCase());
+  const uname = String(user.username || '').toLowerCase();
+  return allow.includes(String(user.id)) || (!!uname && allow.includes(uname));
+}

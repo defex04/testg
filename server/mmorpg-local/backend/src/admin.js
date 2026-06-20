@@ -4,7 +4,7 @@ import fs from 'fs';
 import { game, auth, redis, tx, adminPg, clearConfigCache } from './db.js';
 import { addCurrency, wallet, CUR } from './economy.js';
 import { adminAbort, adminSetIntervention } from './battle/manager.js';
-import { cfg } from './config.js';
+import { cfg, isTelegramAdmin } from './config.js';
 import { verifyInitData } from './auth.js';
 
 /**
@@ -64,11 +64,7 @@ export function adminRoutes(app) {
     const { initData } = req.body || {};
     const user = initData && verifyInitData(initData);
     if (!user) return res.status(401).json({ error: 'bad_signature' });
-    // в списке админов можно указать tg-id ИЛИ @username (без учёта регистра/@)
-    const allow = cfg.adminTelegramIds.map((s) => s.replace(/^@/, '').toLowerCase());
-    const uname = String(user.username || '').toLowerCase();
-    if (!allow.includes(String(user.id)) && !(uname && allow.includes(uname)))
-      return res.status(403).json({ error: 'not_admin' });
+    if (!isTelegramAdmin(user)) return res.status(403).json({ error: 'not_admin' });
     res.json({ ok: true, key: issueToken(),
       admin: { id: user.id, username: user.username ?? null } });
   });

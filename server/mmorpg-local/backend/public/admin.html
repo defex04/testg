@@ -927,26 +927,31 @@ $('#login-form').addEventListener('submit', async (e) => {
       : 'Пароль не подходит'; }
 });
 
-/** Вход через Telegram (без пароля): берём initData из WebApp, меняем на токен. */
+/** Вход через Telegram (без пароля): initData из WebApp ИЛИ из hash (#tginit),
+ *  когда перешли из игры. Меняем подпись на токен-ключ. */
 async function tryTelegramLogin(){
   const tg = window.Telegram && window.Telegram.WebApp;
-  if (!tg || !tg.initData) return false;
-  try { tg.ready(); tg.expand(); } catch (e) {}
+  if (tg){ try { tg.ready(); tg.expand(); } catch (e) {} }
+  const fromHash = new URLSearchParams((location.hash || '').replace(/^#/, '')).get('tginit');
+  const initData = (tg && tg.initData) || fromHash || '';
+  if (!initData) return false;
   try {
     const r = await fetch('/admin/api/telegram-login', {
       method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ initData: tg.initData }) });
+      body: JSON.stringify({ initData }) });
     const d = await r.json().catch(() => ({}));
-    if (r.ok && d.key){ KEY = d.key; sessionStorage.setItem('adminKey', KEY); return true; }
+    if (r.ok && d.key){
+      KEY = d.key; sessionStorage.setItem('adminKey', KEY);
+      history.replaceState(null, '', location.pathname);   // убрать initData из URL
+      return true;
+    }
   } catch (e) {}
   return false;
 }
 
-// Старт: внутри Telegram — вход без пароля; иначе сохранённый ключ; иначе форма.
+// Старт: вход через Telegram (initData/hash); иначе сохранённый ключ; иначе форма.
 (async () => {
-  const inTelegram = !!(window.Telegram && window.Telegram.WebApp
-    && window.Telegram.WebApp.initData);
-  if (inTelegram && await tryTelegramLogin()){ enter(); return; }
+  if (await tryTelegramLogin()){ enter(); return; }
   if (KEY){ try { await api('/stats'); enter(); return; } catch (e) {} }
   logout();
 })();

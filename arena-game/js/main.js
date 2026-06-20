@@ -2094,6 +2094,34 @@ function showTelegramGate() {
   document.body.appendChild(el);
 }
 
+/**
+ * Запуск из Telegram админом — предложить выбор: остаться в игре или открыть
+ * админку. Обычный игрок (не админ) и запуск вне Telegram проходят мгновенно.
+ * При выборе «Админка» переходим на её страницу, неся initData в hash (#tginit)
+ * — телеграм-сессия не теряется при навигации, админка входит без пароля.
+ */
+function adminEntryChoice() {
+  const tg = window.Telegram && window.Telegram.WebApp;
+  if (!api.isAdmin || !tg || !tg.initData) return Promise.resolve();
+  return new Promise((resolve) => {
+    const adminBase = window.API_URL || 'http://localhost:8080';
+    const el = document.createElement('div');
+    el.className = 'admin-choice';
+    el.innerHTML =
+      '<div class="ac-card">' +
+        '<div class="ac-title">С возвращением, мастер</div>' +
+        '<div class="ac-sub">Куда заходим?</div>' +
+        '<button type="button" class="ac-btn ac-game">🎮 В игру</button>' +
+        '<button type="button" class="ac-btn ac-admin">🛠️ Открыть админку</button>' +
+      '</div>';
+    el.querySelector('.ac-game').addEventListener('click', () => { el.remove(); resolve(); });
+    el.querySelector('.ac-admin').addEventListener('click', () => {
+      location.href = adminBase + '/admin#tginit=' + encodeURIComponent(tg.initData);
+    });
+    document.body.appendChild(el);
+  });
+}
+
 (async () => {
   // если на сервере остался идущий бой (после F5/обрыва) — вернёмся в него
   api.onBattleResume((b) => resumeBattle(b).catch((e) => {
@@ -2104,6 +2132,7 @@ function showTelegramGate() {
     setBoot('Вход в игру…');
     const ch = await api.login(PLAYER.name);
     online = true;
+    await adminEntryChoice();        // админу из Telegram — выбор игра/админка
     applyCharacter(ch);
 
     setBoot('Загрузка рюкзака…');

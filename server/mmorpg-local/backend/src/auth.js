@@ -1,6 +1,6 @@
 import crypto from 'crypto';
 import { auth, game } from './db.js';
-import { cfg } from './config.js';
+import { cfg, isTelegramAdmin } from './config.js';
 
 /** Проверка подписи Telegram initData (HMAC по схеме WebApp). */
 export function verifyInitData(initData) {
@@ -100,7 +100,8 @@ export function authRoutes(app, ensureCharacter) {
     await assertNotBanned(accountId);
     const ch = await ensureCharacter(accountId, user.first_name || user.username || 'Безымянный');
     const token = await createSession(accountId, ch.id, 1);
-    res.json({ token, character: ch });
+    // isAdmin — чтобы из Telegram предложить админу выбор: игра или админка
+    res.json({ token, character: ch, isAdmin: isTelegramAdmin(user) });
   });
 
   // Локальный вход для разработки (без Telegram)
