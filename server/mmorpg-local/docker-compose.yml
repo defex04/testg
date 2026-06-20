@@ -39,6 +39,7 @@ services:
     restart: unless-stopped
     environment:
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin}
+      ADMIN_TELEGRAM_IDS: ${ADMIN_TELEGRAM_IDS:-}
       ADMIN_DB: postgres://${PG_SUPER_USER:-postgres}:${PG_SUPER_PASSWORD:-postgres}@postgres:5432/mmo_game
       GAME_DB:  postgres://game_rw:game_rw_dev@postgres:5432/mmo_game
       AUTH_DB:  postgres://auth_svc:auth_svc_dev@postgres:5432/mmo_auth

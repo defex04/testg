@@ -1342,6 +1342,18 @@ let serverInv = [];
 /** Ключ шаблона предмета в ITEMS: знакомые получают 3D, остальные — без. */
 const itemKeyFor = (it) => it.icon || 'srv' + it.templateId;
 
+// Эмодзи-иконка эликсира по его эффекту. Серверные icon-строки шаблонов
+// (вроде 'elixirHealth') в ITEMS не маппятся — без этого в рюкзаке висела бы
+// коробка 📦 вместо колбы. Вид определяем по base_stats (как на сервере).
+const ELIXIR_EMOJI = { health: '🧪', power: '⚡', escape: '🏃' };
+function elixirKindFromStats(stats) {
+  const s = stats || {};
+  if (s.escape) return 'escape';
+  if (s.power_mult != null) return 'power';
+  if (s.heal != null) return 'health';
+  return null;
+}
+
 /**
  * Зарегистрировать вещи с сервера в ITEMS (для 3D и слотов) и привести
  * equipState игрока к серверному состоянию — сервер источник правды.
@@ -1353,7 +1365,10 @@ function registerServerItems(inv) {
     const slotName = slotNameFor(it.slot);
     const key = itemKeyFor(it);
     if (!ITEMS[key]) {
-      ITEMS[key] = { name: it.name, slot: slotName, icon: '📦', noModel: true };
+      // эликсиру (type 4) даём колбу/реторту по эффекту, прочему — коробку
+      const ek = it.type === 4 ? elixirKindFromStats(it.stats) : null;
+      ITEMS[key] = { name: it.name, slot: slotName,
+        icon: ek ? ELIXIR_EMOJI[ek] : '📦', noModel: true };
     }
     if (it.equipped && slotName) equippedBySlot[slotName] = key;
   }
@@ -1887,11 +1902,16 @@ function renderInventory() {
     // эликсир определяем по серверному типу (item_templates.type === 4),
     // иначе — по демо-конфигу ITEMS
     const isElixir = inst ? inst.type === 4 : item.type === 'elixir';
+    // вид эликсира (по base_stats / демо-конфигу): мощь и жизнь идут в пояс,
+    // эликсир побега (escape) в пояс не кладётся — он для выхода из боя
+    const ekind = isElixir
+      ? (inst ? elixirKindFromStats(inst.stats) : (item.kind || null)) : null;
+    const beltable = ekind === 'health' || ekind === 'power';
     const tplId = inst ? inst.templateId : null;
-    if (isElixir) {                   // бейдж: эликсир кладётся в пояс
+    if (isElixir) {                   // бейдж: куда годится эликсир
       const badge = document.createElement('span');
       badge.className = 'inv-slot';
-      badge.textContent = 'Пояс';
+      badge.textContent = beltable ? 'Пояс' : 'Побег';
       head.appendChild(badge);
     } else if (slotName) {            // бейдж слота: понятно, куда вещь надевается
       const badge = document.createElement('span');
@@ -1901,7 +1921,7 @@ function renderInventory() {
     }
     const actions = document.createElement('div');
     actions.className = 'inv-actions';
-    if (isElixir) {                   // эликсир — кнопка «В пояс» (сервер помнит пояс)
+    if (beltable) {                   // эликсир — кнопка «В пояс» (сервер помнит пояс)
       // надето = сумма зарядов шаблона по всем ячейкам; есть = сколько в рюкзаке.
       // Нельзя надеть больше, чем есть (#4). Мощь копится в стопку (можно без
       // свободной ячейки), жизнь занимает новый слот — поэтому ей нужна свободная.

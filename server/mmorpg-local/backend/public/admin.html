@@ -2,8 +2,9 @@
 <html lang="ru">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Гроссбух мира — админ</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
   :root{
     --ink:#12161F; --ink2:#181E2B; --panel:#1C2333; --line:#2A3147;
@@ -87,6 +88,28 @@
     nav button{padding:8px 10px;font-size:12px}
     .grid2{grid-template-columns:1fr}}
 
+  /* Телефон: боковое меню превращается в верхнюю ленту, всё в одну колонку */
+  @media (max-width:640px){
+    #app{grid-template-columns:1fr;grid-template-rows:auto auto 1fr}
+    aside{grid-row:auto;grid-column:1;flex-direction:row;align-items:stretch;
+      border-right:none;border-bottom:1px solid var(--line);overflow-x:auto}
+    aside .wordmark{display:none}
+    nav{display:flex;flex-direction:row;padding:0;overflow-x:auto;width:100%}
+    nav button{border-left:none;border-bottom:3px solid transparent;border-radius:0;
+      white-space:nowrap;padding:11px 13px;font-size:13px}
+    nav button.active{border-left:none;border-bottom-color:var(--brass);background:rgba(201,149,63,.07)}
+    header{padding:0 12px;gap:8px}
+    header h1{font-size:14px}
+    .stamp-env{display:none}
+    main{padding:12px 12px 64px;overflow-x:auto;-webkit-overflow-scrolling:touch}
+    .grid2,.form{grid-template-columns:1fr}
+    .cards{gap:8px}.card{min-width:0;flex:1 1 44%;padding:10px 12px}
+    .card b{font-size:18px}
+    .toolbar{gap:8px}.toolbar input,.toolbar select{flex:1 1 130px;min-width:0}
+    table{font-size:11.5px}th,td{padding:5px 7px}
+    #toast{left:12px;right:12px;bottom:12px;max-width:none}
+  }
+
   #toast{position:fixed;right:22px;bottom:22px;background:var(--ink2);
     border:2px solid var(--brass);color:var(--brass2);
     font:600 12px var(--mono);letter-spacing:.14em;text-transform:uppercase;
@@ -104,7 +127,7 @@
 </head>
 <body>
 
-<div id="login">
+<div id="login" style="display:none">
   <form id="login-form">
     <div class="wordmark">Гроссбух мира<small>панель управления · local</small></div>
     <input id="login-pass" type="password" placeholder="Пароль администратора"
@@ -903,7 +926,30 @@ $('#login-form').addEventListener('submit', async (e) => {
       ? 'Админка выключена: задай ADMIN_PASSWORD в .env'
       : 'Пароль не подходит'; }
 });
-if (KEY) api('/login', { password: KEY }).then(enter).catch(logout);
+
+/** Вход через Telegram (без пароля): берём initData из WebApp, меняем на токен. */
+async function tryTelegramLogin(){
+  const tg = window.Telegram && window.Telegram.WebApp;
+  if (!tg || !tg.initData) return false;
+  try { tg.ready(); tg.expand(); } catch (e) {}
+  try {
+    const r = await fetch('/admin/api/telegram-login', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ initData: tg.initData }) });
+    const d = await r.json().catch(() => ({}));
+    if (r.ok && d.key){ KEY = d.key; sessionStorage.setItem('adminKey', KEY); return true; }
+  } catch (e) {}
+  return false;
+}
+
+// Старт: внутри Telegram — вход без пароля; иначе сохранённый ключ; иначе форма.
+(async () => {
+  const inTelegram = !!(window.Telegram && window.Telegram.WebApp
+    && window.Telegram.WebApp.initData);
+  if (inTelegram && await tryTelegramLogin()){ enter(); return; }
+  if (KEY){ try { await api('/stats'); enter(); return; } catch (e) {} }
+  logout();
+})();
 </script>
 </body>
 </html>

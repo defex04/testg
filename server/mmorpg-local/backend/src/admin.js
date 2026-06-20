@@ -5,6 +5,7 @@ import { game, auth, redis, tx, adminPg, clearConfigCache } from './db.js';
 import { addCurrency, wallet, CUR } from './economy.js';
 import { adminAbort, adminSetIntervention } from './battle/manager.js';
 import { cfg } from './config.js';
+import { verifyInitData } from './auth.js';
 
 /**
  * Админ-API: /admin/api/*, заголовок x-admin-key.
@@ -21,11 +22,29 @@ async function audit(action, targetType, targetId, details) {
 }
 
 export function adminRoutes(app) {
+  // Токены входа через Telegram (выдаём после проверки initData + whitelist).
+  // В памяти процесса: при рестарте сервера достаточно перезайти из Telegram.
+  const adminTokens = new Map();                 // token -> срок годности, мс
+  const TOKEN_TTL = 12 * 3600 * 1000;
+  const issueToken = () => {
+    const t = randomUUID();
+    adminTokens.set(t, Date.now() + TOKEN_TTL);
+    return t;
+  };
+  const tokenValid = (t) => {
+    const exp = t && adminTokens.get(t);
+    if (!exp) return false;
+    if (exp < Date.now()) { adminTokens.delete(t); return false; }
+    return true;
+  };
+  // админка включена, если задан пароль ИЛИ список Telegram-админов
+  const adminEnabled = () => !!cfg.adminPassword || cfg.adminTelegramIds.length > 0;
+
   const guard = (req, res, next) => {
-    if (!cfg.adminPassword) return res.status(503).json({ error: 'admin_disabled' });
-    if (req.headers['x-admin-key'] !== cfg.adminPassword)
-      return res.status(401).json({ error: 'unauthorized' });
-    next();
+    if (!adminEnabled()) return res.status(503).json({ error: 'admin_disabled' });
+    const key = req.headers['x-admin-key'];
+    if ((cfg.adminPassword && key === cfg.adminPassword) || tokenValid(key)) return next();
+    return res.status(401).json({ error: 'unauthorized' });
   };
 
   app.post('/admin/api/login', (req, res) => {
@@ -33,6 +52,25 @@ export function adminRoutes(app) {
     if ((req.body || {}).password !== cfg.adminPassword)
       return res.status(401).json({ error: 'wrong_password' });
     res.json({ ok: true });
+  });
+
+  // Вход через Telegram без пароля: проверяем подпись initData и что tg-id
+  // в списке админов (ADMIN_TELEGRAM_IDS). Возвращаем разовый ключ-токен,
+  // который клиент шлёт как x-admin-key (как пароль, но без ввода).
+  app.post('/admin/api/telegram-login', (req, res) => {
+    if (!cfg.botToken) return res.status(503).json({ error: 'bot_token_not_configured' });
+    if (!cfg.adminTelegramIds.length)
+      return res.status(503).json({ error: 'tg_admin_not_configured' });
+    const { initData } = req.body || {};
+    const user = initData && verifyInitData(initData);
+    if (!user) return res.status(401).json({ error: 'bad_signature' });
+    // в списке админов можно указать tg-id ИЛИ @username (без учёта регистра/@)
+    const allow = cfg.adminTelegramIds.map((s) => s.replace(/^@/, '').toLowerCase());
+    const uname = String(user.username || '').toLowerCase();
+    if (!allow.includes(String(user.id)) && !(uname && allow.includes(uname)))
+      return res.status(403).json({ error: 'not_admin' });
+    res.json({ ok: true, key: issueToken(),
+      admin: { id: user.id, username: user.username ?? null } });
   });
 
   // ================= общая статистика =================
