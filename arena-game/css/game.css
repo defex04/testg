@@ -47,6 +47,19 @@
   --kb: 0px;
   --menu-h: 0px;          /* высота нижнего меню «замка» (ставит JS) */
 
+  /* Безопасные зоны Telegram Mini App в ПОЛНОЭКРАННОМ режиме (tg.requestFullscreen):
+     сумма device safe-area (tg.safeAreaInset: вырез/статус-бар) и контентной
+     (tg.contentSafeAreaInset: место под плавающими кнопками Telegram ✕/⋯ сверху).
+     Заполняет JS (syncTgInsets). Вне Telegram и в обычном окне — нули, и тогда
+     работает env(safe-area-inset-*). --safe-h — высота за вычетом верхней/нижней
+     безопасных зон: по ней строится игровой бокс 9:16, чтобы шапка и меню не
+     уезжали под статус-бар и кнопки Telegram. */
+  --tg-inset-top: 0px;
+  --tg-inset-bottom: 0px;
+  --tg-inset-left: 0px;
+  --tg-inset-right: 0px;
+  --safe-h: calc(var(--app-h, 100dvh) - var(--tg-inset-top) - var(--tg-inset-bottom));
+
   /* собранные тени рамок — мягкие, без жёстких контуров */
   --frame-shadow:
     0 10px 30px rgba(0, 0, 0, .45),
@@ -157,15 +170,17 @@ body.loc-castle .castle-main-menu { display: flex; }
 
 body.loc-castle .game {
   position: relative;
-  /* размер — по ПОЛНОЙ высоте (--app-h, от клавиатуры не зависит): игра не
-     масштабируется при открытии клавиатуры. Сам экран НЕ двигается — клавиатура
-     накрывает нижнее меню, а поле ввода чата поднимает над собой только док
-     (см. .bottom-dock ниже). */
-  width: min(100vw, calc(var(--app-h, 100dvh) * 9 / 16));
-  height: var(--app-h, 100dvh);
+  /* размер — по БЕЗОПАСНОЙ высоте (--safe-h = --app-h минус зоны Telegram): игра
+     не масштабируется при открытии клавиатуры, а в полноэкранном Telegram бокс
+     9:16 целиком помещается в безопасную область (отступы --tg-inset-* в margin),
+     не уезжая под статус-бар и кнопки ✕/⋯. Вне Telegram зоны = 0 → как раньше.
+     Сам экран при клавиатуре не двигается — её накрывает нижнее меню, а поле
+     ввода чата поднимает над собой только док (см. .bottom-dock ниже). */
+  width: min(100vw, calc(var(--safe-h) * 9 / 16));
+  height: var(--safe-h);
   max-height: calc(100vw * 16 / 9);
   max-width: none;
-  margin: 0 auto;
+  margin: var(--tg-inset-top) auto var(--tg-inset-bottom);
   padding: 0;
   gap: 0;
   overflow: hidden;
@@ -3010,10 +3025,13 @@ button.belt-slot { padding: 0; font: inherit; color: inherit; -webkit-tap-highli
   .chat-input { padding: 8px 12px; font-size: 12px; }
   .chat-send { padding: 8px 13px; font-size: 12px; }
 
-  /* гардероб на телефоне — во весь экран */
+  /* гардероб на телефоне — во весь экран; в полноэкранном Telegram шапка с ✕
+     и пояс не должны уходить под статус-бар / кнопки и домашний индикатор */
   .dressing-card {
     width: 100vw;
     height: 100dvh;
+    padding-top: var(--tg-inset-top);
+    padding-bottom: var(--tg-inset-bottom);
     border-radius: 0;
     border: none;
   }
@@ -3059,10 +3077,11 @@ button.belt-slot { padding: 0; font: inherit; color: inherit; -webkit-tap-highli
 /* первая локация на телефоне 9:16 */
 @media (max-width: 700px) {
   body.loc-castle .game {
-    /* размер по ПОЛНОЙ высоте (--app-h) — игра не масштабируется под
-       клавиатуру; вместо этого сдвигается вверх на --kb (см. базовое правило) */
-    width: min(100vw, calc(var(--app-h, 100dvh) * 9 / 16));
-    height: min(var(--app-h, 100dvh), calc(100vw * 16 / 9));
+    /* размер по БЕЗОПАСНОЙ высоте (--safe-h) — игра не масштабируется под
+       клавиатуру; вместо этого сдвигается вверх на --kb (см. базовое правило).
+       Отступы безопасной зоны Telegram — в margin базового правила. */
+    width: min(100vw, calc(var(--safe-h) * 9 / 16));
+    height: min(var(--safe-h), calc(100vw * 16 / 9));
   }
   body.loc-castle .hud-top { padding: max(4px, env(safe-area-inset-top)) 4px 0; }
   .castle-perimeter { padding: 0 6px; }
@@ -3091,8 +3110,8 @@ button.belt-slot { padding: 0; font: inherit; color: inherit; -webkit-tap-highli
   body.loc-castle .game {
     width: 100vw;
     height: calc(100vw * 16 / 9);
-    /* при открытой клавиатуре потолок высоты опускается до видимой области */
-    max-height: var(--app-h, 100dvh);
+    /* потолок высоты — безопасная область (минус зоны Telegram и клавиатуру) */
+    max-height: var(--safe-h);
   }
 }
 
@@ -3142,4 +3161,117 @@ button.belt-slot { padding: 0; font: inherit; color: inherit; -webkit-tap-highli
 .admin-choice .ac-btn.ac-admin {
   background: linear-gradient(180deg, var(--panel-2), var(--panel-lo));
   color: var(--gold-bright);
+}
+
+/* ============================================================
+   Шестерёнка настроек в шапке игрока + окно настроек
+   ============================================================ */
+
+.pp-settings {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid var(--line-soft);
+  background: rgba(244, 205, 111, .05);
+  color: var(--gold);
+  cursor: pointer;
+  transition: color .12s, border-color .12s, transform .1s;
+}
+.pp-settings svg { width: 19px; height: 19px; }
+.pp-settings:hover { color: var(--gold-bright); border-color: var(--line); }
+.pp-settings:active { transform: scale(.94); }
+
+.settings {
+  position: fixed;
+  inset: 0;
+  z-index: 130;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: calc(24px + var(--tg-inset-top)) 24px calc(24px + var(--tg-inset-bottom));
+  background: rgba(6, 9, 4, .92);
+  backdrop-filter: blur(2px);
+}
+.settings-card {
+  width: min(380px, 100%);
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: linear-gradient(180deg, var(--panel-hi), var(--panel-lo));
+  box-shadow: 0 18px 50px rgba(0, 0, 0, .6), inset 0 1px 0 rgba(244, 205, 111, .08);
+  overflow: hidden;
+}
+.settings-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  border-bottom: 1px solid rgba(138, 111, 60, .4);
+  background: rgba(244, 205, 111, .04);
+}
+.settings-title {
+  font-family: var(--font-display);
+  font-size: 18px;
+  color: var(--gold-bright);
+  text-shadow: 0 1px 2px #000;
+}
+.settings-body { display: flex; flex-direction: column; gap: 14px; padding: 18px; }
+
+.settings-row { display: flex; align-items: center; gap: 14px; cursor: pointer; }
+.settings-row-main { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+.settings-row-name { font: 600 15px var(--font-display); color: var(--text); }
+.settings-row-desc { font-size: 12px; color: var(--muted); }
+
+/* переключатель (тумблер) */
+.switch { position: relative; flex: 0 0 auto; width: 50px; height: 28px; }
+.switch input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
+.switch-track {
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  background: var(--panel);
+  border: 1px solid var(--line-dim);
+  transition: background .15s, border-color .15s;
+}
+.switch-knob {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 28%, #ffe9ab, #c79a3f);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, .5);
+  transition: transform .15s;
+}
+.switch input:checked + .switch-track {
+  background: linear-gradient(180deg, var(--green-hi), var(--green-lo));
+  border-color: var(--line);
+}
+.switch input:checked + .switch-track .switch-knob { transform: translateX(22px); }
+
+.settings-exit {
+  appearance: none;
+  cursor: pointer;
+  margin-top: 4px;
+  padding: 12px 16px;
+  border-radius: 11px;
+  border: 1px solid var(--line-dim);
+  font: 600 15px var(--font-display);
+  color: #f0b9a0;
+  background: linear-gradient(180deg, rgba(120, 40, 28, .5), rgba(60, 20, 14, .45));
+  transition: border-color .15s, transform .1s;
+}
+.settings-exit:hover { border-color: var(--hp); }
+.settings-exit:active { transform: translateY(1px); }
+
+@media (max-width: 700px) {
+  .pp-settings { width: 30px; height: 30px; }
+  .pp-settings svg { width: 17px; height: 17px; }
 }

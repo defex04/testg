@@ -95,11 +95,83 @@ function renderXP() {
 const TG_BOT = 'mymmorpg_defex_bot';
 
 const tg = window.Telegram && window.Telegram.WebApp;
+
+// --- Полноэкранный режим (по умолчанию включён) -----------------------------
+// Выбор хранится локально; requestFullscreen/exitFullscreen появились в Bot API
+// 8.0 — в старых клиентах их нет, тогда просто разворачиваем (expand).
+const FS_KEY = 'arena.fullscreen';
+const fullscreenPref = () => {
+  try { return localStorage.getItem(FS_KEY) !== '0'; } catch { return true; }
+};
+// методы Telegram объявлены всегда, но в старых клиентах лишь логируют «not
+// supported» — поэтому проверяем версию, а не наличие метода.
+const tgSupports = (v) => !!(tg && tg.isVersionAtLeast && tg.isVersionAtLeast(v));
+function applyFullscreen(on) {
+  if (!tgSupports('8.0')) return;   // fullscreen API — Bot API 8.0+
+  try { if (on) tg.requestFullscreen(); else tg.exitFullscreen(); } catch {}
+}
+function setFullscreenPref(on) {
+  try { localStorage.setItem(FS_KEY, on ? '1' : '0'); } catch {}
+  applyFullscreen(on);
+}
+
+// Безопасные зоны: device (safeAreaInset: вырез/статус-бар) + контентная
+// (contentSafeAreaInset: место под плавающими кнопками Telegram ✕/⋯ сверху).
+// Кладём суммой в CSS-переменные --tg-inset-* — по ним бокс игры вписывается в
+// безопасную область (см. game.css). Вне Telegram остаются нули.
+function syncTgInsets() {
+  if (!tg) return;
+  const sa = tg.safeAreaInset || {};
+  const ca = tg.contentSafeAreaInset || {};
+  const s = document.documentElement.style;
+  const px = (a, b) => Math.max(0, Math.round((a || 0) + (b || 0))) + 'px';
+  s.setProperty('--tg-inset-top', px(sa.top, ca.top));
+  s.setProperty('--tg-inset-bottom', px(sa.bottom, ca.bottom));
+  s.setProperty('--tg-inset-left', px(sa.left, ca.left));
+  s.setProperty('--tg-inset-right', px(sa.right, ca.right));
+}
+
 if (tg) {
   tg.ready();
   tg.expand();
   if (tg.disableVerticalSwipes) tg.disableVerticalSwipes();
+  // предупреждение при выходе (свайп вниз / нативная кнопка ✕ «Закрыть»)
+  if (tgSupports('6.2') && tg.enableClosingConfirmation) tg.enableClosingConfirmation();
+  applyFullscreen(fullscreenPref());
+  syncTgInsets();
+  ['safeAreaChanged', 'contentSafeAreaChanged', 'fullscreenChanged'].forEach((ev) => {
+    try { tg.onEvent(ev, syncTgInsets); } catch {}
+  });
 }
+
+// --- Выход из игры (с подтверждением) ---------------------------------------
+function closeApp() {
+  if (tg) {
+    // мы уже спросили подтверждение сами — снимаем нативное, чтобы не спрашивали дважды
+    try { tg.disableClosingConfirmation && tg.disableClosingConfirmation(); } catch {}
+    if (tg.close) { tg.close(); return; }
+  }
+  window.close();
+}
+function confirmExit() {
+  const msg = 'Выйти из игры?';
+  if (tgSupports('6.2') && tg.showConfirm) tg.showConfirm(msg, (ok) => { if (ok) closeApp(); });
+  else if (window.confirm(msg)) closeApp();
+}
+
+// --- Окно настроек (шестерёнка в шапке) -------------------------------------
+(() => {
+  const el = $('settings');
+  if (!el) return;
+  const fsInput = $('set-fullscreen');
+  const open = () => { if (fsInput) fsInput.checked = fullscreenPref(); el.classList.remove('hidden'); };
+  const close = () => el.classList.add('hidden');
+  $('pp-settings')?.addEventListener('click', open);
+  $('settings-close')?.addEventListener('click', close);
+  el.addEventListener('click', (e) => { if (e.target === el) close(); });
+  fsInput?.addEventListener('change', () => setFullscreenPref(fsInput.checked));
+  $('settings-exit')?.addEventListener('click', confirmExit);
+})();
 
 // ---------------------------------------------------------------------------
 // Каркас: элементы, режимы экрана, UI локации
