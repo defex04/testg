@@ -1240,6 +1240,20 @@ $('chat-form').addEventListener('submit', (e) => {
   const vv = window.visualViewport;
   const tgApp = window.Telegram && window.Telegram.WebApp;
 
+  // Открыта ли мобильная клавиатура (сфокусировано текстовое поле). Пока да —
+  // НЕ пересчитываем «полную» высоту: иначе сигналы вьюпорта/safe-area, которые
+  // Telegram шлёт при выезде клавиатуры, схлопнули бы --app-h до высоты без
+  // клавиатуры и весь UI прыгал бы с ресайзом. Клавиатуру отрабатывает только
+  // подъём дока (--kb); полную высоту перемеряем уже после расфокуса поля.
+  const keyboardOpen = () => {
+    const a = document.activeElement;
+    if (!a) return false;
+    const tag = a.tagName;
+    if (tag === 'TEXTAREA') return true;
+    return tag === 'INPUT'
+      && a.type !== 'checkbox' && a.type !== 'radio' && a.type !== 'range' && a.type !== 'button';
+  };
+
   // «Полную» высоту НИ ОДНОМУ сигналу доверять как абсолюту нельзя: при
   // клавиатуре window.innerHeight ужимается на Android, а tg.viewportStableHeight
   // «дышит» на iOS. Поэтому полная высота = МАКСИМУМ виденного при текущей ширине,
@@ -1250,7 +1264,11 @@ $('chat-form').addEventListener('submit', (e) => {
   let baseWidth = window.innerWidth;
 
   const heights = () => {
-    if (window.innerWidth !== baseWidth) { baseWidth = window.innerWidth; baseFull = 0; }
+    // сброс «полной» высоты только при реальной смене ширины (поворот экрана),
+    // и НЕ во время ввода — клавиатура иногда дёргает ширину на пиксель
+    if (window.innerWidth !== baseWidth && !keyboardOpen()) {
+      baseWidth = window.innerWidth; baseFull = 0;
+    }
 
     // видимая часть — наименьший из доступных сигналов (ловит клавиатуру)
     let seen = window.innerHeight;
@@ -1281,6 +1299,9 @@ $('chat-form').addEventListener('submit', (e) => {
   };
   const schedule = () => { if (!raf) raf = requestAnimationFrame(apply); };
   const resetStableHeight = () => {
+    // во время ввода (клавиатура открыта) не трогаем «полную» высоту — иначе
+    // safe-area/viewport-событие от клавиатуры схлопнет --app-h и UI прыгнет (#)
+    if (keyboardOpen()) return;
     const resetAndSchedule = () => {
       baseFull = 0;
       schedule();

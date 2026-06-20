@@ -79,11 +79,24 @@
     <!-- ── панель персонажа: уровень, имя, опыт / PvP-опыт, медь ────── -->
     <header class="hud-top">
       <div class="player-plate">
-        <div class="pp-level" id="pp-level">15</div>
+        <div class="pp-level-holder">
+          <div class="pp-level" id="pp-level">15</div>
+          <span class="pp-level-cap" aria-hidden="true">УР.</span>
+        </div>
         <div class="pp-main">
           <div class="pp-name" id="pp-name">ИгрокА</div>
-          <div class="pp-bar pp-xp" title="Опыт"><div class="pp-fill" id="pp-xp-fill"></div><span class="pp-bar-text" id="pp-xp-text"></span></div>
-          <div class="pp-bar pp-pvp" title="Опыт PvP"><div class="pp-fill" id="pp-pvp-fill"></div><span class="pp-bar-text" id="pp-pvp-text"></span></div>
+          <div class="pp-meter pp-meter-xp" title="Опыт">
+            <span class="pp-meter-ico" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2.5l2.7 6.1 6.6.6-5 4.4 1.5 6.5L12 17.1 6.2 20.6l1.5-6.5-5-4.4 6.6-.6z"/></svg>
+            </span>
+            <div class="pp-bar pp-xp"><div class="pp-fill" id="pp-xp-fill"></div><span class="pp-bar-text" id="pp-xp-text"></span></div>
+          </div>
+          <div class="pp-meter pp-meter-pvp" title="Доблесть (опыт PvP)">
+            <span class="pp-meter-ico" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2.5l7.5 2.8v5.6c0 4.7-3.2 7.9-7.5 10.1-4.3-2.2-7.5-5.4-7.5-10.1V5.3z"/></svg>
+            </span>
+            <div class="pp-bar pp-pvp"><div class="pp-fill" id="pp-pvp-fill"></div><span class="pp-bar-text" id="pp-pvp-text"></span></div>
+          </div>
         </div>
         <div class="pp-money">
           <span class="pp-money-cell" title="Медь"><span class="coin coin-copper"></span><span id="pp-copper">0</span></span>

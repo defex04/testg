@@ -239,8 +239,12 @@ body.loc-castle .player-plate {
   gap: 8px;
 }
 body.loc-castle .pp-level { width: 36px; height: 36px; font-size: 14px; }
+body.loc-castle .pp-level-cap { font-size: 7px; letter-spacing: 1.5px; }
 body.loc-castle .pp-name { font-size: 12px; }
 body.loc-castle .pp-bar { height: 12px; }
+body.loc-castle .pp-meter { gap: 5px; }
+body.loc-castle .pp-meter-ico { width: 14px; height: 14px; }
+body.loc-castle .pp-meter-ico svg { width: 9px; height: 9px; }
 body.loc-castle .pp-money { padding: 4px 8px; gap: 2px 8px; }
 body.loc-castle .pp-money-cell { font-size: 11px; }
 
@@ -845,39 +849,86 @@ body.loc-castle.in-battle .sprite-main .sm-ico {
 }
 
 .player-plate {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 14px;
   width: 100%;
   padding: 10px 16px 10px 10px;
   background:
-    radial-gradient(130% 90% at 50% 0%, rgba(216, 169, 63, .06), transparent 60%),
+    radial-gradient(130% 90% at 50% 0%, rgba(216, 169, 63, .10), transparent 60%),
     linear-gradient(180deg, var(--panel-hi), var(--panel-lo));
   border: 1px solid var(--line-soft);
   border-radius: 18px;
   box-shadow:
     0 6px 18px rgba(0, 0, 0, .4),
-    inset 0 1px 0 rgba(244, 205, 111, .09);
+    inset 0 1px 0 rgba(244, 205, 111, .09),
+    inset 0 0 22px rgba(0, 0, 0, .35);
+}
+/* тонкая золотая «искра» по верхнему краю плашки */
+.player-plate::before {
+  content: "";
+  position: absolute;
+  left: 9%;
+  right: 9%;
+  top: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(255, 226, 156, .65), transparent);
+  pointer-events: none;
+}
+
+/* держатель медальона: круг уровня + подпись «УР.» под ним */
+.pp-level-holder {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+.pp-level-cap {
+  font-family: var(--font-display);
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  color: var(--gold);
+  text-shadow: 0 1px 2px #000;
+  opacity: .8;
 }
 
 /* золотой медальон уровня (общий для плашки игрока и шапки боя) */
 .pp-level, .bh-level {
+  position: relative;
   flex: 0 0 auto;
   display: flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid #5e4716;
+  border: 1px solid #6a5118;
   border-radius: 50%;
-  background: radial-gradient(circle at 35% 28%, #ffe9ab, #e3b34f 45%, #a97c25 80%, #7c5a18);
-  color: #33240a;
+  background: radial-gradient(circle at 35% 28%, #fff2c4, #e8bd57 44%, #b5852b 74%, #7c5a18);
+  color: #2e2008;
   font-weight: 700;
-  text-shadow: 0 1px 0 rgba(255, 240, 190, .55);
+  text-shadow: 0 1px 0 rgba(255, 244, 200, .6);
   box-shadow:
     0 0 0 2px rgba(8, 10, 5, .85),
-    0 0 12px rgba(216, 169, 63, .35),
-    inset 0 -3px 5px rgba(0, 0, 0, .28);
+    0 0 14px rgba(227, 179, 79, .45),
+    inset 0 -3px 5px rgba(0, 0, 0, .3),
+    inset 0 2px 4px rgba(255, 246, 214, .55);
+  overflow: hidden;
 }
 .pp-level { width: 46px; height: 46px; font-size: 18px; }
+/* бегущий по ободу блик — медальон «оживает» */
+.pp-level::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: conic-gradient(from 0deg, transparent 0 70%, rgba(255, 255, 255, .85) 80%, transparent 90% 100%);
+  -webkit-mask: radial-gradient(circle, transparent 54%, #000 60%);
+          mask: radial-gradient(circle, transparent 54%, #000 60%);
+  animation: pp-medallion-spin 4.5s linear infinite;
+  pointer-events: none;
+}
+@keyframes pp-medallion-spin { to { transform: rotate(360deg); } }
 
 .pp-main {
   flex: 1;
@@ -891,45 +942,94 @@ body.loc-castle.in-battle .sprite-main .sm-ico {
   text-align: center;
   font-family: var(--font-display);
   font-size: 14.5px;
-  color: #f6ead0;
-  text-shadow: 0 1px 2px #000;
+  font-weight: 700;
+  letter-spacing: .3px;
+  background: linear-gradient(180deg, #fff4d4 0%, #f0d48a 45%, #d59f3e 100%);
+  -webkit-background-clip: text;
+          background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, .8));
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-/* полосы опыта (зелёная) и PvP-опыта (оранжевая) с цифрами поверх */
+/* строка-индикатор: иконка-бейдж + полоса */
+.pp-meter {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.pp-meter-ico {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  color: #fff;
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, .6),
+    inset 0 -1px 2px rgba(0, 0, 0, .45),
+    inset 0 1px 1px rgba(255, 255, 255, .45);
+}
+.pp-meter-ico svg { width: 10px; height: 10px; filter: drop-shadow(0 1px 1px rgba(0, 0, 0, .5)); }
+.pp-meter-xp .pp-meter-ico {
+  background: radial-gradient(circle at 35% 30%, #c6f290, #4e9a36 70%, #2c6b1e);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, .6), 0 0 7px rgba(120, 200, 80, .5), inset 0 -1px 2px rgba(0, 0, 0, .45), inset 0 1px 1px rgba(255, 255, 255, .4);
+}
+.pp-meter-pvp .pp-meter-ico {
+  background: radial-gradient(circle at 35% 30%, #ffd699, #e0892f 70%, #9c5a1c);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, .6), 0 0 7px rgba(240, 150, 50, .5), inset 0 -1px 2px rgba(0, 0, 0, .45), inset 0 1px 1px rgba(255, 255, 255, .4);
+}
+
+/* полосы опыта (зелёная) и доблести/PvP (оранжевая) с цифрами поверх */
 .pp-bar {
   position: relative;
+  flex: 1;
+  min-width: 0;
   height: 15px;
   border-radius: 8px;
   background: #0a0d06;
   border: 1px solid rgba(0, 0, 0, .9);
-  box-shadow: inset 0 1px 3px #000, 0 0 0 1px rgba(138, 111, 60, .3);
+  box-shadow: inset 0 1px 3px #000, inset 0 -1px 2px rgba(255, 255, 255, .05), 0 0 0 1px rgba(138, 111, 60, .35);
   overflow: hidden;
 }
-.pp-fill { height: 100%; width: 100%; border-radius: 7px; transition: width .4s ease; }
+.pp-fill {
+  position: relative;
+  height: 100%;
+  width: 100%;
+  border-radius: 7px;
+  overflow: hidden;
+  transition: width .5s cubic-bezier(.3, .8, .3, 1);
+}
 .pp-xp .pp-fill {
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, .38), rgba(255, 255, 255, 0) 45%),
-    linear-gradient(180deg, #9bd36e 0%, #5da23e 50%, #356b22 100%);
+    linear-gradient(180deg, rgba(255, 255, 255, .4), rgba(255, 255, 255, 0) 45%),
+    linear-gradient(180deg, #a9e07a 0%, #5da23e 50%, #356b22 100%);
+  box-shadow: 0 0 8px rgba(120, 200, 80, .45);
 }
 .pp-pvp .pp-fill {
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, .35), rgba(255, 255, 255, 0) 45%),
-    linear-gradient(180deg, #ffc372 0%, #e08a2e 50%, #98551a 100%);
+    linear-gradient(180deg, rgba(255, 255, 255, .4), rgba(255, 255, 255, 0) 45%),
+    linear-gradient(180deg, #ffd083 0%, #ef9a35 50%, #b5631d 100%);
+  box-shadow: 0 0 8px rgba(240, 150, 50, .45);
 }
 .pp-bar-text {
   position: absolute;
   inset: 0;
+  z-index: 2;
   display: flex;
   align-items: center;
   justify-content: center;
+  white-space: nowrap;
   font-size: 9.5px;
   font-weight: 600;
-  letter-spacing: .4px;
+  letter-spacing: .3px;
   color: #fff7e3;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, .85);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, .9), 0 0 3px rgba(0, 0, 0, .7);
 }
 
 /* кошелёк — бейдж справа: медь / серебро / золото / бриллианты (2×2) */
@@ -939,9 +1039,10 @@ body.loc-castle.in-battle .sprite-main .sm-ico {
   grid-template-columns: auto auto;
   gap: 4px 12px;
   padding: 7px 12px;
-  background: rgba(244, 205, 111, .05);
-  border: 1px solid rgba(138, 111, 60, .35);
+  background: linear-gradient(180deg, rgba(48, 36, 14, .55), rgba(20, 14, 6, .55));
+  border: 1px solid rgba(180, 140, 70, .42);
   border-radius: 12px;
+  box-shadow: inset 0 1px 0 rgba(255, 222, 150, .14), inset 0 0 12px rgba(0, 0, 0, .5);
 }
 .pp-money-cell {
   display: flex;
@@ -952,15 +1053,31 @@ body.loc-castle.in-battle .sprite-main .sm-ico {
   font-weight: 700;
   color: #f0d48a;
   text-shadow: 0 1px 2px #000;
+  transition: transform .12s ease, color .12s ease;
 }
+.pp-money-cell:hover { transform: translateY(-1px); color: var(--gold-bright); }
 
-/* монетки и бриллиант */
+/* монетки и бриллиант (с пробегающим бликом) */
 .coin {
+  position: relative;
   display: inline-block;
   flex: 0 0 auto;
-  width: 11px;
-  height: 11px;
+  width: 12px;
+  height: 12px;
   border-radius: 50%;
+  overflow: hidden;
+}
+.coin::after,
+.gem::after {
+  content: "";
+  position: absolute;
+  top: -50%;
+  left: -70%;
+  width: 45%;
+  height: 200%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, .85), transparent);
+  transform: rotate(18deg);
+  animation: coin-shine 4.5s ease-in-out infinite;
 }
 .coin-copper {
   background: radial-gradient(circle at 35% 30%, #ffd9a0, #d28a3c 55%, #8a5219);
@@ -970,18 +1087,35 @@ body.loc-castle.in-battle .sprite-main .sm-ico {
   background: radial-gradient(circle at 35% 30%, #ffffff, #b9c2cc 55%, #6e7a86);
   box-shadow: 0 0 5px rgba(185, 194, 204, .45), inset 0 -1px 1px rgba(0, 0, 0, .4);
 }
+.coin-silver::after { animation-delay: 1.1s; }
 .coin-gold {
   background: radial-gradient(circle at 35% 30%, #ffe9ab, #e3b34f 55%, #9c6f1f);
   box-shadow: 0 0 5px rgba(227, 179, 79, .6), inset 0 -1px 1px rgba(0, 0, 0, .4);
 }
+.coin-gold::after { animation-delay: 2.2s; }
 .gem {
+  position: relative;
   display: inline-block;
   flex: 0 0 auto;
-  width: 12px;
-  height: 11px;
+  width: 13px;
+  height: 12px;
   background: linear-gradient(135deg, #e8f9ff 0%, #7fd4f2 45%, #2e9dc9 100%);
   clip-path: polygon(50% 100%, 0 32%, 22% 0, 78% 0, 100% 32%);
-  filter: drop-shadow(0 0 4px rgba(127, 212, 242, .55));
+  filter: drop-shadow(0 0 4px rgba(127, 212, 242, .6));
+  overflow: hidden;
+}
+.gem::after { animation-delay: 3.3s; }
+@keyframes coin-shine {
+  0% { left: -70%; }
+  18%, 100% { left: 130%; }
+}
+
+/* уважение к системной настройке «уменьшить движение» */
+@media (prefers-reduced-motion: reduce) {
+  .pp-level::before,
+  .coin::after,
+  .gem::after { animation: none; }
+  .pp-level::before { display: none; }
 }
 
 /* ---------- середина: эликсиры | панель | правые кнопки ---------- */
@@ -3158,14 +3292,18 @@ button.belt-slot { padding: 0; font: inherit; color: inherit; -webkit-tap-highli
 
   .player-plate { gap: 9px; padding: 7px 9px 7px 7px; border-radius: 14px; }
   .pp-level { width: 38px; height: 38px; font-size: 14px; }
+  .pp-level-cap { font-size: 7px; letter-spacing: 1.5px; }
   .pp-main { gap: 4px; }
   .pp-name { font-size: 12px; }
+  .pp-meter { gap: 5px; }
+  .pp-meter-ico { width: 14px; height: 14px; }
+  .pp-meter-ico svg { width: 9px; height: 9px; }
   .pp-bar { height: 13px; }
   .pp-bar-text { font-size: 8.5px; }
   .pp-money { padding: 5px 8px; border-radius: 10px; gap: 3px 8px; }
   .pp-money-cell { font-size: 10.5px; gap: 4px; }
-  .coin { width: 9px; height: 9px; }
-  .gem { width: 10px; height: 9px; }
+  .coin { width: 10px; height: 10px; }
+  .gem { width: 11px; height: 10px; }
 
   .game-mid { gap: 7px; }
 
@@ -3394,13 +3532,18 @@ button.belt-slot { padding: 0; font: inherit; color: inherit; -webkit-tap-highli
   padding: 0;
   border-radius: 50%;
   border: 1px solid var(--line-soft);
-  background: rgba(244, 205, 111, .05);
+  background: radial-gradient(circle at 35% 30%, rgba(244, 205, 111, .16), rgba(244, 205, 111, .03));
   color: var(--gold);
   cursor: pointer;
-  transition: color .12s, border-color .12s, transform .1s;
+  transition: color .12s, border-color .12s, transform .1s, box-shadow .15s;
 }
-.pp-settings svg { width: 19px; height: 19px; }
-.pp-settings:hover { color: var(--gold-bright); border-color: var(--line); }
+.pp-settings svg { width: 19px; height: 19px; transition: transform .5s ease; }
+.pp-settings:hover {
+  color: var(--gold-bright);
+  border-color: var(--line);
+  box-shadow: 0 0 10px rgba(227, 179, 79, .4);
+}
+.pp-settings:hover svg { transform: rotate(90deg); }
 .pp-settings:active { transform: scale(.94); }
 
 .settings {
