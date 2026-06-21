@@ -82,6 +82,24 @@ export const api = {
   battleInfo: (id) => rest('/api/battles/' + Number(id)),
   sendChat:  (text) => socket && socket.send(JSON.stringify({ type: 'chat', text })),
   onChat:    (fn) => socketHandlers.set('chat', fn),
+  // личные сообщения в общий чат и приватная личка (отдельный канал на пару)
+  sendPersonal: (to, text) =>
+    socket && socket.send(JSON.stringify({ type: 'chatPersonal', to, text })),
+  sendPrivate:  (to, text) =>
+    socket && socket.send(JSON.stringify({ type: 'chatPrivate', to, text })),
+  privateHistory: (peerId) => rest('/api/chat/private/' + Number(peerId)),
+  onChatDM:  (fn) => socketHandlers.set('chatDM', fn),
+  onMail:    (fn) => socketHandlers.set('mail', fn),
+  // публичная карточка игрока: по id или нику
+  playerInfo: ({ id, name }) => rest('/api/players/info?' +
+    (id ? 'id=' + Number(id) : 'name=' + encodeURIComponent(name))),
+  // ── почта ──
+  mail:       () => rest('/api/mail'),
+  mailUnread: () => rest('/api/mail/unread'),
+  mailRead:   (id) => rest('/api/mail/' + Number(id)),
+  mailSend:   (payload) => rest('/api/mail/send', payload),
+  mailTake:   (id) => rest('/api/mail/' + Number(id) + '/take', {}),
+  mailDelete: (id) => rest('/api/mail/' + Number(id) + '/delete', {}),
   /** Регистрировать ДО login: cb получит ServerBattle, если бой ещё идёт. */
   onBattleResume: (fn) => { resumeCb = fn; },
 };

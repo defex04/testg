@@ -464,7 +464,7 @@ export function adminRoutes(app) {
 
   const ITEM_COLS = ['name', 'type', 'subtype', 'quality', 'level_req', 'slot',
     'base_stats', 'requirements', 'stackable', 'max_stack', 'tradable',
-    'sellable', 'droppable', 'repairable', 'icon', 'model'];
+    'sellable', 'droppable', 'repairable', 'icon', 'model', 'price'];
   const JSON_COLS = new Set(['base_stats', 'requirements']);
 
   app.post('/admin/api/item-templates', guard, async (req, res) => {

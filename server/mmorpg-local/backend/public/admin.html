@@ -983,6 +983,7 @@ R.items = async (f = {}) => {
   ${table([
     {h:'ID',v:r=>r.id},{h:'Название',v:r=>r.name},{h:'Тип',v:r=>dict(D.itemType,r.type)},
     {h:'Слот',v:r=>dict(D.slot,r.slot)},{h:'Кач.',v:r=>r.quality},{h:'Ур.',v:r=>r.level_req},
+    {h:'Цена',v:r=>r.price||0},
     {h:'Параметры',v:r=>JSON.stringify(r.base_stats||{})},
     {h:'3D',html:r=>`<td>${r.model?'<span class="credit">✓</span>':'<span class="muted">—</span>'}</td>`},
     {h:'В мире',v:r=>r.instances},{h:'v',v:r=>r.version},
@@ -1050,6 +1051,7 @@ window.editTpl = (r) => {
         <option value="0" ${!t.stackable?'selected':''}>нет</option>
         <option value="1" ${t.stackable?'selected':''}>да</option></select></div>
       <div><label>Макс. стак</label><input id="t-maxstack" type="number" value="${t.max_stack||1}"></div>
+      <div><label>Цена (медь)</label><input id="t-price" type="number" value="${t.price||0}"></div>
     </div>
     <h3 style="margin-top:14px">Характеристики
       <button type="button" class="sm" style="margin-left:8px" onclick="addStatRow()">+ строка</button></h3>
@@ -1095,6 +1097,7 @@ window.saveTpl = async () => {
     type: +$('#t-type').value, slot: $('#t-slot').value ? +$('#t-slot').value : null,
     quality: +$('#t-q').value, icon: $('#t-icon').value.trim() || null,
     stackable: $('#t-stack').value === '1', max_stack: +$('#t-maxstack').value || 1,
+    price: +$('#t-price').value || 0,
     level_req: lvl, requirements: { level: lvl },
     base_stats: collectStats(), model,
   };

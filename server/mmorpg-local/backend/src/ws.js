@@ -3,7 +3,10 @@ import { sessionByToken } from './auth.js';
 import { getCharacter } from './characters.js';
 import { enterLocation, leavePresence } from './locations.js';
 import * as battle from './battle/manager.js';
-import { sendChat, subscribeChat } from './chat.js';
+import { sendChat, sendPersonal, sendPrivate, subscribeChat, subscribePrivate } from './chat.js';
+import { redis, redisSub } from './db.js';
+
+const MAIL_NOTIFY = (id) => `mail.notify.${id}`;
 
 /**
  * Один WebSocket на клиента: бой + чат + присутствие.
@@ -15,11 +18,30 @@ export function createHub(server) {
   const byChar = new Map();
 
   subscribeChat((msg) => {
+    const out = JSON.stringify({ type: 'chat', from: msg.senderName,
+      fromId: msg.senderId ?? null, text: msg.body,
+      to: msg.toName ?? null, toId: msg.toId ?? null });
     for (const conn of byChar.values()) {
-      if (conn.locId === msg.locId && conn.ws.readyState === 1) {
-        conn.ws.send(JSON.stringify({ type: 'chat', from: msg.senderName, text: msg.body }));
-      }
+      if (conn.locId === msg.locId && conn.ws.readyState === 1) conn.ws.send(out);
     }
+  });
+
+  // личка: сообщение адресовано конкретному зрителю (viewerId), шлём только ему
+  subscribePrivate((msg) => {
+    const conn = byChar.get(String(msg.viewerId));
+    if (!conn || conn.ws.readyState !== 1) return;
+    const mine = String(msg.fromId) === String(msg.viewerId);
+    conn.send({ type: 'chatDM',
+      peerId: mine ? msg.toId : msg.fromId,
+      peerName: mine ? msg.toName : msg.fromName,
+      text: msg.body, ts: msg.ts, mine });
+  });
+
+  // почта: пинг адресату — обновить счётчик непрочитанных (доходит между процессами)
+  redisSub.pSubscribe('mail.notify.*', (raw) => {
+    let id; try { id = JSON.parse(raw).to; } catch { return; }
+    const conn = byChar.get(String(id));
+    if (conn && conn.ws.readyState === 1) conn.send({ type: 'mail', event: 'new' });
   });
 
   wss.on('connection', async (ws, req) => {
@@ -78,6 +100,16 @@ export function createHub(server) {
             await sendChat(me, m.text);
             break;
           }
+          case 'chatPersonal': {     // личное сообщение в общий чат локации
+            const me = await getCharacter(ch.id);
+            await sendPersonal(me, m.to, m.text);
+            break;
+          }
+          case 'chatPrivate': {      // приватное сообщение (личка) в отдельный канал
+            const me = await getCharacter(ch.id);
+            await sendPrivate(me, m.to, m.text);
+            break;
+          }
         }
       } catch (e) {
         const payload = { type: 'error', error: e.message };
@@ -102,6 +134,11 @@ export function createHub(server) {
     onMoved(charId, from, to) {
       const conn = byChar.get(String(charId));
       if (conn) conn.locId = to;
+    },
+    /** Уведомить адресата о новом письме (через redis — между процессами). */
+    notifyMail(recipientId) {
+      redis.publish(MAIL_NOTIFY(recipientId),
+        JSON.stringify({ to: Number(recipientId) })).catch(() => {});
     },
   };
 }

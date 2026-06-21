@@ -7,7 +7,8 @@ const REASON = { admin: 11 };
 export async function getInventory(charId) {
   const { rows } = await game.query(
     `SELECT i.id, i.template_id, i.owner_type, i.slot, i.quantity, i.enchant_level,
-            t.name, t.icon, t.slot AS equip_slot, t.type, t.base_stats
+            t.name, t.icon, t.slot AS equip_slot, t.type, t.base_stats,
+            t.price, t.tradable
        FROM item_instances i JOIN item_templates t ON t.id = i.template_id
       WHERE i.owner_id = $1 AND i.owner_type IN (1, 2) AND i.status = 1
       ORDER BY i.id`, [charId]);
@@ -15,6 +16,7 @@ export async function getInventory(charId) {
     id: r.id, templateId: r.template_id, name: r.name, icon: r.icon,
     type: r.type, slot: r.equip_slot, quantity: r.quantity,
     enchant: r.enchant_level, stats: r.base_stats,
+    price: Number(r.price) || 0, tradable: r.tradable !== false,
     equipped: r.owner_type === OWNER.equipment,
   }));
 }

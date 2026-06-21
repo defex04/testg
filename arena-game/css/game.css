@@ -3722,3 +3722,317 @@ body.tg-fullscreen .net-status { display: flex; }
   0% { transform: translateX(-120%); }
   100% { transform: translateX(330%); }
 }
+
+/* ===========================================================================
+   ПОЧТА · ЛИЧКА · КЛИКАБЕЛЬНЫЕ ОБЪЕКТЫ ЧАТА · МЕНЮ НИКА
+   =========================================================================== */
+
+/* --- бейдж непрочитанных писем на конверте --- */
+.menu-icon { position: relative; }
+.mail-badge {
+  position: absolute;
+  top: -4px;
+  right: 6px;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-display);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  color: #fff;
+  background: linear-gradient(180deg, #d4452f, #9c2417);
+  border: 1px solid #f0b48a;
+  border-radius: 999px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, .55), 0 0 8px rgba(212, 69, 47, .5);
+  pointer-events: none;
+  z-index: 3;
+}
+.mail-badge.hidden { display: none; }
+
+/* --- кликабельные объекты в чате (бой / инфо) --- */
+.chat-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 0 7px;
+  margin: 0 1px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--gold-bright);
+  background: rgba(216, 169, 63, .12);
+  border: 1px solid rgba(169, 133, 63, .6);
+  border-radius: 7px;
+  text-decoration: none;
+  cursor: pointer;
+  vertical-align: baseline;
+  transition: background .12s, border-color .12s;
+}
+.chat-chip:hover { background: rgba(216, 169, 63, .22); border-color: var(--gold); color: #ffe7a5; }
+.chat-chip.info-link { color: #bfe08a; border-color: rgba(120, 160, 70, .6); background: rgba(120, 160, 70, .12); }
+.chat-chip.info-link:hover { background: rgba(120, 160, 70, .22); border-color: #9fd06a; color: #d6f0a8; }
+
+/* --- кликабельный ник + личные сообщения в общем чате --- */
+.chat-nick.tappable { cursor: pointer; text-decoration: underline dotted; text-underline-offset: 2px; }
+.chat-nick.tappable:hover { color: #ffe7a5; }
+.chat-line.personal { color: #e7d9c0; }
+.chat-line.personal b.chat-nick { color: #f0c07a; }
+.chat-line.dm.mine b { color: #9fd06a; }
+.chat-line.dm.their b { color: var(--gold-bright); }
+.chat-empty {
+  color: #8d845f;
+  font-style: italic;
+  text-align: center;
+  padding: 18px 8px;
+}
+
+/* --- вкладки лички --- */
+.chat-tab.dm-tab { display: inline-flex; align-items: center; gap: 6px; padding-right: 8px; }
+.dm-tab-name { max-width: 90px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dm-tab-badge {
+  min-width: 15px; height: 15px; padding: 0 4px;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 10px; font-weight: 700; line-height: 1;
+  color: #fff; background: #c1402c; border-radius: 999px;
+}
+.dm-tab-badge.hidden { display: none; }
+.dm-tab-close {
+  font-size: 13px; line-height: 1; color: #b6a987;
+  padding: 0 2px; border-radius: 5px; transition: color .12s, background .12s;
+}
+.dm-tab-close:hover { color: #ffd9d0; background: rgba(193, 64, 44, .35); }
+
+/* --- панель «личное в общий чат» над полем ввода --- */
+.chat-personal-bar {
+  display: flex; align-items: center; gap: 7px;
+  margin-top: 8px; padding: 5px 10px;
+  font-size: 12px; color: #e7d9c0;
+  background: rgba(216, 169, 63, .1);
+  border: 1px solid rgba(169, 133, 63, .5);
+  border-radius: 9px; flex: 0 0 auto;
+}
+.chat-personal-bar.hidden { display: none; }
+.cpb-label { color: #cdbd8d; }
+.cpb-name { color: var(--gold-bright); font-weight: 700; }
+.cpb-clear {
+  margin-left: auto; background: none; border: none; cursor: pointer;
+  color: #b6a987; font-size: 14px; padding: 0 4px;
+}
+.cpb-clear:hover { color: #ffd9d0; }
+
+/* --- меню по тапу на ник --- */
+.nickmenu { position: fixed; inset: 0; z-index: 200; }
+.nickmenu.hidden { display: none; }
+.nickmenu-pop {
+  position: fixed;
+  min-width: 190px;
+  padding: 6px;
+  background: linear-gradient(180deg, var(--panel-hi), var(--panel-lo));
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, .8), inset 0 1px 0 rgba(244, 205, 111, .08);
+}
+.nickmenu-head {
+  font-family: var(--font-display);
+  font-size: 13px;
+  color: var(--gold-bright);
+  padding: 4px 10px 7px;
+  border-bottom: 1px solid rgba(138, 111, 60, .35);
+  margin-bottom: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.nickmenu-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 9px 12px;
+  font-family: inherit;
+  font-size: 13px;
+  color: var(--text);
+  background: none;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background .12s, color .12s;
+}
+.nickmenu-item:hover { background: rgba(216, 169, 63, .14); color: var(--gold-bright); }
+
+/* --- модалка почты --- */
+.mail {
+  position: fixed; inset: 0; z-index: 72;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(5, 7, 3, .74); backdrop-filter: blur(2px);
+}
+.mail.hidden { display: none; }
+.mail-card {
+  width: min(560px, calc(100vw - 28px));
+  height: min(640px, calc(100dvh - 44px));
+  display: flex; flex-direction: column;
+  background: linear-gradient(180deg, var(--panel-hi), var(--panel-lo));
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  box-shadow: 0 12px 50px rgba(0, 0, 0, .8), inset 0 1px 0 rgba(244, 205, 111, .09);
+  overflow: hidden;
+}
+.mail-compose-btn {
+  font-family: var(--font-display);
+  font-size: 12.5px;
+  color: #eef3d8;
+  padding: 6px 12px;
+  background: linear-gradient(180deg, var(--green-hi), var(--green-md) 50%, var(--green-lo));
+  border: 1px solid var(--green-edge);
+  border-radius: 9px;
+  cursor: pointer;
+  transition: filter .15s;
+}
+.mail-compose-btn:hover { filter: brightness(1.14); }
+.mail-body { flex: 1; min-height: 0; overflow-y: auto; padding: 12px 14px; }
+
+/* список писем */
+.mail-list { display: flex; flex-direction: column; gap: 6px; }
+.mail-row {
+  display: flex; align-items: center; gap: 10px;
+  width: 100%; text-align: left;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, .025);
+  border: 1px solid rgba(138, 111, 60, .2);
+  border-radius: 11px;
+  cursor: pointer;
+  transition: border-color .14s, background .14s;
+}
+.mail-row:hover { border-color: var(--gold); background: rgba(216, 169, 63, .07); }
+.mail-dot { flex: 0 0 auto; width: 8px; height: 8px; border-radius: 50%; background: transparent; }
+.mail-row.unread .mail-dot { background: #d4452f; box-shadow: 0 0 7px rgba(212, 69, 47, .7); }
+.mail-row.unread .mail-row-from { color: var(--gold-bright); }
+.mail-row-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.mail-row-from { font-size: 13px; color: #d3c79f; font-weight: 600; }
+.mail-row-subj {
+  font-size: 12.5px; color: #b9ad88;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.mail-row-meta { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+.mail-clip { font-size: 11.5px; color: #c7b888; }
+.mail-row-date { font-size: 11px; color: #8d845f; }
+
+/* чтение письма */
+.mail-read { display: flex; flex-direction: column; gap: 10px; }
+.mail-read-head { display: flex; justify-content: space-between; align-items: baseline; font-size: 12.5px; color: #b9ad88; }
+.mail-from.tappable { cursor: pointer; text-decoration: underline dotted; text-underline-offset: 2px; }
+.mail-from.tappable:hover { color: #ffe7a5; }
+.mail-read-date { color: #8d845f; font-size: 11px; }
+.mail-read-subj { font-family: var(--font-display); font-size: 15px; color: var(--gold-bright); }
+.mail-read-body {
+  font-size: 13.5px; line-height: 1.55; color: var(--text);
+  white-space: pre-wrap; word-break: break-word;
+  padding: 10px 0; border-top: 1px solid rgba(138, 111, 60, .25);
+  border-bottom: 1px solid rgba(138, 111, 60, .25);
+}
+.mail-att-box { display: flex; flex-direction: column; gap: 7px; }
+.mail-att-title { font-size: 12px; color: #cdbd8d; }
+.mail-att, .mail-attach-row {
+  display: flex; align-items: center; gap: 9px;
+  padding: 7px 10px;
+  background: rgba(255, 255, 255, .025);
+  border: 1px solid rgba(138, 111, 60, .22);
+  border-radius: 9px;
+}
+.mail-att-icon { font-size: 17px; flex: 0 0 auto; }
+.mail-att-name { font-size: 13px; color: var(--text); flex: 1; min-width: 0; }
+.mail-att-tax { font-size: 12px; color: #e0a36a; font-variant-numeric: tabular-nums; }
+.mail-att-qty {
+  width: 56px; padding: 4px 6px; font-size: 12px; color: var(--text);
+  background: #0c1007; border: 1px solid var(--line-dim); border-radius: 7px; outline: none;
+}
+.mail-att-del {
+  background: none; border: none; cursor: pointer; color: #b6a987; font-size: 14px; padding: 0 3px;
+}
+.mail-att-del:hover { color: #ffd9d0; }
+.mail-read-actions { display: flex; gap: 9px; margin-top: 4px; }
+.mail-btn {
+  font-family: var(--font-display); font-size: 12.5px;
+  padding: 8px 14px; color: var(--text);
+  background: linear-gradient(180deg, #262f17, #171d0d);
+  border: 1px solid var(--line-dim); border-radius: 9px; cursor: pointer;
+  transition: border-color .14s, color .14s;
+}
+.mail-btn:hover { border-color: var(--gold); color: var(--gold-bright); }
+.mail-btn.sm { padding: 5px 10px; font-size: 11.5px; }
+.mail-btn.mail-send {
+  color: #eef3d8;
+  background: linear-gradient(180deg, var(--green-hi), var(--green-md) 50%, var(--green-lo));
+  border-color: var(--green-edge);
+}
+.mail-btn.mail-send:hover { filter: brightness(1.14); color: #fff; }
+.mail-btn:disabled { opacity: .5; cursor: default; }
+.mail-take { align-self: flex-start; }
+
+/* написание письма */
+.mail-compose { display: flex; flex-direction: column; gap: 11px; }
+.mail-field { display: flex; flex-direction: column; gap: 4px; }
+.mail-field > span { font-size: 12px; color: #cdbd8d; }
+.mail-field input, .mail-field textarea {
+  width: 100%; padding: 9px 12px; font-family: inherit; font-size: 13px;
+  color: var(--text); background: #0c1007;
+  border: 1px solid var(--line-dim); border-radius: 10px; outline: none;
+  box-shadow: inset 0 2px 6px rgba(0, 0, 0, .55); resize: vertical;
+}
+.mail-field input:focus, .mail-field textarea:focus {
+  border-color: #a9853f; box-shadow: inset 0 2px 6px rgba(0, 0, 0, .55), 0 0 8px rgba(216, 169, 63, .22);
+}
+.mail-attach { display: flex; flex-direction: column; gap: 7px; }
+.mail-attach-head { display: flex; align-items: center; justify-content: space-between; font-size: 12px; color: #cdbd8d; }
+.mail-attach-list { display: flex; flex-direction: column; gap: 6px; }
+.mail-tax {
+  font-size: 12.5px; color: #cdbd8d; text-align: right;
+  padding: 8px 2px 0; border-top: 1px solid rgba(138, 111, 60, .25);
+}
+.mail-tax b { color: #e0a36a; font-variant-numeric: tabular-nums; }
+
+/* карточка игрока (информация) */
+.pinfo { display: flex; flex-direction: column; gap: 8px; padding: 4px 2px; }
+.pinfo-row { display: flex; justify-content: space-between; font-size: 13px; color: #b9ad88; }
+.pinfo-row b { color: var(--gold-bright); }
+.pinfo-on { color: #9fd06a !important; }
+.pinfo-off { color: #9a8f6c !important; }
+.pinfo-about {
+  font-size: 12.5px; color: var(--text); line-height: 1.5;
+  padding: 8px 0; border-top: 1px solid rgba(138, 111, 60, .25);
+  border-bottom: 1px solid rgba(138, 111, 60, .25); white-space: pre-wrap;
+}
+.pinfo-actions { display: flex; gap: 9px; margin-top: 4px; }
+
+/* выбор вещи для вложения */
+.attach-picker {
+  position: fixed; inset: 0; z-index: 90;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(5, 7, 3, .7); backdrop-filter: blur(2px);
+}
+.attach-picker-card {
+  width: min(440px, calc(100vw - 36px));
+  max-height: min(70dvh, 560px);
+  display: flex; flex-direction: column;
+  background: linear-gradient(180deg, var(--panel-hi), var(--panel-lo));
+  border: 1px solid var(--line); border-radius: 16px; overflow: hidden;
+  box-shadow: 0 12px 44px rgba(0, 0, 0, .8);
+}
+.attach-picker-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 11px 15px; font-family: var(--font-display); font-size: 14px;
+  color: var(--gold-bright); border-bottom: 1px solid rgba(138, 111, 60, .4);
+}
+.attach-picker-close { background: none; border: none; color: var(--text); font-size: 17px; cursor: pointer; }
+.attach-picker-close:hover { color: var(--gold-bright); }
+.attach-picker-list { padding: 10px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
+.attach-pick-row {
+  display: flex; align-items: center; gap: 9px; width: 100%; text-align: left;
+  padding: 9px 11px; background: rgba(255, 255, 255, .025);
+  border: 1px solid rgba(138, 111, 60, .2); border-radius: 10px; cursor: pointer;
+  transition: border-color .14s, background .14s;
+}
+.attach-pick-row:hover { border-color: var(--gold); background: rgba(216, 169, 63, .07); }
+.attach-pick-price { font-size: 11px; color: #b29a6a; flex: 0 0 auto; }

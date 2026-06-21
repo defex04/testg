@@ -1144,19 +1144,21 @@ function applyMemberSort(key) {
 $('sort-hp')?.addEventListener('click', () => applyMemberSort('hp'));
 $('sort-en')?.addEventListener('click', () => applyMemberSort('en'));
 
-// подвкладки чата — заглушка
-document.querySelectorAll('.chat-tab').forEach((t) => {
-  t.addEventListener('click', () => {
-    document.querySelectorAll('.chat-tab').forEach((x) => x.classList.toggle('active', x === t));
-  });
-});
-
 // ---------------------------------------------------------------------------
-// Чат локации: отправка на сервер, своё сообщение возвращается из pub/sub
+// Чат: вкладки (общий / клан / личка), личные сообщения в общем, кликабельные
+// объекты-ссылки на бой и инфо игрока. Личка — отдельные закрываемые вкладки.
 // ---------------------------------------------------------------------------
 
 const chatLog = $('chat-log');
+const chatTabsEl = $('chat-tabs');
+const chatInput = $('chat-input');
+const personalBar = $('chat-personal-bar');
 const MAX_CHAT_LINES = 150;   // история не растёт бесконечно
+
+let activeChat = 'common';          // 'common' | 'clan' | 'dm:<peerId>'
+let personalTarget = null;          // {id, name} — следующее сообщение в общий чат как личное
+const commonMsgs = [];              // {kind, author, authorId, text, to, toId}
+const dmConvos = new Map();         // peerId(String) -> {name, msgs:[{mine,text,ts}], unread, loaded}
 
 /** Системный шум из истории — не показываем при входе. Объявления боёв оставляем — по ним вмешиваются. */
 function isChatJunk(sender, body) {
@@ -1174,59 +1176,693 @@ function scrollChatToBottom() {
   });
 }
 
-/** История чата локации: только сообщения игроков и полезные системные. */
-function loadChatHistory(rows) {
+// ── Кликабельные объекты в тексте: «Бой #N», ссылки ?battle=N и ?info=Ник ──
+
+function battleChip(id, label) {
+  const a = document.createElement('a');
+  a.className = 'chat-chip battle-link';
+  a.href = '#';
+  a.textContent = '⚔ ' + (label || ('Бой #' + id));
+  a.addEventListener('click', (e) => { e.preventDefault(); openBattleInfo(Number(id)); });
+  return a;
+}
+function infoChip(name) {
+  const a = document.createElement('a');
+  a.className = 'chat-chip info-link';
+  a.href = '#';
+  a.textContent = '👤 ' + name;
+  a.addEventListener('click', (e) => { e.preventDefault(); openPlayerInfo({ name }); });
+  return a;
+}
+/** Если URL — ссылка игры (?battle=N или ?info=Ник), вернуть чип, иначе null. */
+function chipFromUrl(url) {
+  try {
+    const u = new URL(url);
+    const b = u.searchParams.get('battle');
+    if (b && /^\d+$/.test(b)) return battleChip(Number(b));
+    const info = u.searchParams.get('info');
+    if (info) return infoChip(info);
+  } catch { /* не URL — ниже как текст */ }
+  return null;
+}
+/** Разобрать текст на текстовые узлы и кликабельные объекты. */
+function linkifyInto(el, text) {
+  const re = /(https?:\/\/[^\s]+)|Бой #(\d+)/g;
+  let last = 0, m;
+  while ((m = re.exec(text))) {
+    if (m.index > last) el.appendChild(document.createTextNode(text.slice(last, m.index)));
+    if (m[1]) {
+      const chip = chipFromUrl(m[1]);
+      el.appendChild(chip || document.createTextNode(m[1]));
+    } else {
+      el.appendChild(battleChip(Number(m[2]), m[0]));
+    }
+    last = re.lastIndex;
+  }
+  if (last < text.length) el.appendChild(document.createTextNode(text.slice(last)));
+}
+
+/** Кликабельный ник: открывает меню действий (если это не мы и есть id). */
+function nickEl(name, id) {
+  const b = document.createElement('b');
+  b.className = 'chat-nick';
+  b.textContent = name;
+  if (id != null && String(id) !== String(PLAYER.id)) {
+    b.classList.add('tappable');
+    b.addEventListener('click', (e) => { e.stopPropagation(); openNickMenu(e, { id, name }); });
+  }
+  return b;
+}
+
+// ── Построение строк чата ──
+
+function chatLineEl(msg) {
+  const line = document.createElement('div');
+  if (msg.kind === 'system') {
+    line.className = 'chat-line system';
+    const b = document.createElement('b');
+    b.textContent = '[Система]';
+    line.append(b, document.createTextNode(': '));
+    linkifyInto(line, msg.text);
+    return line;
+  }
+  line.className = 'chat-line' + (msg.to ? ' personal' : '');
+  line.appendChild(nickEl(msg.author, msg.authorId));
+  if (msg.to) {                       // личное в общем: «Игрок → Цель»
+    line.appendChild(document.createTextNode(' → '));
+    line.appendChild(nickEl(msg.to, msg.toId));
+  }
+  line.appendChild(document.createTextNode(': '));
+  linkifyInto(line, msg.text);
+  return line;
+}
+
+function dmLineEl(m) {
+  const line = document.createElement('div');
+  line.className = 'chat-line dm ' + (m.mine ? 'mine' : 'their');
+  const b = document.createElement('b');
+  b.textContent = m.mine ? 'Вы' : (m.peerName || '');
+  line.append(b, document.createTextNode(': '));
+  linkifyInto(line, m.text);
+  return line;
+}
+
+// ── Рендер вкладок и активного журнала ──
+
+function dmKey(id) { return 'dm:' + id; }
+
+function renderChatTabs() {
+  // статичные вкладки уже в HTML; динамически добавляем/убираем вкладки лички
+  chatTabsEl.querySelectorAll('.chat-tab').forEach((t) => {
+    const tab = t.dataset.chat;
+    t.classList.toggle('active', tab === activeChat);
+  });
+  // убрать вкладки лички закрытых бесед
+  chatTabsEl.querySelectorAll('.chat-tab.dm-tab').forEach((t) => {
+    if (!dmConvos.has(t.dataset.peer)) t.remove();
+  });
+  for (const [pid, convo] of dmConvos) {
+    let tab = chatTabsEl.querySelector(`.chat-tab.dm-tab[data-peer="${pid}"]`);
+    if (!tab) {
+      tab = document.createElement('button');
+      tab.className = 'chat-tab dm-tab';
+      tab.dataset.chat = dmKey(pid);
+      tab.dataset.peer = pid;
+      tab.innerHTML = `<span class="dm-tab-name"></span>`
+        + `<span class="dm-tab-badge hidden"></span>`
+        + `<span class="dm-tab-close" title="Закрыть">✕</span>`;
+      chatTabsEl.appendChild(tab);
+    }
+    tab.querySelector('.dm-tab-name').textContent = convo.name;
+    const badge = tab.querySelector('.dm-tab-badge');
+    badge.textContent = convo.unread > 9 ? '9+' : String(convo.unread);
+    badge.classList.toggle('hidden', !convo.unread);
+    tab.classList.toggle('active', dmKey(pid) === activeChat);
+  }
+}
+
+function renderActiveChat() {
   chatLog.innerHTML = '';
+  if (activeChat === 'clan') {
+    chatLog.innerHTML = '<div class="chat-empty">Клановый чат скоро появится.</div>';
+  } else if (activeChat.startsWith('dm:')) {
+    const convo = dmConvos.get(activeChat.slice(3));
+    if (convo) for (const m of convo.msgs) chatLog.appendChild(dmLineEl({ ...m, peerName: convo.name }));
+  } else {
+    for (const msg of commonMsgs) chatLog.appendChild(chatLineEl(msg));
+  }
+  personalBar.classList.toggle('hidden', !(activeChat === 'common' && personalTarget));
+  scrollChatToBottom();
+}
+
+function setActiveChat(tab) {
+  activeChat = tab;
+  if (tab.startsWith('dm:')) {        // открыли личку — сбросить непрочитанные
+    const convo = dmConvos.get(tab.slice(3));
+    if (convo) convo.unread = 0;
+  }
+  updateChatInputMode();
+  renderChatTabs();
+  renderActiveChat();
+}
+
+function updateChatInputMode() {
+  if (activeChat.startsWith('dm:')) {
+    const convo = dmConvos.get(activeChat.slice(3));
+    chatInput.placeholder = convo ? `Сообщение для ${convo.name}…` : 'Сообщение…';
+  } else if (activeChat === 'clan') {
+    chatInput.placeholder = 'Клановый чат скоро…';
+  } else {
+    chatInput.placeholder = personalTarget
+      ? `Личное для ${personalTarget.name}…` : 'Введите сообщение…';
+  }
+}
+
+// ── Общий чат ──
+
+function pushCommon(msg) {
+  commonMsgs.push(msg);
+  while (commonMsgs.length > MAX_CHAT_LINES) commonMsgs.shift();
+  if (activeChat === 'common') {
+    chatLog.appendChild(chatLineEl(msg));
+    while (chatLog.children.length > MAX_CHAT_LINES) chatLog.firstChild.remove();
+    scrollChatToBottom();
+  }
+}
+
+/** Системная строка в общий чат (вход в локацию, объявления боёв, чек об оплате почты). */
+function chatMessage(author, text, system = false) {
+  if (system || author === 'Система') pushCommon({ kind: 'system', text: String(text) });
+  else pushCommon({ kind: 'msg', author, authorId: null, text: String(text) });
+}
+function chatSystem(text) { pushCommon({ kind: 'system', text: String(text) }); }
+
+/** Входящее сообщение общего чата (из pub/sub): обычное или личное (to). */
+function onCommonChat(m) {
+  if (m.from === 'Система') { pushCommon({ kind: 'system', text: String(m.text) }); return; }
+  pushCommon({ kind: 'msg', author: m.from, authorId: m.fromId ?? null,
+    text: String(m.text), to: m.to || null, toId: m.toId ?? null });
+}
+
+/** История общего чата локации: только сообщения игроков и полезные системные. */
+function loadChatHistory(rows) {
+  commonMsgs.length = 0;
   for (const h of rows) {
     if (isChatJunk(h.sender_name, h.body)) continue;
-    appendChatLine(h.sender_name, h.body, h.sender_name === 'Система');
+    if (h.sender_name === 'Система') commonMsgs.push({ kind: 'system', text: String(h.body) });
+    else commonMsgs.push({ kind: 'msg', author: h.sender_name,
+      authorId: h.sender_id ?? null, text: String(h.body) });
   }
-  scrollChatToBottom();
+  if (activeChat === 'common') renderActiveChat();
 }
 
-function appendChatLine(author, text, system = false) {
-  const line = document.createElement('div');
-  line.className = 'chat-line' + (system || author === 'Система' ? ' system' : '');
-  const b = document.createElement('b');
-  b.textContent = system || author === 'Система' ? `[${author}]` : author;
-  line.appendChild(b);
-  line.appendChild(document.createTextNode(': '));
-  const str = String(text);
-  const m = str.match(/Бой #(\d+)/);
-  if (m) {
-    line.appendChild(document.createTextNode(str.slice(0, m.index)));
-    const a = document.createElement('a');
-    a.className = 'battle-link';
-    a.href = '#';
-    a.textContent = m[0];
-    a.addEventListener('click', (e) => {
-      e.preventDefault();
-      openBattleInfo(Number(m[1]));
-    });
-    line.appendChild(a);
-    line.appendChild(document.createTextNode(str.slice(m.index + m[0].length)));
-  } else {
-    line.appendChild(document.createTextNode(str));
+// ── Личка (DM) ──
+
+function ensureConvo(peer) {
+  const pid = String(peer.id);
+  let convo = dmConvos.get(pid);
+  if (!convo) {
+    convo = { name: peer.name, msgs: [], unread: 0, loaded: false };
+    dmConvos.set(pid, convo);
+  } else if (peer.name) {
+    convo.name = peer.name;
   }
-  chatLog.appendChild(line);
-  while (chatLog.children.length > MAX_CHAT_LINES) chatLog.firstChild.remove();
+  return convo;
 }
 
-function chatMessage(author, text, system = false) {
-  appendChatLine(author, text, system);
-  scrollChatToBottom();
+/** Открыть (или создать) вкладку лички с игроком и переключиться на неё. */
+async function openDmTab(peer) {
+  const pid = String(peer.id);
+  const convo = ensureConvo(peer);
+  closeMail(); closeBattleInfo();     // освободить чат из-под модалок
+  openCastleDock('chat');             // показать чат-панель
+  setActiveChat(dmKey(pid));
+  if (!convo.loaded && online) {
+    convo.loaded = true;
+    try {
+      const rows = await api.privateHistory(peer.id);
+      convo.msgs = rows.map((r) => ({ mine: r.mine, text: r.body, ts: r.ts }));
+      if (activeChat === dmKey(pid)) renderActiveChat();
+      else renderChatTabs();
+    } catch (e) { console.error('История лички:', e); }
+  }
+  chatInput.focus();
 }
+
+function closeDmTab(pid) {
+  dmConvos.delete(String(pid));
+  if (activeChat === dmKey(pid)) activeChat = 'common';
+  updateChatInputMode();
+  renderChatTabs();
+  renderActiveChat();
+}
+
+/** Входящее приватное сообщение. */
+function onDmMessage(m) {
+  const pid = String(m.peerId);
+  const convo = ensureConvo({ id: pid, name: m.peerName });
+  convo.msgs.push({ mine: !!m.mine, text: String(m.text), ts: m.ts });
+  while (convo.msgs.length > MAX_CHAT_LINES) convo.msgs.shift();
+  if (activeChat === dmKey(pid)) {
+    chatLog.appendChild(dmLineEl({ mine: !!m.mine, text: String(m.text), peerName: convo.name }));
+    while (chatLog.children.length > MAX_CHAT_LINES) chatLog.firstChild.remove();
+    scrollChatToBottom();
+  } else if (!m.mine) {
+    convo.unread++;
+  }
+  renderChatTabs();
+}
+
+// ── Личное сообщение в общий чат: цель ставится из меню ника ──
+
+function setPersonalTarget(peer) {
+  personalTarget = { id: peer.id, name: peer.name };
+  closeMail(); closeBattleInfo();     // показать общий чат под модалками
+  openCastleDock('chat');
+  setActiveChat('common');
+  $('cpb-name').textContent = peer.name;
+  personalBar.classList.remove('hidden');
+  updateChatInputMode();
+  chatInput.focus();
+}
+function clearPersonalTarget() {
+  personalTarget = null;
+  personalBar.classList.add('hidden');
+  updateChatInputMode();
+}
+$('cpb-clear').addEventListener('click', clearPersonalTarget);
+
+// ── Переключение вкладок и отправка ──
+
+chatTabsEl.addEventListener('click', (e) => {
+  const close = e.target.closest('.dm-tab-close');
+  if (close) { e.stopPropagation(); closeDmTab(close.closest('.dm-tab').dataset.peer); return; }
+  const tab = e.target.closest('.chat-tab');
+  if (tab) setActiveChat(tab.dataset.chat);
+});
 
 $('chat-form').addEventListener('submit', (e) => {
   e.preventDefault();
-  const input = $('chat-input');
-  const text = input.value.trim();
-  input.value = '';
-  input.blur();                          // Enter — отправили и скрыли клавиатуру
+  const text = chatInput.value.trim();
+  chatInput.value = '';
+  chatInput.blur();                      // Enter — отправили и скрыли клавиатуру
   if (!text) return;
-  if (online) api.sendChat(text);        // вернётся всем в локации, включая нас
-  else chatMessage(PLAYER.name, text);   // оффлайн: локальное эхо
+  if (!online) {                         // оффлайн: локальное эхо в общий
+    chatMessage(PLAYER.name, text);
+    return;
+  }
+  if (activeChat.startsWith('dm:')) {
+    const convo = dmConvos.get(activeChat.slice(3));
+    if (convo) api.sendPrivate(convo.name, text);   // эхо вернётся через chatDM
+  } else if (activeChat === 'common' && personalTarget) {
+    api.sendPersonal(personalTarget.name, text);    // вернётся всем в локации
+    clearPersonalTarget();
+  } else {
+    api.sendChat(text);                  // обычный общий чат
+  }
 });
+
+// ---------------------------------------------------------------------------
+// Меню по тапу на ник игрока: личка / личное в общий / копировать / инфо
+// ---------------------------------------------------------------------------
+
+const nickmenuEl = $('nickmenu');
+const nickmenuPop = $('nickmenu-pop');
+let nickmenuPeer = null;
+
+function openNickMenu(ev, peer) {
+  nickmenuPeer = peer;
+  $('nickmenu-head').textContent = peer.name;
+  nickmenuEl.classList.remove('hidden');
+  nickmenuPop.style.visibility = 'hidden';
+  requestAnimationFrame(() => {
+    const r = nickmenuPop.getBoundingClientRect();
+    let x = (ev.clientX ?? 20), y = (ev.clientY ?? 20) + 10;
+    x = Math.min(x, window.innerWidth - r.width - 8);
+    y = Math.min(y, window.innerHeight - r.height - 8);
+    nickmenuPop.style.left = Math.max(8, x) + 'px';
+    nickmenuPop.style.top = Math.max(8, y) + 'px';
+    nickmenuPop.style.visibility = '';
+  });
+}
+function closeNickMenu() { nickmenuEl.classList.add('hidden'); nickmenuPeer = null; }
+nickmenuEl.addEventListener('click', (e) => { if (e.target === nickmenuEl) closeNickMenu(); });
+nickmenuPop.addEventListener('click', (e) => {
+  const btn = e.target.closest('.nickmenu-item');
+  if (!btn) return;
+  const peer = nickmenuPeer;
+  closeNickMenu();
+  if (!peer) return;
+  switch (btn.dataset.act) {
+    case 'private':  openDmTab(peer); break;
+    case 'personal': setPersonalTarget(peer); break;
+    case 'copy':     writeClipboard(peer.name)
+      .then((ok) => showToast(ok ? 'Ник скопирован' : 'Не удалось скопировать')); break;
+    case 'info':     openPlayerInfo(peer); break;
+  }
+});
+
+/** Карточка игрока (пункт «Информация»). Рисуем в окне #binfo, пряча «ссылку». */
+async function openPlayerInfo(peer) {
+  if (!online) { showToast('Нет связи с сервером'); return; }
+  binfoId = null;
+  clearInterval(binfoTimer); binfoTimer = null;
+  binfoTitle.textContent = peer.name || 'Игрок';
+  binfoBody.innerHTML = '<div class="bi-empty">Загрузка…</div>';
+  if (binfoCopyBtn) binfoCopyBtn.style.display = 'none';
+  binfoEl.classList.remove('hidden');
+  let p;
+  try {
+    p = await api.playerInfo(peer);
+  } catch (e) {
+    binfoBody.innerHTML = `<div class="bi-empty">Не удалось загрузить: ${esc(e.message)}</div>`;
+    return;
+  }
+  binfoTitle.textContent = p.name;
+  binfoBody.innerHTML = `
+    <div class="pinfo">
+      <div class="pinfo-row"><span>Уровень</span><b>${p.level ?? '?'}</b></div>
+      <div class="pinfo-row"><span>Локация</span><b>${esc(p.location || '—')}</b></div>
+      <div class="pinfo-row"><span>Статус</span>
+        <b class="${p.online ? 'pinfo-on' : 'pinfo-off'}">${p.online ? 'в сети' : 'не в сети'}</b></div>
+      ${p.about ? `<div class="pinfo-about">${esc(p.about)}</div>` : ''}
+      <div class="pinfo-actions">
+        <button type="button" class="bi-join-btn" data-pi="dm">Приватное сообщение</button>
+        <button type="button" class="bi-join-btn" data-pi="mail">Письмо</button>
+      </div>
+    </div>`;
+  const self = String(p.id) === String(PLAYER.id);
+  binfoBody.querySelectorAll('.pinfo-actions .bi-join-btn').forEach((b) => {
+    if (self) { b.disabled = true; return; }
+    b.addEventListener('click', () => {
+      closeBattleInfo();
+      if (b.dataset.pi === 'dm') openDmTab({ id: p.id, name: p.name });
+      else openMail({ to: p.name });
+    });
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Почта: список писем · чтение · отправка (налог считает сервер)
+// ---------------------------------------------------------------------------
+
+const mailEl = $('mail');
+const mailBody = $('mail-body');
+const mailTitle = $('mail-title');
+const mailBadge = $('mail-badge');
+let mailUnreadN = 0;
+let mailTariffs = { taxSend: 100, itemPct: 0.1, maxAtt: 8 };
+let mailCompose = null;   // null | { to, attach:[{id,name,icon,price,qty,maxQty,stackable}] }
+
+function setMailBadge(n) {
+  mailUnreadN = Math.max(0, Number(n) || 0);
+  if (!mailBadge) return;
+  mailBadge.textContent = mailUnreadN > 99 ? '99+' : String(mailUnreadN);
+  mailBadge.classList.toggle('hidden', mailUnreadN === 0);
+}
+async function refreshMailUnread() {
+  if (!online) return;
+  try { setMailBadge((await api.mailUnread()).unread); } catch (e) { /* не критично */ }
+}
+
+function closeMail() { mailEl.classList.add('hidden'); mailCompose = null; }
+$('mail-close').addEventListener('click', closeMail);
+mailEl.addEventListener('click', (e) => { if (e.target === mailEl) closeMail(); });
+$('mail-compose').addEventListener('click', () => openCompose());
+
+/** Открыть почту: список писем (или сразу написать письмо адресату opts.to). */
+async function openMail(opts = {}) {
+  if (!online) { showToast('Почта доступна только онлайн'); return; }
+  mailEl.classList.remove('hidden');
+  if (opts.to) { await openCompose(opts.to); return; }
+  await renderInbox();
+}
+
+async function renderInbox() {
+  mailCompose = null;
+  mailTitle.textContent = 'Почта';
+  $('mail-compose').style.display = '';
+  mailBody.innerHTML = '<div class="bi-empty">Загрузка…</div>';
+  let data;
+  try {
+    data = await api.mail();
+  } catch (e) {
+    mailBody.innerHTML = `<div class="bi-empty">Не удалось загрузить: ${esc(e.message)}</div>`;
+    return;
+  }
+  if (data.tariffs) mailTariffs = data.tariffs;
+  setMailBadge(data.unread);
+  if (!data.items.length) {
+    mailBody.innerHTML = '<div class="bi-empty">Писем нет. Нажмите «Написать», чтобы отправить.</div>';
+    return;
+  }
+  const list = document.createElement('div');
+  list.className = 'mail-list';
+  for (const it of data.items) {
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.className = 'mail-row' + (it.isRead ? '' : ' unread');
+    const att = it.attCount ? `<span class="mail-clip" title="Вложения">📎${it.attCount}</span>` : '';
+    row.innerHTML = `
+      <span class="mail-dot" aria-hidden="true"></span>
+      <span class="mail-row-main">
+        <span class="mail-row-from">${esc(it.senderName)}</span>
+        <span class="mail-row-subj">${esc(it.subject || '(без темы)')}</span>
+      </span>
+      <span class="mail-row-meta">${att}<span class="mail-row-date">${mailDate(it.ts)}</span></span>`;
+    row.addEventListener('click', () => openLetter(it.id));
+    list.appendChild(row);
+  }
+  mailBody.innerHTML = '';
+  mailBody.appendChild(list);
+}
+
+function mailDate(ts) {
+  const d = new Date(ts);
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${pad(d.getDate())}.${pad(d.getMonth() + 1)} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+async function openLetter(id) {
+  $('mail-compose').style.display = 'none';
+  mailTitle.textContent = 'Письмо';
+  mailBody.innerHTML = '<div class="bi-empty">Загрузка…</div>';
+  let m;
+  try {
+    m = await api.mailRead(id);
+  } catch (e) {
+    mailBody.innerHTML = `<div class="bi-empty">Не удалось открыть: ${esc(e.message)}</div>`;
+    return;
+  }
+  refreshMailUnread();   // письмо стало прочитанным — обновить бейдж
+  const fromTappable = m.senderId && String(m.senderId) !== String(PLAYER.id);
+  const att = m.attachments.map((a) => `
+    <div class="mail-att">
+      <span class="mail-att-icon">${esc(a.icon || '📦')}</span>
+      <span class="mail-att-name">${esc(a.name)}${a.quantity > 1 ? ` ×${a.quantity}` : ''}</span>
+    </div>`).join('');
+  mailBody.innerHTML = `
+    <div class="mail-read">
+      <div class="mail-read-head">
+        <span>От: <b class="mail-from ${fromTappable ? 'tappable' : ''}">${esc(m.senderName)}</b></span>
+        <span class="mail-read-date">${mailDate(m.ts)}</span>
+      </div>
+      <div class="mail-read-subj">${esc(m.subject || '(без темы)')}</div>
+      <div class="mail-read-body">${esc(m.body) || '<i>пусто</i>'}</div>
+      ${m.attachments.length ? `<div class="mail-att-box">
+        <div class="mail-att-title">Вложения${m.canClaim ? '' : ' (получены)'}</div>${att}
+        ${m.canClaim ? '<button type="button" class="mail-btn mail-take">Забрать в рюкзак</button>' : ''}
+      </div>` : ''}
+      <div class="mail-read-actions">
+        <button type="button" class="mail-btn mail-reply">Ответить</button>
+        <button type="button" class="mail-btn mail-del">Удалить</button>
+      </div>
+    </div>`;
+  if (fromTappable) {
+    mailBody.querySelector('.mail-from').addEventListener('click', (e) =>
+      openNickMenu(e, { id: m.senderId, name: m.senderName }));
+  }
+  mailBody.querySelector('.mail-take')?.addEventListener('click', async (e) => {
+    e.target.disabled = true;
+    try {
+      const r = await api.mailTake(id);
+      await refreshSelf();
+      showToast(r.taken ? 'Вложения в рюкзаке' : 'Уже получено');
+      openLetter(id);
+    } catch (err) { e.target.disabled = false; showToast('Не удалось забрать: ' + err.message); }
+  });
+  mailBody.querySelector('.mail-reply').addEventListener('click', () => {
+    if (m.senderId) openCompose(m.senderName);
+    else showToast('Системному отправителю ответить нельзя');
+  });
+  mailBody.querySelector('.mail-del').addEventListener('click', async (e) => {
+    e.target.disabled = true;
+    try {
+      await api.mailDelete(id);
+      await refreshSelf();
+      refreshMailUnread();
+      renderInbox();
+    } catch (err) { e.target.disabled = false; showToast('Не удалось удалить: ' + err.message); }
+  });
+}
+
+/** Экран написания письма: адресат, тема, текст, вложения, налог. */
+async function openCompose(prefillTo = '') {
+  $('mail-compose').style.display = 'none';
+  mailTitle.textContent = 'Новое письмо';
+  mailCompose = { to: prefillTo, attach: [] };
+  mailBody.innerHTML = `
+    <div class="mail-compose">
+      <label class="mail-field"><span>Кому (ник)</span>
+        <input id="mc-to" type="text" maxlength="24" autocomplete="off" value="${esc(prefillTo)}"></label>
+      <label class="mail-field"><span>Тема</span>
+        <input id="mc-subj" type="text" maxlength="80" autocomplete="off"></label>
+      <label class="mail-field"><span>Сообщение</span>
+        <textarea id="mc-body" maxlength="1000" rows="4"></textarea></label>
+      <div class="mail-attach">
+        <div class="mail-attach-head">
+          <span>Вложения <span class="muted" id="mc-attn">0/${mailTariffs.maxAtt}</span></span>
+          <button type="button" class="mail-btn sm" id="mc-add">+ Вещь</button>
+        </div>
+        <div id="mc-attach-list" class="mail-attach-list"></div>
+      </div>
+      <div class="mail-tax" id="mc-tax"></div>
+      <div class="mail-read-actions">
+        <button type="button" class="mail-btn mail-send" id="mc-send">Отправить</button>
+        <button type="button" class="mail-btn" id="mc-cancel">Отмена</button>
+      </div>
+    </div>`;
+  $('mc-cancel').addEventListener('click', renderInbox);
+  $('mc-add').addEventListener('click', openAttachPicker);
+  $('mc-send').addEventListener('click', sendComposed);
+  renderComposeAttach();
+}
+
+function renderComposeAttach() {
+  const box = $('mc-attach-list');
+  if (!box) return;
+  box.innerHTML = '';
+  for (const a of mailCompose.attach) {
+    const row = document.createElement('div');
+    row.className = 'mail-attach-row';
+    row.innerHTML = `
+      <span class="mail-att-icon">${esc(a.icon || '📦')}</span>
+      <span class="mail-att-name">${esc(a.name)}</span>
+      ${a.stackable ? `<input class="mail-att-qty" type="number" min="1" max="${a.maxQty}" value="${a.qty}">` : ''}
+      <span class="mail-att-tax">+${Math.ceil(a.price * a.qty * mailTariffs.itemPct)}</span>
+      <button type="button" class="mail-att-del" title="Убрать">✕</button>`;
+    if (a.stackable) {
+      const qty = row.querySelector('.mail-att-qty');
+      const taxEl = row.querySelector('.mail-att-tax');
+      qty.addEventListener('input', () => {            // не перерисовываем строку — не теряем фокус
+        a.qty = Math.max(1, Math.min(a.maxQty, Math.floor(+qty.value || 1)));
+        taxEl.textContent = '+' + Math.ceil(a.price * a.qty * mailTariffs.itemPct);
+        renderComposeTax();
+      });
+      qty.addEventListener('change', () => { qty.value = a.qty; });  // нормализуем по уходу
+    }
+    row.querySelector('.mail-att-del').addEventListener('click', () => {
+      mailCompose.attach = mailCompose.attach.filter((x) => x !== a);
+      renderComposeAttach();
+    });
+    box.appendChild(row);
+  }
+  const attn = $('mc-attn');
+  if (attn) attn.textContent = `${mailCompose.attach.length}/${mailTariffs.maxAtt}`;
+  renderComposeTax();
+}
+
+function renderComposeTax() {
+  const el = $('mc-tax');
+  if (!el) return;
+  const itemsTax = mailCompose.attach.reduce(
+    (s, a) => s + Math.ceil(a.price * a.qty * mailTariffs.itemPct), 0);
+  const total = mailTariffs.taxSend + itemsTax;
+  el.innerHTML = `Налог: <b>${mailTariffs.taxSend}</b> за письмо`
+    + (itemsTax ? ` + <b>${itemsTax}</b> за вложения` : '')
+    + ` = <b>${total}</b> меди`;
+}
+
+/** Выбор вещи для вложения из рюкзака (только торгуемые, не надетые). */
+async function openAttachPicker() {
+  if (mailCompose.attach.length >= mailTariffs.maxAtt) {
+    showToast(`Не больше ${mailTariffs.maxAtt} вложений`); return;
+  }
+  let inv;
+  try { inv = await api.inventory(); }
+  catch (e) { showToast('Не удалось загрузить рюкзак: ' + e.message); return; }
+  const used = new Set(mailCompose.attach.map((a) => a.id));
+  const items = inv.filter((it) => !it.equipped && it.tradable !== false && !used.has(it.id));
+  const pop = document.createElement('div');
+  pop.className = 'attach-picker';
+  pop.innerHTML = `<div class="attach-picker-card">
+    <div class="attach-picker-head">Выберите вещь
+      <button type="button" class="attach-picker-close">✕</button></div>
+    <div class="attach-picker-list"></div></div>`;
+  const list = pop.querySelector('.attach-picker-list');
+  if (!items.length) {
+    list.innerHTML = '<div class="bi-empty">Нет вещей для отправки.</div>';
+  } else for (const it of items) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'attach-pick-row';
+    const tax = Math.ceil((it.price || 0) * mailTariffs.itemPct);
+    b.innerHTML = `<span class="mail-att-icon">${esc(it.icon || '📦')}</span>
+      <span class="mail-att-name">${esc(it.name)}${it.quantity > 1 ? ` ×${it.quantity}` : ''}</span>
+      <span class="attach-pick-price">${it.price || 0} · налог ${tax}/шт</span>`;
+    b.addEventListener('click', () => {
+      const stackable = it.quantity > 1;
+      mailCompose.attach.push({ id: it.id, name: it.name, icon: it.icon,
+        price: it.price || 0, qty: 1, maxQty: it.quantity, stackable });
+      pop.remove();
+      renderComposeAttach();
+    });
+    list.appendChild(b);
+  }
+  pop.querySelector('.attach-picker-close').addEventListener('click', () => pop.remove());
+  pop.addEventListener('click', (e) => { if (e.target === pop) pop.remove(); });
+  document.body.appendChild(pop);
+}
+
+async function sendComposed() {
+  const to = $('mc-to').value.trim();
+  const subject = $('mc-subj').value.trim();
+  const body = $('mc-body').value.trim();
+  if (!to) { showToast('Укажите получателя'); return; }
+  if (!body && !mailCompose.attach.length) { showToast('Пустое письмо'); return; }
+  const btn = $('mc-send');
+  btn.disabled = true;
+  const items = mailCompose.attach.map((a) => ({ id: a.id, qty: a.qty }));
+  try {
+    const r = await api.mailSend({ to, subject, body, items });
+    await refreshSelf();
+    // чек об оплате — в общий чат
+    chatSystem(`Письмо игроку «${r.recipientName}» отправлено. Списано ${r.tax} меди.`);
+    showToast(`Письмо отправлено · налог ${r.tax} меди`);
+    renderInbox();
+  } catch (e) {
+    btn.disabled = false;
+    showToast('Не удалось отправить: ' + (MAIL_ERRORS[e.message] || e.message));
+  }
+}
+
+const MAIL_ERRORS = {
+  recipient_not_found: 'Игрок с таким ником не найден',
+  cannot_mail_self: 'Нельзя писать самому себе',
+  insufficient_funds: 'Не хватает меди на налог',
+  too_many_attachments: 'Слишком много вложений',
+  item_not_tradable: 'Эту вещь нельзя отправить',
+  recipient_required: 'Укажите получателя',
+};
+
+/** Обновить себя после операций с деньгами/вещами (кошелёк + рюкзак). */
+async function refreshSelf() {
+  if (!online) return;
+  try {
+    applyCharacter(await api.me());
+    registerServerItems(await api.inventory());
+  } catch (e) { console.error('Обновление состояния:', e); }
+}
 
 // ---------------------------------------------------------------------------
 // Мобильная клавиатура. В Telegram WebView (особенно iOS) выехавшая клавиатура
@@ -1373,6 +2009,10 @@ async function refreshPlayers() {
       lvl.className = 'm-lvl';
       lvl.textContent = `[${p.level}]`;
       name.appendChild(lvl);
+      if (String(p.id) !== String(PLAYER.id)) {        // тап по нику — меню действий
+        name.classList.add('tappable');
+        name.addEventListener('click', (e) => openNickMenu(e, { id: p.id, name: p.name }));
+      }
       row.appendChild(name);
       if (String(p.id) !== String(PLAYER.id)) {
         const atk = document.createElement('button');
@@ -2375,7 +3015,6 @@ function showToast(text) {
 }
 
 const CASTLE_STUBS = {
-  mail: 'Почта',
   auction: 'Аукцион',
 };
 
@@ -2384,6 +3023,7 @@ castlePerimeter?.addEventListener('click', (e) => {
   if (!btn) return;
   const id = btn.dataset.castle;
   if (id === 'bag') openDressing();
+  else if (id === 'mail') openMail();
   else if (id === 'battles') toggleBattlesPanel();
   else if (CASTLE_STUBS[id]) {
     showToast(`Модуль «${CASTLE_STUBS[id]}» подключается отдельно — пока заглушка`);
@@ -2477,17 +3117,23 @@ function adminEntryChoice() {
     registerServerItems(await api.inventory());
 
     setBoot('Загрузка чата…');
-    // чат: история без системного шума, затем живые сообщения
-    api.onChat((m) => chatMessage(m.from, m.text));
+    // чат: история без системного шума, затем живые сообщения; личка и почта
+    api.onChat(onCommonChat);
+    api.onChatDM(onDmMessage);
+    api.onMail(() => refreshMailUnread());
     loadChatHistory(await api.chatHistory());
+    refreshMailUnread();
 
     serverLocId = ch.location_id;
     setLocation(LOC_BY_ID[ch.location_id] || 'village', { quiet: true });
     refreshPlayers();
 
-    // ссылка вида ?battle=N (скопированная из окна боя) — открываем статистику боя
-    const deepBattle = new URLSearchParams(location.search).get('battle');
+    // ссылки из адреса: ?battle=N — статистика боя, ?info=Ник — карточка игрока
+    const params = new URLSearchParams(location.search);
+    const deepBattle = params.get('battle');
     if (deepBattle && /^\d+$/.test(deepBattle)) openBattleInfo(Number(deepBattle));
+    const deepInfo = params.get('info');
+    if (deepInfo) openPlayerInfo({ name: deepInfo });
   } catch (e) {
     if (e.message === 'dev_auth_disabled') {
       document.querySelector('.game')?.classList.add('hidden');

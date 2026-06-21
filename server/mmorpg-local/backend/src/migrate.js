@@ -60,6 +60,34 @@ const STATEMENTS = [
   `DELETE FROM locations WHERE id = 3`,
   `INSERT INTO location_links (from_id, to_id) VALUES (1, 2), (2, 1)
    ON CONFLICT (from_id, to_id) DO NOTHING`,
+  // --- Почта -----------------------------------------------------------
+  // Номинальная стоимость предмета (медь). От неё считается налог за вложение
+  // в письмо (10%). 0 = бесценок (налог за вложение не берётся).
+  `ALTER TABLE item_templates ADD COLUMN IF NOT EXISTS price BIGINT NOT NULL DEFAULT 0`,
+  // Стартовые цены для предметов сидов (только пока админ не задал своих — price=0).
+  `UPDATE item_templates SET price = 1000 WHERE id = 101 AND price = 0`,  // бронзовый доспех
+  `UPDATE item_templates SET price = 300  WHERE id = 201 AND price = 0`,  // эликсир побега
+  `UPDATE item_templates SET price = 200  WHERE id = 202 AND price = 0`,  // эликсир жизни
+  `UPDATE item_templates SET price = 250  WHERE id = 203 AND price = 0`,  // эликсир ярости
+  // Тарифы почты: фикс за письмо + доля от стоимости каждого вложенного предмета.
+  `INSERT INTO game_config (key, value) VALUES ('mail.tax_send', '100')
+   ON CONFLICT (key) DO NOTHING`,
+  `INSERT INTO game_config (key, value) VALUES ('mail.tax_item_pct', '0.1')
+   ON CONFLICT (key) DO NOTHING`,
+  `INSERT INTO game_config (key, value) VALUES ('mail.max_attachments', '8')
+   ON CONFLICT (key) DO NOTHING`,
+  `INSERT INTO game_config (key, value) VALUES ('mail.expire_days', '30')
+   ON CONFLICT (key) DO NOTHING`,
+  // --- Приватный чат (личка) ------------------------------------------
+  // Канал лички на пару игроков: chat_channels(type=6) хранит сообщения,
+  // dm_pairs стабильно отображает упорядоченную пару (lo,hi) -> channel_id.
+  `CREATE TABLE IF NOT EXISTS dm_pairs (
+     lo         BIGINT NOT NULL,
+     hi         BIGINT NOT NULL,
+     channel_id BIGINT NOT NULL,
+     PRIMARY KEY (lo, hi)
+   )`,
+  `GRANT SELECT, INSERT ON dm_pairs TO game_rw`,
 ];
 
 export async function runMigrations() {

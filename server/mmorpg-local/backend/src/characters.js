@@ -1,4 +1,4 @@
-import { game, tx, gameConfig } from './db.js';
+import { game, tx, gameConfig, redis } from './db.js';
 import { wallet } from './economy.js';
 
 const START_LOCATION = 1; // Деревня
@@ -96,8 +96,39 @@ export async function addExp(client, charId, amount) {
     `UPDATE characters SET exp = exp + $2 WHERE id = $1`, [charId, amount]);
 }
 
+/** Публичная информация об игроке (для карточки «Информация» из чата/почты). */
+export async function publicInfo({ id, name }) {
+  const where = id ? `ch.id = $1` : `ch.name = $1`;
+  const { rows } = await game.query(
+    `SELECT ch.id, ch.name, ch.level, ch.faction, ch.location_id,
+            l.name AS location_name, p.about
+       FROM characters ch
+       JOIN locations l ON l.id = ch.location_id
+       LEFT JOIN character_profile p ON p.character_id = ch.id
+      WHERE ${where} AND ch.status = 1`, [id || name]);
+  const r = rows[0];
+  if (!r) return null;
+  // присутствие — из Redis (поддерживается при входе/выходе сокета)
+  const online = await redis.hExists(`loc:${r.location_id}:players`, String(r.id))
+    .catch(() => false);
+  return {
+    id: Number(r.id), name: r.name, level: r.level, faction: r.faction,
+    location: r.location_name, about: r.about || '', online,
+  };
+}
+
 export function characterRoutes(app, authed) {
   app.get('/api/me', authed, async (req, res) => {
     res.json(await getCharacter(req.session.character_id));
+  });
+
+  // публичная карточка игрока: по id (?id=) или по нику (?name=)
+  app.get('/api/players/info', authed, async (req, res) => {
+    const info = await publicInfo({
+      id: Number(req.query.id) || null,
+      name: req.query.name ? String(req.query.name) : null,
+    });
+    if (!info) return res.status(404).json({ error: 'not_found' });
+    res.json(info);
   });
 }

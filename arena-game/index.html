@@ -122,6 +122,7 @@
         </button>
         <button type="button" class="menu-icon" data-castle="mail" title="Почта">
           <img src="assets/menu/tm-mail.webp" alt="" draggable="false">
+          <span class="mail-badge hidden" id="mail-badge" aria-label="Непрочитанные письма">0</span>
           <span class="mi-label">Почта</span>
         </button>
       </div>
@@ -236,11 +237,16 @@
           </div>
 
           <div class="dock-pane" id="pane-chat">
-            <div class="chat-tabs">
+            <div class="chat-tabs" id="chat-tabs">
               <button class="chat-tab active" data-chat="common">Общий</button>
               <button class="chat-tab" data-chat="clan">Клановый</button>
             </div>
             <div class="chat-log" id="chat-log"></div>
+            <div class="chat-personal-bar hidden" id="chat-personal-bar">
+              <span class="cpb-label">Личное →</span>
+              <span class="cpb-name" id="cpb-name"></span>
+              <button type="button" class="cpb-clear" id="cpb-clear" title="Отменить">✕</button>
+            </div>
             <form class="chat-input-row" id="chat-form">
               <input class="chat-input" id="chat-input" type="text"
                      placeholder="Введите сообщение…" autocomplete="off" maxlength="200">
@@ -379,6 +385,30 @@
         <button class="dressing-close" id="binfo-close">✕</button>
       </div>
       <div class="binfo-body" id="binfo-body"></div>
+    </div>
+  </div>
+
+  <!-- Почта: список писем · чтение · отправка -->
+  <div class="mail hidden" id="mail">
+    <div class="mail-card">
+      <div class="dressing-head">
+        <span class="dressing-title" id="mail-title">Почта</span>
+        <span style="flex:1"></span>
+        <button class="mail-compose-btn" id="mail-compose" type="button" title="Написать письмо">✉ Написать</button>
+        <button class="dressing-close" id="mail-close">✕</button>
+      </div>
+      <div class="mail-body" id="mail-body"></div>
+    </div>
+  </div>
+
+  <!-- Меню по тапу на ник игрока -->
+  <div class="nickmenu hidden" id="nickmenu">
+    <div class="nickmenu-pop" id="nickmenu-pop">
+      <div class="nickmenu-head" id="nickmenu-head"></div>
+      <button type="button" class="nickmenu-item" data-act="private">Приватное сообщение</button>
+      <button type="button" class="nickmenu-item" data-act="personal">Личное в общий чат</button>
+      <button type="button" class="nickmenu-item" data-act="copy">Скопировать ник</button>
+      <button type="button" class="nickmenu-item" data-act="info">Информация</button>
     </div>
   </div>
 
