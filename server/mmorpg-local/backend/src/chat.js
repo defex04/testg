@@ -70,9 +70,9 @@ export async function sendPersonal(ch, toName, text) {
   const msg = { channelId, locId: ch.location_id, senderId: ch.id, senderName: ch.name,
     toId: Number(rcpt.id), toName: rcpt.name, body: text, ts };
   await game.query(
-    `INSERT INTO chat_messages (channel_id, message_id, sender_id, sender_name, body, flags)
-     VALUES ($1, $2, $3, $4, $5, 1)`,   // flags=1: личное в общем
-    [channelId, ts, ch.id, ch.name, text]);
+    `INSERT INTO chat_messages (channel_id, message_id, sender_id, sender_name, body, flags, target_name)
+     VALUES ($1, $2, $3, $4, $5, 1, $6)`,   // flags=1: личное в общем
+    [channelId, ts, ch.id, ch.name, text, rcpt.name]);
   await redis.publish(`chat.loc.${ch.location_id}`, JSON.stringify(msg));
   return msg;
 }
@@ -161,7 +161,7 @@ export async function history(locId) {
   const limit = Number(await gameConfig('chat.history_limit')) || 50;
   const channelId = await locationChannel(locId);
   const { rows } = await game.query(
-    `SELECT sender_id, sender_name, body, created_at FROM chat_messages
+    `SELECT sender_id, sender_name, body, target_name, created_at FROM chat_messages
       WHERE channel_id = $1 ORDER BY created_at DESC LIMIT $2`, [channelId, limit]);
   return rows.reverse();
 }

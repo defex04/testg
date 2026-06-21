@@ -1222,15 +1222,12 @@ function linkifyInto(el, text) {
   if (last < text.length) el.appendChild(document.createTextNode(text.slice(last)));
 }
 
-/** Кликабельный ник: открывает меню действий (если это не мы и есть id). */
+/** Кликабельный ник: открывает меню действий. Свой ник — тоже (меню урезано). */
 function nickEl(name, id) {
   const b = document.createElement('b');
-  b.className = 'chat-nick';
+  b.className = 'chat-nick tappable';
   b.textContent = name;
-  if (id != null && String(id) !== String(PLAYER.id)) {
-    b.classList.add('tappable');
-    b.addEventListener('click', (e) => { e.stopPropagation(); openNickMenu(e, { id, name }); });
-  }
+  b.addEventListener('click', (e) => { e.stopPropagation(); openNickMenu(e, { id, name }); });
   return b;
 }
 
@@ -1307,7 +1304,12 @@ function renderActiveChat() {
     chatLog.innerHTML = '<div class="chat-empty">Клановый чат скоро появится.</div>';
   } else if (activeChat.startsWith('dm:')) {
     const convo = dmConvos.get(activeChat.slice(3));
-    if (convo) for (const m of convo.msgs) chatLog.appendChild(dmLineEl({ ...m, peerName: convo.name }));
+    if (convo && convo.msgs.length) {
+      for (const m of convo.msgs) chatLog.appendChild(dmLineEl({ ...m, peerName: convo.name }));
+    } else {
+      chatLog.innerHTML = `<div class="chat-empty">Личная переписка с «${esc(convo?.name || '')}».<br>`
+        + `Напишите сообщение — оно придёт только этому игроку.</div>`;
+    }
   } else {
     for (const msg of commonMsgs) chatLog.appendChild(chatLineEl(msg));
   }
@@ -1370,8 +1372,8 @@ function loadChatHistory(rows) {
   for (const h of rows) {
     if (isChatJunk(h.sender_name, h.body)) continue;
     if (h.sender_name === 'Система') commonMsgs.push({ kind: 'system', text: String(h.body) });
-    else commonMsgs.push({ kind: 'msg', author: h.sender_name,
-      authorId: h.sender_id ?? null, text: String(h.body) });
+    else commonMsgs.push({ kind: 'msg', author: h.sender_name, authorId: h.sender_id ?? null,
+      text: String(h.body), to: h.target_name || null, toId: null });
   }
   if (activeChat === 'common') renderActiveChat();
 }
@@ -1433,6 +1435,22 @@ function onDmMessage(m) {
   renderChatTabs();
 }
 
+const CHAT_ERRORS = {
+  recipient_not_found: 'Игрок с таким ником не найден',
+  cannot_dm_self: 'Нельзя писать самому себе',
+  muted: 'Вы не можете писать в чат',
+};
+/** Ошибка чата/лички с сервера — показываем строкой в открытом чате (видно над клавиатурой). */
+function onServerChatError(m) {
+  const text = CHAT_ERRORS[m.error] || ('Ошибка: ' + (m.error || 'неизвестно'));
+  const line = document.createElement('div');
+  line.className = 'chat-line system chat-error';
+  line.textContent = '⚠ ' + text;
+  chatLog.appendChild(line);
+  while (chatLog.children.length > MAX_CHAT_LINES) chatLog.firstChild.remove();
+  scrollChatToBottom();
+}
+
 // ── Личное сообщение в общий чат: цель ставится из меню ника ──
 
 function setPersonalTarget(peer) {
@@ -1491,8 +1509,13 @@ const nickmenuPop = $('nickmenu-pop');
 let nickmenuPeer = null;
 
 function openNickMenu(ev, peer) {
-  nickmenuPeer = peer;
+  const self = (peer.id != null && String(peer.id) === String(PLAYER.id))
+    || (peer.id == null && peer.name === PLAYER.name);
+  nickmenuPeer = { ...peer, self };
   $('nickmenu-head').textContent = peer.name;
+  // себе не пишут — прячем «приватное» и «личное»
+  nickmenuPop.querySelector('[data-act="private"]').classList.toggle('hidden', self);
+  nickmenuPop.querySelector('[data-act="personal"]').classList.toggle('hidden', self);
   nickmenuEl.classList.remove('hidden');
   nickmenuPop.style.visibility = 'hidden';
   requestAnimationFrame(() => {
@@ -1507,6 +1530,18 @@ function openNickMenu(ev, peer) {
 }
 function closeNickMenu() { nickmenuEl.classList.add('hidden'); nickmenuPeer = null; }
 nickmenuEl.addEventListener('click', (e) => { if (e.target === nickmenuEl) closeNickMenu(); });
+
+/** Гарантировать peer.id: если есть только ник — спросить сервер (для лички/инфо). */
+async function resolvePeer(peer) {
+  if (peer.id != null) return peer;
+  try {
+    const p = await api.playerInfo({ name: peer.name });
+    return { id: p.id, name: p.name };
+  } catch {
+    showToast('Игрок не найден'); return null;
+  }
+}
+
 nickmenuPop.addEventListener('click', (e) => {
   const btn = e.target.closest('.nickmenu-item');
   if (!btn) return;
@@ -1514,8 +1549,8 @@ nickmenuPop.addEventListener('click', (e) => {
   closeNickMenu();
   if (!peer) return;
   switch (btn.dataset.act) {
-    case 'private':  openDmTab(peer); break;
-    case 'personal': setPersonalTarget(peer); break;
+    case 'private':  resolvePeer(peer).then((p) => p && openDmTab(p)); break;
+    case 'personal': setPersonalTarget(peer); break;   // личное шлётся по нику
     case 'copy':     writeClipboard(peer.name)
       .then((ok) => showToast(ok ? 'Ник скопирован' : 'Не удалось скопировать')); break;
     case 'info':     openPlayerInfo(peer); break;
@@ -1583,6 +1618,13 @@ function setMailBadge(n) {
 async function refreshMailUnread() {
   if (!online) return;
   try { setMailBadge((await api.mailUnread()).unread); } catch (e) { /* не критично */ }
+}
+
+/** Символ предмета: серверный icon-ключ (буквы вроде elixirHealth) — не символ. */
+function itemIconText(icon, type, stats) {
+  if (type === 4) return ELIXIR_EMOJI[elixirKindFromStats(stats)] || '🧪';
+  if (!icon || /[A-Za-z]/.test(String(icon))) return type === 2 ? '🛡️' : '📦';
+  return icon;
 }
 
 function closeMail() { mailEl.classList.add('hidden'); mailCompose = null; }
@@ -1658,7 +1700,7 @@ async function openLetter(id) {
   const fromTappable = m.senderId && String(m.senderId) !== String(PLAYER.id);
   const att = m.attachments.map((a) => `
     <div class="mail-att">
-      <span class="mail-att-icon">${esc(a.icon || '📦')}</span>
+      <span class="mail-att-icon">${esc(itemIconText(a.icon, a.type, a.stats))}</span>
       <span class="mail-att-name">${esc(a.name)}${a.quantity > 1 ? ` ×${a.quantity}` : ''}</span>
     </div>`).join('');
   mailBody.innerHTML = `
@@ -1727,6 +1769,7 @@ async function openCompose(prefillTo = '') {
         <div id="mc-attach-list" class="mail-attach-list"></div>
       </div>
       <div class="mail-tax" id="mc-tax"></div>
+      <div class="mail-error hidden" id="mc-error"></div>
       <div class="mail-read-actions">
         <button type="button" class="mail-btn mail-send" id="mc-send">Отправить</button>
         <button type="button" class="mail-btn" id="mc-cancel">Отмена</button>
@@ -1785,6 +1828,8 @@ function renderComposeTax() {
 
 /** Выбор вещи для вложения из рюкзака (только торгуемые, не надетые). */
 async function openAttachPicker() {
+  // убрать клавиатуру: иначе пикерное окно центрируется под ней и не тапается (#5)
+  document.activeElement?.blur();
   if (mailCompose.attach.length >= mailTariffs.maxAtt) {
     showToast(`Не больше ${mailTariffs.maxAtt} вложений`); return;
   }
@@ -1807,12 +1852,13 @@ async function openAttachPicker() {
     b.type = 'button';
     b.className = 'attach-pick-row';
     const tax = Math.ceil((it.price || 0) * mailTariffs.itemPct);
-    b.innerHTML = `<span class="mail-att-icon">${esc(it.icon || '📦')}</span>
+    b.innerHTML = `<span class="mail-att-icon">${esc(itemIconText(it.icon, it.type, it.stats))}</span>
       <span class="mail-att-name">${esc(it.name)}${it.quantity > 1 ? ` ×${it.quantity}` : ''}</span>
       <span class="attach-pick-price">${it.price || 0} · налог ${tax}/шт</span>`;
     b.addEventListener('click', () => {
       const stackable = it.quantity > 1;
-      mailCompose.attach.push({ id: it.id, name: it.name, icon: it.icon,
+      mailCompose.attach.push({ id: it.id, name: it.name,
+        icon: itemIconText(it.icon, it.type, it.stats),
         price: it.price || 0, qty: 1, maxQty: it.quantity, stackable });
       pop.remove();
       renderComposeAttach();
@@ -1824,12 +1870,21 @@ async function openAttachPicker() {
   document.body.appendChild(pop);
 }
 
+function mailError(text) {       // тосты в фуллскрине Telegram прячутся за шапкой —
+  const el = $('mc-error');      // показываем ошибку прямо в форме
+  if (!el) { showToast(text); return; }
+  el.textContent = text;
+  el.classList.remove('hidden');
+}
+
 async function sendComposed() {
+  document.activeElement?.blur();           // убрать клавиатуру, чтобы видеть результат
   const to = $('mc-to').value.trim();
   const subject = $('mc-subj').value.trim();
   const body = $('mc-body').value.trim();
-  if (!to) { showToast('Укажите получателя'); return; }
-  if (!body && !mailCompose.attach.length) { showToast('Пустое письмо'); return; }
+  $('mc-error').classList.add('hidden');
+  if (!to) { mailError('Укажите получателя'); return; }
+  if (!body && !mailCompose.attach.length) { mailError('Письмо пустое — добавьте текст или вещь'); return; }
   const btn = $('mc-send');
   btn.disabled = true;
   const items = mailCompose.attach.map((a) => ({ id: a.id, qty: a.qty }));
@@ -1842,7 +1897,7 @@ async function sendComposed() {
     renderInbox();
   } catch (e) {
     btn.disabled = false;
-    showToast('Не удалось отправить: ' + (MAIL_ERRORS[e.message] || e.message));
+    mailError(MAIL_ERRORS[e.message] || ('Не удалось отправить: ' + e.message));
   }
 }
 
@@ -3121,6 +3176,7 @@ function adminEntryChoice() {
     api.onChat(onCommonChat);
     api.onChatDM(onDmMessage);
     api.onMail(() => refreshMailUnread());
+    api.onError(onServerChatError);
     loadChatHistory(await api.chatHistory());
     refreshMailUnread();
 

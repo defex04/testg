@@ -88,6 +88,8 @@ const STATEMENTS = [
      PRIMARY KEY (lo, hi)
    )`,
   `GRANT SELECT, INSERT ON dm_pairs TO game_rw`,
+  // Адресат личного сообщения в общем чате — чтобы стрелка «→ Ник» пережила релог
+  `ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS target_name TEXT`,
 ];
 
 export async function runMigrations() {

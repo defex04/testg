@@ -18,6 +18,7 @@ const socketHandlers = new Map();
 let currentBattle = null;
 let pendingHunt = null;
 let resumeCb = null;
+let genericErrorCb = null;   // ошибки вне боя (чат/личка) — показать игроку
 
 async function rest(path, body) {
   const r = await fetch(API + path, {
@@ -90,6 +91,7 @@ export const api = {
   privateHistory: (peerId) => rest('/api/chat/private/' + Number(peerId)),
   onChatDM:  (fn) => socketHandlers.set('chatDM', fn),
   onMail:    (fn) => socketHandlers.set('mail', fn),
+  onError:   (fn) => { genericErrorCb = fn; },   // серверные ошибки вне боя
   // публичная карточка игрока: по id или нику
   playerInfo: ({ id, name }) => rest('/api/players/info?' +
     (id ? 'id=' + Number(id) : 'name=' + encodeURIComponent(name))),
@@ -200,7 +202,8 @@ function wireBattleHandlers() {
       return e;
     };
     if (pendingHunt) { pendingHunt.reject(wrap()); pendingHunt = null; return; }
-    if (currentBattle) currentBattle._on('serverError', { error: m.error, ...m });
+    if (currentBattle) { currentBattle._on('serverError', { error: m.error, ...m }); return; }
+    if (genericErrorCb) genericErrorCb(m);
     else console.warn('Сервер:', m.error);
   });
 }
