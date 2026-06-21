@@ -7,6 +7,8 @@ import { sendChat, sendPersonal, sendPrivate, subscribeChat, subscribePrivate } 
 import { redis, redisSub } from './db.js';
 
 const MAIL_NOTIFY = (id) => `mail.notify.${id}`;
+const configuredPresenceGrace = Number(process.env.PRESENCE_GRACE_MS);
+const PRESENCE_GRACE_MS = Number.isFinite(configuredPresenceGrace) ? configuredPresenceGrace : 0;
 
 /**
  * Один WebSocket на клиента: бой + чат + присутствие.
@@ -16,6 +18,14 @@ const MAIL_NOTIFY = (id) => `mail.notify.${id}`;
 export function createHub(server) {
   const wss = new WebSocketServer({ server, path: '/ws' });
   const byChar = new Map();
+
+  async function forgetPresence(ch, conn) {
+    if (byChar.get(String(ch.id)) !== conn) return;
+    byChar.delete(String(ch.id));
+    battle.detach(ch.id);
+    const me = await getCharacter(ch.id);
+    await leavePresence(me).catch(() => {});
+  }
 
   subscribeChat((msg) => {
     const out = JSON.stringify({ type: 'chat', from: msg.senderName,
@@ -51,12 +61,14 @@ export function createHub(server) {
     const ch = await getCharacter(session.character_id);
 
     const prev = byChar.get(String(ch.id));
+    if (prev?.offlineTimer) clearTimeout(prev.offlineTimer);
     if (prev && prev.ws.readyState === 1) prev.ws.close(4000, 'replaced'); // вторая вкладка
 
     const send = (o) => { try {
       if (ws.readyState === 1) ws.send(JSON.stringify(o));
     } catch { /* сокет умер — бой продолжается без зрителя */ } };
-    const conn = { ws, locId: ch.location_id, send };
+    const conn = { ws, locId: ch.location_id, send, intentionalClose: false,
+      offlineTimer: null };
     byChar.set(String(ch.id), conn);
     await enterLocation(ch);
 
@@ -95,6 +107,10 @@ export function createHub(server) {
           case 'turnDone': await battle.finishTurn(ch.id); break;
           case 'escape':   await battle.escapeBattle(ch.id); break;
           case 'leaveBattle': battle.leaveBattle(ch.id); break;  // бросит cannot_leave
+          case 'clientClose':
+            conn.intentionalClose = true;
+            ws.close(1000, 'client_close');
+            break;
           case 'chat': {
             const me = await getCharacter(ch.id);
             await sendChat(me, m.text);
@@ -122,10 +138,14 @@ export function createHub(server) {
 
     ws.on('close', async () => {
       if (byChar.get(String(ch.id)) === conn) {
-        byChar.delete(String(ch.id));
         battle.detach(ch.id);                    // НЕ прерываем бой
-        const me = await getCharacter(ch.id);
-        await leavePresence(me).catch(() => {});
+        if (conn.intentionalClose) {
+          await forgetPresence(ch, conn);
+        } else if (PRESENCE_GRACE_MS > 0) {
+          conn.offlineTimer = setTimeout(() => {
+            forgetPresence(ch, conn).catch(() => {});
+          }, PRESENCE_GRACE_MS);
+        }
       }
     });
   });

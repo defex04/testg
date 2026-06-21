@@ -1665,6 +1665,53 @@ body.loc-castle.in-battle .sprite-main .sm-ico {
   min-width: 0;
   flex: 0 1 auto;
 }
+.nick-wrap {
+  min-width: 0;
+  flex: 0 1 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+}
+.fighter-col.right .nick-wrap { align-items: flex-end; }
+.nick-effects,
+.m-effects {
+  min-height: 13px;
+  display: flex;
+  gap: 2px;
+  line-height: 1;
+}
+.m-effects {
+  justify-content: center;
+  margin-bottom: 1px;
+}
+.nick-effects:empty { display: none; }
+.m-effects:empty { display: none; }
+.nick-effect {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  min-width: 17px;
+  height: 13px;
+  padding: 0 3px;
+  border-radius: 6px;
+  border: 1px solid rgba(109, 219, 142, .48);
+  background: rgba(8, 10, 5, .82);
+  color: #dff7e7;
+  font-size: 10px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, .45);
+}
+.nick-effect.debuff {
+  border-color: rgba(232, 102, 90, .52);
+  color: #ffd2cb;
+}
+.nick-effect b {
+  font-family: var(--font-display);
+  font-size: 8px;
+  line-height: 1;
+  font-weight: 700;
+}
 
 /* значок «инфо» рядом с ником — отчеканенный золотой медальон с «i» (ТЗ #7):
    тот же стиль, что у медальона уровня, тёмная буква на золоте — крупно и читаемо */
@@ -2309,6 +2356,26 @@ body.hints-off .strike-wheel.hint-attack .sw-sprite.sword:not(.thrust):not(.clan
   color: #e6dcba;
 }
 .finfo-row b { color: var(--gold-bright); font-variant-numeric: tabular-nums; }
+.finfo-block-title {
+  margin-top: 4px;
+  font-family: var(--font-display);
+  font-size: 13px;
+  color: #d4bd74;
+}
+.finfo-effects {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  min-height: 28px;
+}
+.finfo-effects-empty {
+  padding: 7px 8px;
+  border: 1px solid rgba(216, 169, 63, .18);
+  border-radius: 7px;
+  color: #9a8f6c;
+  font-size: 12px;
+  background: rgba(0, 0, 0, .16);
+}
 
 /* ---------- всплывающий урон ---------- */
 

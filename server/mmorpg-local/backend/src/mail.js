@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto';
 import { game, tx, gameConfig } from './db.js';
-import { addCurrency, CUR } from './economy.js';
+import { addCurrency, CUR, moneyBalanceCopper } from './economy.js';
 import { getCharacter } from './characters.js';
 
 // owner_type предметов: 1 рюкзак, 5 почта. reason в ledger'ах: 3/5 = mail.
@@ -189,11 +189,8 @@ export async function sendMail(sender, { to, subject, body, items }) {
     const tax = t.taxSend + itemsTax;
 
     // деньги: понятная ошибка до списания, атомарность гарантирует addCurrency
-    const bal = Number((await c.query(
-      `SELECT COALESCE(balance, 0) AS b FROM character_currencies
-        WHERE character_id = $1 AND currency_id = $2`,
-      [sender.id, CUR.copper])).rows[0]?.b || 0);
-    if (bal < tax) throw bad('insufficient_funds');
+    const bal = await moneyBalanceCopper(c, sender.id, true);
+    if (bal < BigInt(tax)) throw bad('insufficient_funds');
 
     const expiresAt = `now() + interval '${t.expDays} days'`;
     const mailId = (await c.query(

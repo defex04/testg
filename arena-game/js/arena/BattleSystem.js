@@ -139,6 +139,7 @@ export class BattleSystem extends EventTarget {
         else if (crit) damage *= 1.8;
         else if (blocked) damage *= 0.12;           // блок гасит удар
         damage = Math.max(1, Math.round(damage));
+        damage = Math.min(damage, Math.max(0, Math.round(defender.hp)));
         defender.hp = Math.max(0, defender.hp - damage);
       }
 

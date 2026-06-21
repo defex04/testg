@@ -71,6 +71,26 @@ function wedgePath(a0, a1, ri, ro) {
   return 'M' + pts.map((p) => p[0].toFixed(2) + ' ' + p[1].toFixed(2)).join(' L') + ' Z';
 }
 
+function miniEffectsHtml(list = []) {
+  return list.map((e) => {
+    const cls = e.kind === 'debuff' ? 'debuff' : 'buff';
+    const label = e.label ? ` title="${esc(e.label)}"` : '';
+    const time = e.time != null && e.time !== '' ? `<b>${esc(e.time)}</b>` : '';
+    return `<span class="nick-effect ${cls}"${label}>${esc(e.icon || '✦')}${time}</span>`;
+  }).join('');
+}
+
+function fighterEffects(f = {}) {
+  const out = [];
+  const turns = Number(f.buffTurns || 0);
+  if (turns > 0) {
+    const pct = Math.round(((Number(f.buffMult) || 1.5) - 1) * 100);
+    out.push({ icon: '💪', time: turns, kind: 'buff',
+      label: `Эликсир мощи: урон +${pct}%` });
+  }
+  return out;
+}
+
 export class BattleUI {
   /**
    * opts: {
@@ -105,7 +125,10 @@ export class BattleUI {
       <div class="fighter-col ${side}">
         <div class="fighter-head">
           <span class="lvl-badge" title="Уровень">${info.level ?? '?'}</span>
-          <span class="nick">${esc(info.name)}</span>
+          <span class="nick-wrap">
+            <span class="nick-effects"></span>
+            <span class="nick">${esc(info.name)}</span>
+          </span>
           <button class="info-btn" type="button" data-side="${side}"
                   title="Информация об игроке" aria-label="Информация об игроке">${INFO_SVG}</button>
         </div>
@@ -185,6 +208,7 @@ export class BattleUI {
       enFill: q('.bar-en .bar-fill'),
       enText: q('.bar-en .bar-val'),
       name: q('.nick'),
+      nameEffects: q('.nick-effects'),
       lvl: q('.lvl-badge'),
       effects: {
         left: this.headEl.querySelector('.bh-effects-left'),
@@ -410,6 +434,7 @@ export class BattleUI {
     if (this.refs.name.right) this.refs.name.right.textContent = info.name ?? '';
     if (this.refs.lvl.right)
       this.refs.lvl.right.textContent = info.level != null ? info.level : '?';
+    this.setEffects('right', fighterEffects(info));
   }
 
   /**
@@ -421,6 +446,8 @@ export class BattleUI {
     const host = this.refs.effects[side];
     if (!host) return;
     host.innerHTML = '';
+    if (this.refs.nameEffects?.[side])
+      this.refs.nameEffects[side].innerHTML = miniEffectsHtml(list);
     for (const e of list) {
       const chip = document.createElement('span');
       chip.className = 'effect-chip ' + (e.kind === 'debuff' ? 'debuff' : 'buff');
@@ -494,6 +521,7 @@ export class BattleUI {
           if (!row) continue;
           row.hp.style.width = (f.maxHp ? Math.max(0, (f.hp / f.maxHp) * 100) : 0) + '%';
           row.en.style.width = (f.maxEn ? Math.max(0, (f.en / f.maxEn) * 100) : 0) + '%';
+          if (row.eff) row.eff.innerHTML = miniEffectsHtml(fighterEffects(f));
           row.el.classList.toggle('dead', f.alive === false || f.hp <= 0);
         }
       }
@@ -521,6 +549,7 @@ export class BattleUI {
         // две полосы вплотную: жизнь (красная) + энергия (синяя), БЕЗ значков (#6.2);
         // «инфо» сидит рядом с ником (#6.3 — раскладка в CSS)
         m.innerHTML = `<div class="m-line"><span class="m-name">${esc(f.name)} <span class="m-lvl">[${f.level ?? '?'}]</span></span>${infoBtn}</div>
+          <div class="m-effects">${miniEffectsHtml(fighterEffects(f))}</div>
           <div class="m-bars">
             <div class="m-bar m-hp"><div class="m-fill" style="width:${pct}%"></div></div>
             <div class="m-bar m-en"><div class="m-fill" style="width:${enPct}%"></div></div>
@@ -542,6 +571,7 @@ export class BattleUI {
           el: m,
           hp: m.querySelector('.m-hp .m-fill'),
           en: m.querySelector('.m-en .m-fill'),
+          eff: m.querySelector('.m-effects'),
         });
       }
     }

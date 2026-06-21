@@ -72,6 +72,12 @@ export class Engine {
       lastTargetedTurn: 0,               // раунд, когда по бойцу БИЛИ — для «холода» цели
       buffMult: 1,                       // множитель урона от «Эликсира мощи»
       buffTurns: 0,                      // на сколько своих ударов он действует
+      aiHealUses: Number(def.aiHealUses ?? 0),
+      aiPowerUses: Number(def.aiPowerUses ?? 0),
+      aiHealAmount: Number(def.aiHealAmount ?? 0),
+      aiHealAt: Number(def.aiHealAt ?? 0.6),
+      aiPowerMult: Number(def.aiPowerMult ?? 1.5),
+      aiPowerTurns: Number(def.aiPowerTurns ?? 3),
     };
     this.fighters.set(id, f);
     this.teams[side].push(id);
@@ -301,6 +307,7 @@ export class Engine {
       // «Эликсир мощи»: усиливает удары N раз; заряд тратится на удар
       if (attacker.buffTurns > 0) { damage *= attacker.buffMult; attacker.buffTurns -= 1; }
       damage = Math.max(1, Math.round(damage));
+      damage = Math.min(damage, Math.max(0, Math.round(defender.hp)));
       defender.hp = Math.max(0, defender.hp - damage);
       if (defender.hp <= 0) defender.alive = false;
     }

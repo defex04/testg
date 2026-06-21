@@ -811,12 +811,11 @@ async function initBattle(resumedBattle = null, starter = null, pvpTarget = null
   currentFocusId = battle.focus ? (battle.focus.id ?? null) : null;
   showHP('left', battle.sides.left.hp, battle.sides.left.maxHp);
   showHP('right', battle.sides.right.hp, battle.sides.right.maxHp);
-  ui.setRoster(battle.roster);
   ui.setOpponent(battle.focus);
+  applyBattleRoster(battle.roster);
   totalDamage = 0;
   ui.setDamage(0);
-  ui.setEffects('left', []);
-  ui.setEffects('right', []);
+  refreshHeaderEffects();
   // энергия пока без серверной механики — показываем пустые полосы
   ui.setEnergy('left', 0, 0);
   ui.setEnergy('right', 0, 0);
@@ -833,7 +832,7 @@ async function initBattle(resumedBattle = null, starter = null, pvpTarget = null
     const d = e.detail;
     if (d.turn !== lastTurnShown) { ui.setTurn(d.turn); lastTurnShown = d.turn; }
     ui.setTimer(d.timeLeft);
-    if (d.roster) ui.setRoster(d.roster);
+    if (d.roster) applyBattleRoster(d.roster);
     updateBattleInfo();
     if (d.canAct) {                // мой ход
       applyFocus(d.focus);
@@ -854,7 +853,7 @@ async function initBattle(resumedBattle = null, starter = null, pvpTarget = null
   battle.addEventListener('timer', (e) => ui.setTimer(e.detail.timeLeft));
 
   battle.addEventListener('rosterUpdate', (e) => {
-    if (e.detail.roster) ui.setRoster(e.detail.roster);
+    if (e.detail.roster) applyBattleRoster(e.detail.roster);
     updateBattleInfo();
   });
 
@@ -862,7 +861,7 @@ async function initBattle(resumedBattle = null, starter = null, pvpTarget = null
     const d = e.detail;
     setBeltLive(false);            // ход разыгрывается — пояс блокируется
     ui.showResolving();            // колесо скрыто, баннер убран — видна анимация
-    if (d.roster) ui.setRoster(d.roster);
+    if (d.roster) applyBattleRoster(d.roster);
     if (d.focus) applyFocus(d.focus);
     updateBattleInfo();
     // в журнал — только удары (#10): пропуски ход не логируем
@@ -881,6 +880,8 @@ async function initBattle(resumedBattle = null, starter = null, pvpTarget = null
       // серверный счётчик «Эликсира мощи» убывает с каждым ударом — синхронизируем чип
       if (d.sides && d.sides.left && d.sides.left.buffTurns != null) {
         selfBuffTurns = d.sides.left.buffTurns;
+        syncEffectFromFighter(battle.sides.left);
+        syncEffectFromFighter(battle.sides.right);
         refreshSelfEffects();
       }
       battle.finishTurn();
@@ -891,7 +892,7 @@ async function initBattle(resumedBattle = null, starter = null, pvpTarget = null
   // и (если эффект пришёлся на меня) — HP/всплывашку/чип эффекта.
   battle.addEventListener('elixir', (e) => {
     const d = e.detail;
-    if (d.roster) ui.setRoster(d.roster);
+    if (d.roster) applyBattleRoster(d.roster);
     updateBattleInfo();
     // остаток заряда в моей ячейке (пил я) — пояс авторитетно с сервера
     if (d.isUser && d.slot != null && elixirBelt[d.slot]) {
@@ -899,24 +900,29 @@ async function initBattle(resumedBattle = null, starter = null, pvpTarget = null
       else elixirBelt[d.slot].qty = d.slotQty;
       renderCombatBar();
     }
-    // лог «кто что выпил» — пишет только пьющий у себя (избегаем дублей)
-    if (d.isUser) {
-      const name = esc(battle.sides.left.name);
-      if (d.kind === 'health') ui.log(`<b>${name}</b> восстанавливает ${d.heal} HP`);
-      else ui.log(`<b>${name}</b> усиливает удары на +${Math.round((d.mult - 1) * 100)}% (${d.turns} х.)`);
+    if (d.target) syncEffectFromFighter(d.target);
+    const byName = esc(d.byName || battle.sides.left.name);
+    const targetName = d.targetName && d.targetName !== d.byName ? ` для <b>${esc(d.targetName)}</b>` : '';
+    if (d.kind === 'health') ui.log(`<b>${byName}</b> восстанавливает ${d.heal} HP${targetName}`);
+    else ui.log(`<b>${byName}</b> усиливает удары${targetName} на +${Math.round((d.mult - 1) * 100)}% (${d.turns} х.)`);
+
+    const side = effectPopupSide(d);
+    if (!side) {
+      refreshHeaderEffects();
+      return;
     }
-    if (!d.onSelf) return;                   // эффект на союзника — дальше только ростер
-    showHP('left', d.hp, d.maxHp);
-    const pos = fighters.left
-      ? arena.worldToScreen(fighters.left.headPoint()) : { x: 70, y: 90 };
+    showHP(side, d.hp, d.maxHp);
+    const fighter = fighters[side];
+    const pos = fighter
+      ? arena.worldToScreen(fighter.headPoint()) : { x: side === 'left' ? 70 : 220, y: 90 };
     if (d.kind === 'health' && d.heal > 0) {
       ui.popup(pos, `+${d.heal}`, 'heal');
     } else if (d.kind === 'power') {
       const pct = Math.round((d.mult - 1) * 100);
-      selfBuffPct = pct;
+      if (side === 'left') selfBuffPct = pct;
       ui.popup(pos, `Мощь +${pct}%`, 'crit');
     }
-    selfBuffTurns = d.buffTurns || 0;
+    if (side === 'left') selfBuffTurns = d.buffTurns || 0;
     refreshSelfEffects();
     renderCombatBar();         // мощь активна → её слот уходит на «перезарядку» (#3)
   });
@@ -2624,6 +2630,7 @@ let elixirBelt = new Array(ELIXIR_SLOTS).fill(null);
 const elixirSpent = new Set();         // (резерв; при серверном поясе доступность — по qty)
 let selfBuffTurns = 0;                 // оставшиеся усиленные удары (с сервера)
 let selfBuffPct = 0;                   // прибавка урона «Эликсира мощи», %
+const battleEffects = new Map();       // fighterId -> [{ icon, time, kind, label }]
 let beltLive = false;                  // можно ли использовать пояс прямо сейчас
 
 const elixirGlyph = (kind) => (kind === 'power' ? '⚡' : '🧪');
@@ -2682,17 +2689,36 @@ function applyFocus(focus) {
     }
   }
   if (focus.maxHp) showHP('right', focus.hp, focus.maxHp);
+  syncEffectFromFighter(focus);
+  refreshHeaderEffects();
   setOpponentVisible(true);
 }
 
 /** Карточка «информация об игроке» (модалка боя): имя, уровень, HP, сторона. */
-function fighterCard(name, level, hp, maxHp, teamLabel) {
+function effectsInfoHtml(list = []) {
+  if (!list.length) return '<div class="finfo-effects-empty">Активных эффектов нет</div>';
+  return `<div class="finfo-effects">${list.map((e) =>
+    `<span class="effect-chip ${e.kind === 'debuff' ? 'debuff' : 'buff'}" title="${esc(e.label || '')}">
+       <span class="effect-ico">${esc(e.icon || '✦')}</span>
+       ${e.time != null && e.time !== '' ? `<span class="effect-time">${esc(e.time)}</span>` : ''}
+     </span>`).join('')}</div>`;
+}
+
+function fighterCard(info, teamLabel) {
+  const name = info?.name;
+  const level = info?.level;
+  const hp = info?.hp;
+  const maxHp = info?.maxHp;
+  syncEffectFromFighter(info);
   const rows = [`<div class="finfo-row"><span>Уровень</span><b>${esc(String(level ?? '?'))}</b></div>`];
   if (maxHp) rows.push(
     `<div class="finfo-row"><span>Здоровье</span><b>${Math.max(0, Math.round(hp))} / ${maxHp}</b></div>`);
   if (teamLabel) rows.push(`<div class="finfo-row"><span>Сторона</span><b>${teamLabel}</b></div>`);
   binfoTitle.textContent = name || '—';
-  binfoBody.innerHTML = `<div class="finfo">${rows.join('')}</div>`;
+  binfoBody.innerHTML = `<div class="finfo">${rows.join('')}
+    <div class="finfo-block-title">Активные эффекты</div>
+    ${effectsInfoHtml(effectsFor(info?.id))}
+  </div>`;
   if (binfoCopyBtn) binfoCopyBtn.style.display = 'none';   // не бой — ссылку не копируем
   clearInterval(binfoTimer); binfoTimer = null; binfoId = null;
   binfoEl.classList.remove('hidden');
@@ -2703,8 +2729,9 @@ function showFighterInfo(side) {
   if (!battle || !battle.sides) return;
   const base = battle.sides[side] || {};
   const info = side === 'right' && battle.focus ? battle.focus : base;
-  fighterCard(info.name ?? base.name, info.level ?? base.level,
-    info.hp != null ? info.hp : base.hp, info.maxHp ?? base.maxHp,
+  fighterCard({ ...base, ...info,
+    hp: info.hp != null ? info.hp : base.hp,
+    maxHp: info.maxHp ?? base.maxHp },
     side === 'left' ? 'Союзники' : 'Противники');
 }
 
@@ -2714,7 +2741,7 @@ function showMemberInfo(id) {
   for (const side of ['left', 'right']) {
     const f = (battle.roster[side] || []).find((x) => String(x.id) === String(id));
     if (f) {
-      fighterCard(f.name, f.level, f.hp, f.maxHp, side === 'left' ? 'Союзники' : 'Противники');
+      fighterCard(f, side === 'left' ? 'Союзники' : 'Противники');
       return;
     }
   }
@@ -2730,6 +2757,7 @@ const offscreenLog = (s) => {
 /** Сбросить эликсир-эффекты и заряды к началу боя. */
 function resetElixirBattle() {
   elixirSpent.clear();
+  battleEffects.clear();
   selfBuffTurns = 0;
   selfBuffPct = 0;
   beltLive = false;
@@ -2737,15 +2765,64 @@ function resetElixirBattle() {
   refreshSelfEffects();
 }
 
+function powerEffectFor(f) {
+  const turns = Number(f?.buffTurns || 0);
+  if (turns <= 0) return null;
+  const pct = Math.round(((Number(f?.buffMult) || 1.5) - 1) * 100);
+  return { icon: '💪', time: turns, kind: 'buff',
+    label: `Эликсир мощи: урон +${pct}%`, pct };
+}
+
+function syncEffectFromFighter(f) {
+  if (!f || f.id == null) return;
+  const eff = powerEffectFor(f);
+  const key = String(f.id);
+  if (eff) battleEffects.set(key, [eff]);
+  else battleEffects.delete(key);
+}
+
+function syncEffectsFromRoster(roster) {
+  for (const side of ['left', 'right']) {
+    for (const f of roster?.[side] || []) syncEffectFromFighter(f);
+  }
+}
+
+function effectsFor(id) {
+  return id == null ? [] : (battleEffects.get(String(id)) || []);
+}
+
+function refreshHeaderEffects() {
+  if (!ui) return;
+  syncEffectFromFighter(battle?.sides?.left);
+  syncEffectFromFighter(battle?.focus || battle?.sides?.right);
+  const leftId = battle?.sides?.left?.id;
+  const right = battle?.focus || battle?.sides?.right;
+  const selfPower = effectsFor(leftId)[0];
+  selfBuffTurns = selfPower ? Number(selfPower.time) || 0 : 0;
+  selfBuffPct = selfPower ? selfPower.pct || selfBuffPct : 0;
+  ui.setEffects('left', effectsFor(leftId));
+  ui.setEffects('right', effectsFor(right?.id));
+}
+
+function applyBattleRoster(roster) {
+  if (!roster || !ui) return;
+  ui.setRoster(roster);
+  syncEffectsFromRoster(roster);
+  refreshHeaderEffects();
+}
+
 /** Показать активные эффекты игрока иконками с таймером в шапке боя. */
 function refreshSelfEffects() {
-  if (!ui) return;
-  const list = [];
-  if (selfBuffTurns > 0) {
-    list.push({ icon: '💪', time: selfBuffTurns, kind: 'buff',
-                label: `Эликсир мощи: урон +${selfBuffPct}%` });
+  refreshHeaderEffects();
+}
+
+function effectPopupSide(d) {
+  if (d.onSelf) return 'left';
+  const right = battle?.focus || battle?.sides?.right;
+  if (d.targetSide === 'right' && right && String(right.id) === String(d.targetId)) {
+    return 'right';
   }
-  ui.setEffects('left', list);
+  return null;
 }
 
 function setBeltLive(v) {

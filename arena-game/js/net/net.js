@@ -19,6 +19,25 @@ let currentBattle = null;
 let pendingHunt = null;
 let resumeCb = null;
 let genericErrorCb = null;   // ошибки вне боя (чат/личка) — показать игроку
+let socketCloseIntent = false;
+let reconnectTimer = null;
+let reconnectDelay = 1000;
+
+function sendWs(payload) {
+  if (socket && socket.readyState === WebSocket.OPEN) {
+    socket.send(JSON.stringify(payload));
+    return true;
+  }
+  scheduleReconnect();
+  return false;
+}
+
+function gracefulCloseSocket() {
+  socketCloseIntent = true;
+  try { sendWs({ type: 'clientClose' }); } catch { /* page is closing */ }
+}
+
+window.addEventListener('beforeunload', gracefulCloseSocket);
 
 async function rest(path, body) {
   const r = await fetch(API + path, {
@@ -81,13 +100,13 @@ export const api = {
   beltUnequip: (slot) => rest('/api/belt/unequip', { slot }),
   chatHistory: () => rest('/api/chat/history'),
   battleInfo: (id) => rest('/api/battles/' + Number(id)),
-  sendChat:  (text) => socket && socket.send(JSON.stringify({ type: 'chat', text })),
+  sendChat:  (text) => sendWs({ type: 'chat', text }),
   onChat:    (fn) => socketHandlers.set('chat', fn),
   // личные сообщения в общий чат и приватная личка (отдельный канал на пару)
   sendPersonal: (to, text) =>
-    socket && socket.send(JSON.stringify({ type: 'chatPersonal', to, text })),
+    sendWs({ type: 'chatPersonal', to, text }),
   sendPrivate:  (to, text) =>
-    socket && socket.send(JSON.stringify({ type: 'chatPrivate', to, text })),
+    sendWs({ type: 'chatPrivate', to, text }),
   privateHistory: (peerId) => rest('/api/chat/private/' + Number(peerId)),
   onChatDM:  (fn) => socketHandlers.set('chatDM', fn),
   onMail:    (fn) => socketHandlers.set('mail', fn),
@@ -122,17 +141,41 @@ async function checkResumeBattle() {
 function connectSocket() {
   wireBattleHandlers();
   return new Promise((resolve, reject) => {
-    socket = new WebSocket(API.replace('http', 'ws') + '/ws?token=' + token);
-    socket.addEventListener('open', resolve);
+    socketCloseIntent = false;
+    const ws = new WebSocket(API.replace('http', 'ws') + '/ws?token=' + token);
+    socket = ws;
+    let opened = false;
+    ws.addEventListener('open', () => {
+      opened = true;
+      reconnectDelay = 1000;
+      resolve();
+    });
     // без этого login зависал бы навсегда, если REST доступен, а WS — нет
-    socket.addEventListener('error',
-      () => reject(new Error('ws_unavailable')), { once: true });
-    socket.addEventListener('message', (e) => {
+    ws.addEventListener('error',
+      () => { if (!opened) reject(new Error('ws_unavailable')); }, { once: true });
+    ws.addEventListener('close', () => {
+      if (socket === ws && !socketCloseIntent) scheduleReconnect();
+    });
+    ws.addEventListener('message', (e) => {
       let msg; try { msg = JSON.parse(e.data); } catch { return; }
       const h = socketHandlers.get(msg.type);
       if (h) h(msg);
     });
   });
+}
+
+function scheduleReconnect() {
+  if (!token || socketCloseIntent || reconnectTimer) return;
+  reconnectTimer = setTimeout(async () => {
+    reconnectTimer = null;
+    try {
+      await connectSocket();
+      await checkResumeBattle();
+    } catch (e) {
+      reconnectDelay = Math.min(30000, Math.round(reconnectDelay * 1.7));
+      scheduleReconnect();
+    }
+  }, reconnectDelay);
 }
 
 function wireBattleHandlers() {
@@ -154,7 +197,24 @@ function wireBattleHandlers() {
   socketHandlers.set('battleResume', (m) => {
     // бой уже подхвачен (push и REST-страховка могут прийти оба) — не дублируем
     if (currentBattle && currentBattle.battleId === m.battleId
-        && currentBattle.phase !== 'ended') return;
+        && currentBattle.phase !== 'ended') {
+      if (m.sides) {
+        currentBattle._applySides(m.sides);
+        currentBattle.sides.right = { ...(m.sides.right || m.focus || currentBattle.sides.right || {}) };
+      }
+      if (m.roster) currentBattle.roster = m.roster;
+      if ('focus' in m) currentBattle._applyFocus(m.focus);
+      if (m.policy) currentBattle.policy = m.policy;
+      currentBattle.phase = m.phase || currentBattle.phase;
+      if (m.phase === 'choose') {
+        currentBattle._on('turnStart', { turn: m.turn, timeLeft: m.timeLeft,
+          canAct: m.canAct !== false, active: m.active, waiting: !!m.waiting,
+          focus: m.focus, targets: m.targets || [], roster: m.roster });
+      } else if (m.roster) {
+        currentBattle._on('rosterUpdate', { roster: m.roster });
+      }
+      return;
+    }
     console.log('battleResume:', m.battleId, 'фаза', m.phase);
     const b = new ServerBattle(
       { battleId: m.battleId, phase: m.phase, kind: m.kind,
@@ -184,6 +244,8 @@ function wireBattleHandlers() {
   socketHandlers.set('elixir', (m) =>
     currentBattle && currentBattle._on('elixir',
       { byId: m.byId, onSelf: !!m.onSelf, isUser: !!m.isUser,
+        byName: m.byName, targetId: m.targetId, targetName: m.targetName,
+        targetSide: m.targetSide, target: m.target,
         kind: m.kind, heal: m.heal, mult: m.mult, turns: m.turns,
         buffTurns: m.buffTurns, hp: m.hp, maxHp: m.maxHp,
         slot: m.slot, slotQty: m.slotQty, roster: m.roster }));
@@ -227,7 +289,7 @@ export class ServerBattle extends EventTarget {
   static hunt() {
     return new Promise((resolve, reject) => {
       pendingHunt = { resolve, reject };
-      socket.send(JSON.stringify({ type: 'hunt' }));
+      if (!sendWs({ type: 'hunt' })) { pendingHunt = null; reject(new Error('ws_unavailable')); }
     });
   }
 
@@ -235,7 +297,7 @@ export class ServerBattle extends EventTarget {
   static attack(targetId) {
     return new Promise((resolve, reject) => {
       pendingHunt = { resolve, reject };
-      socket.send(JSON.stringify({ type: 'attack', targetId }));
+      if (!sendWs({ type: 'attack', targetId })) { pendingHunt = null; reject(new Error('ws_unavailable')); }
     });
   }
 
@@ -243,7 +305,7 @@ export class ServerBattle extends EventTarget {
   static join(battleId, side) {
     return new Promise((resolve, reject) => {
       pendingHunt = { resolve, reject };
-      socket.send(JSON.stringify({ type: 'join', battleId, side }));
+      if (!sendWs({ type: 'join', battleId, side })) { pendingHunt = null; reject(new Error('ws_unavailable')); }
     });
   }
 
@@ -252,6 +314,7 @@ export class ServerBattle extends EventTarget {
     if (s.left) {
       this.sides.left.hp = s.left.hp;
       if (s.left.buffTurns != null) this.sides.left.buffTurns = s.left.buffTurns;
+      if (s.left.buffMult != null) this.sides.left.buffMult = s.left.buffMult;
     }
     if (s.right) this.sides.right = { ...s.right };
   }
@@ -277,6 +340,16 @@ export class ServerBattle extends EventTarget {
     if (type === 'elixir' && detail.onSelf) {   // эффект пришёлся мне — обновить плашку
       this.sides.left.hp = detail.hp;
       if (detail.maxHp != null) this.sides.left.maxHp = detail.maxHp;
+      if (detail.buffTurns != null) this.sides.left.buffTurns = detail.buffTurns;
+      if (detail.mult != null) this.sides.left.buffMult = detail.mult;
+    }
+    if (type === 'elixir' && detail.targetSide === 'right' && detail.target) {
+      if (this.sides.right && String(this.sides.right.id) === String(detail.target.id)) {
+        this.sides.right = { ...this.sides.right, ...detail.target };
+      }
+      if (this.focus && String(this.focus.id) === String(detail.target.id)) {
+        this.focus = { ...this.focus, ...detail.target };
+      }
     }
     if (type === 'battleEnd') {
       this.phase = 'ended';
@@ -299,16 +372,15 @@ export class ServerBattle extends EventTarget {
   /** move: { attack, block, pass, target } — target = id выбранного врага (NvN). */
   submitMove(side, move) {
     const block = move.block ? String(move.block).replace(/^b-/, '') : null;
-    socket.send(JSON.stringify(
-      { type: 'move', attack: move.attack ?? null, block,
-        pass: !!move.pass, target: move.target ?? null }));
+    sendWs({ type: 'move', attack: move.attack ?? null, block,
+      pass: !!move.pass, target: move.target ?? null });
     return true;
   }
   /** Использовать боевой эликсир: { kind:'health'|'power', potency, turns }. */
-  useElixir(payload) { socket.send(JSON.stringify({ type: 'elixir', ...payload })); }
-  finishTurn()    { socket.send(JSON.stringify({ type: 'turnDone' })); }
+  useElixir(payload) { sendWs({ type: 'elixir', ...payload }); }
+  finishTurn()    { sendWs({ type: 'turnDone' }); }
   /** Покинуть бой: сервер сам спишет Эликсир побега или откажет. */
-  requestEscape() { socket.send(JSON.stringify({ type: 'escape' })); }
+  requestEscape() { sendWs({ type: 'escape' }); }
   destroy()       { if (currentBattle === this) currentBattle = null; }
   _emit(type, detail) { this.dispatchEvent(new CustomEvent(type, { detail })); }
 }

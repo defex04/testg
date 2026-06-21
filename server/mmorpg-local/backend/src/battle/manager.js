@@ -40,7 +40,7 @@ function makeBattle(id, kind, locationId, policy, engine) {
 function addPlayer(b, charId, send, side) {
   b.players.set(cid(charId),
     { charId: cid(charId), side, send: send || noop, attached: true,
-      totalDamage: 0, turnDone: false });
+      totalDamage: 0, kills: 0, turnDone: false });
   return b.players.get(cid(charId));
 }
 const playerList = (b) => [...b.players.values()];
@@ -53,7 +53,7 @@ function broadcast(b, payloadFor) {
 // --- зеркалирование: команда зрителя как left ---
 const pub = (f) => f && ({ id: f.id, name: f.name, level: f.level,
   hp: Math.round(f.hp), maxHp: f.maxHp, alive: f.alive,
-  buffTurns: f.buffTurns || 0 });
+  buffTurns: f.buffTurns || 0, buffMult: f.buffMult || 1 });
 const rosterFor = (b, vSide) => ({
   left:  b.engine.teams[vSide].map((id) => pub(b.engine.fighter(id))),
   right: b.engine.teams[other(vSide)].map((id) => pub(b.engine.fighter(id))),
@@ -65,7 +65,7 @@ function anyEnemy(b, vSide) {
 }
 function sidesFor(b, p, focus) {
   const me = b.engine.fighter(p.charId);
-  const right = focus || anyEnemy(b, me.side);
+  const right = focus || b.engine.opponentOf(me.id) || anyEnemy(b, me.side);
   return { left: pub(me), right: pub(right) };
 }
 
@@ -79,8 +79,16 @@ function turnStartFor(b, p) {
   if (af) {
     if (af.id === me.id) {            // мой ход — смотрю на своего «липкого» соперника
       canAct = true; focus = e.opponentOf(me.id) || e.enemiesOf(me.id)[0] || null;
-    } else if (af.side !== vSide) { focus = af; }  // ходит враг — смотрим на него
-    else { waiting = true; }                        // ходит союзник — ждём соперника
+    } else if (af.side !== vSide) {
+      const myOpp = e.opponentOf(me.id);
+      const actorOpp = e.opponentOf(af.id);
+      if ((myOpp && String(myOpp.id) === String(af.id))
+          || (actorOpp && String(actorOpp.id) === String(me.id))) {
+        focus = af;
+      } else {
+        waiting = true; focus = myOpp || null;
+      }
+    } else { waiting = true; focus = e.opponentOf(me.id) || null; }
   }
   return {
     type: 'turnStart', turn: e.turn,
@@ -126,6 +134,37 @@ function startView(b, p) {
   return { left: pub(me), right: pub(enemy),
     roster: rosterFor(b, me.side), focus: pub(enemy),
     policy: { intervention: b.policy.intervention } };
+}
+
+function elixirEventFor(b, q, actor, target, data) {
+  const qme = b.engine.fighter(q.charId);
+  const isTargetSelf = target.charId != null && cid(q.charId) === cid(target.charId);
+  const isActorSelf = actor.charId != null && cid(q.charId) === cid(actor.charId);
+  return {
+    type: 'elixir',
+    byId: actor.id,
+    byName: actor.name,
+    targetId: target.id,
+    targetName: target.name,
+    targetSide: target.side === qme.side ? 'left' : 'right',
+    target: pub(target),
+    onSelf: isTargetSelf,
+    isUser: isActorSelf,
+    kind: data.kind,
+    heal: data.heal || 0,
+    mult: data.mult || 1,
+    turns: data.turns || 0,
+    buffTurns: target.buffTurns || 0,
+    hp: Math.round(target.hp),
+    maxHp: target.maxHp,
+    slot: data.slot,
+    slotQty: data.slotQty,
+    roster: rosterFor(b, qme.side),
+  };
+}
+
+function broadcastElixir(b, actor, target, data) {
+  broadcast(b, (q) => elixirEventFor(b, q, actor, target, data));
 }
 
 /** Настройки выбора цели (липкость/«холод») из конфига; есть дефолты. */
@@ -228,10 +267,14 @@ export async function startHunt(ch, send) {
     `INSERT INTO battle_participants (battle_id, character_id, side, status)
      VALUES ($1, $2, 1, 1)`, [battleId, ch.id]);
 
+  const npcStats = { ...(npc.stats || {}), hp: 1500,
+    aiHealUses: 1, aiPowerUses: 1, aiHealAmount: 800, aiHealAt: 0.6,
+    aiPowerMult: 1.5, aiPowerTurns: 3 };
+
   const engine = new Engine({
     left:  [{ id: ch.id, charId: ch.id, name: ch.name, level: ch.level,
               isAI: false, ...(await combatProfileFor(ch.id, start)) }],
-    right: [{ id: `npc-${npc.id}`, name: npc.name, level: npc.level, isAI: true, ...npc.stats }],
+    right: [{ id: `npc-${npc.id}`, name: npc.name, level: npc.level, isAI: true, ...npcStats }],
   }, { turnTime, target: await targetCfg() });
 
   const b = makeBattle(battleId, 'hunt', ch.location_id, policy, engine);
@@ -427,6 +470,24 @@ function startTurnTimer(b) {
   }, 1000);
 }
 
+function applyAiElixirs(b, af) {
+  if (!af || !af.isAI || !af.alive) return;
+  if ((af.aiPowerUses || 0) > 0 && af.buffTurns <= 0) {
+    af.aiPowerUses -= 1;
+    const mult = clampNum(af.aiPowerMult, 1, 2, 1.5);
+    const turns = clampNum(af.aiPowerTurns, 1, 5, 3);
+    b.engine.addBuff(af.id, mult, turns);
+    broadcastElixir(b, af, af, { kind: 'power', mult, turns });
+  }
+  if ((af.aiHealUses || 0) > 0 && af.hp <= af.maxHp * (af.aiHealAt || 0.6)) {
+    af.aiHealUses -= 1;
+    const amount = clampNum(af.aiHealAmount, 1, af.maxHp, 800);
+    const healed = b.engine.heal(af.id, amount);
+    broadcastElixir(b, af, af, { kind: 'health', heal: healed });
+  }
+  snapshot(b.id, b).catch(console.error);
+}
+
 function onTurnTimeout(b) {
   if (b.engine.phase !== 'choose') return;
   let af = b.engine.currentActor();
@@ -438,6 +499,7 @@ function onTurnTimeout(b) {
   const move = af.isAI
     ? b.engine.aiMove()
     : { attack: null, block: null, pass: true };
+  if (af.isAI) applyAiElixirs(b, af);
   if (!b.engine.submit(af.id, move) && af.isAI) {
     b.engine.submit(af.id, { attack: null, block: null, pass: true });
   }
@@ -468,6 +530,7 @@ function enterActor(b) {
     setTimeout(() => {
       if (b.step !== step) return;   // ход уже сменился — не дублируем
       if (b.engine.phase === 'choose' && b.engine.currentActorId() === af.id) {
+        applyAiElixirs(b, af);
         if (!b.engine.submit(af.id, b.engine.aiMove())) {
           console.warn(`Бой ${b.id}: ИИ ${af.name} (${af.id}) — пропуск хода`);
           b.engine.submit(af.id, { attack: null, block: null, pass: true });
@@ -611,17 +674,7 @@ export async function useElixir(charId, msg = {}) {
   await snapshot(b.id, b);
 
   // slotQty (остаток заряда в ячейке пояса после списания) уже посчитан выше в tx
-  broadcast(b, (q) => {
-    const qme = b.engine.fighter(q.charId);
-    return { type: 'elixir',
-      byId: cid(charId),                                  // кто выпил (лог/слот)
-      onSelf: cid(q.charId) === cid(tf.charId ?? ''),     // эффект пришёлся зрителю → его плашка
-      isUser: cid(q.charId) === cid(charId),              // зритель — пьющий → его пояс/чип
-      kind, heal: healed, mult, turns, buffTurns: tf.buffTurns,
-      hp: Math.round(tf.hp), maxHp: tf.maxHp,
-      slot, slotQty,
-      roster: rosterFor(b, qme.side) };
-  });
+  broadcastElixir(b, me, tf, { kind, heal: healed, mult, turns, slot, slotQty });
   return true;
 }
 
@@ -634,6 +687,7 @@ async function resolveCurrent(b) {
     s.targetId = b.engine.fighter(s.defenderId)?.charId ?? null;
     const ap = s.actorId && b.players.get(cid(s.actorId));
     if (ap && !s.dodged) ap.totalDamage += s.damage;
+    if (ap && s.killed) ap.kills += 1;
   }
   await snapshot(b.id, b);
   logRounds(b.id, r.turn, r.strikes).catch(console.error);
@@ -693,7 +747,7 @@ async function endBattle(b) {
         [b.id, p.charId, me.hp > 0 ? 1 : 2,
          victory ? 1 : winner ? 2 : 3, b.engine.turn,
          p.totalDamage, victory && reward ? reward.exp : 0,
-         victory ? 1 : 0, me.hp > 0 ? 0 : 1]);
+         p.kills || 0, me.hp > 0 ? 0 : 1]);
       if (victory && reward) {
         await addCurrency(c, p.charId, CUR[reward.currency], reward.amount, 7,
           { idempotencyKey: randomUUID(), type: 1, id: b.id });

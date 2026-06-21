@@ -60,6 +60,12 @@ const STATEMENTS = [
   `DELETE FROM locations WHERE id = 3`,
   `INSERT INTO location_links (from_id, to_id) VALUES (1, 2), (2, 1)
    ON CONFLICT (from_id, to_id) DO NOTHING`,
+  `UPDATE npc_templates
+      SET stats = coalesce(stats, '{}'::jsonb)
+        || '{"hp": 1500, "aiHealUses": 1, "aiPowerUses": 1,
+             "aiHealAmount": 800, "aiHealAt": 0.6,
+             "aiPowerMult": 1.5, "aiPowerTurns": 3}'::jsonb
+    WHERE id = 1`,
   // --- Почта -----------------------------------------------------------
   // Номинальная стоимость предмета (медь). От неё считается налог за вложение
   // в письмо (10%). 0 = бесценок (налог за вложение не берётся).
