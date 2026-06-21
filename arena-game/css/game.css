@@ -239,7 +239,7 @@ body.loc-castle .player-plate {
   gap: 8px;
 }
 body.loc-castle .pp-level { width: 36px; height: 36px; font-size: 14px; }
-body.loc-castle .pp-level-cap { font-size: 7px; letter-spacing: 1.5px; }
+body.loc-castle .pp-level-cap { font-size: 7.5px; letter-spacing: .3px; }
 body.loc-castle .pp-name { font-size: 12px; }
 body.loc-castle .pp-bar { height: 12px; }
 body.loc-castle .pp-meter { gap: 5px; }
@@ -300,14 +300,14 @@ body.loc-castle .pp-money-cell { font-size: 11px; }
 .menu-icon[data-castle="auction"] img { transform: scale(1.1) translateY(1px); }
 
 .menu-icon[data-castle="battles"] {
-  width: clamp(76px, 19vmin, 86px);
+  width: clamp(84px, 19vmin, 92px);   /* подпись «Текущие бои» помещается целиком */
 }
 .menu-icon[data-castle="battles"] img { transform: scale(1.04) translateY(-1px); }
 
 /* подпись под иконкой — чтобы назначение читалось без угадывания */
 .mi-label {
   font-family: var(--font-display);
-  font-size: 12px;
+  font-size: clamp(10px, 3vw, 12px);   /* на узких Android-экранах подпись не вылезает */
   line-height: 1;
   letter-spacing: .12px;
   text-transform: uppercase;
@@ -318,6 +318,8 @@ body.loc-castle .pp-money-cell { font-size: 11px; }
   width: 100%;
   max-width: 100%;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .menu-icon:hover { transform: scale(1.05); }
@@ -449,14 +451,17 @@ body.loc-castle.in-battle .sprite-main[data-mm="players"]   { order: 4; }
 .sprite-main[data-mm="clan"]      .sm-ico { background-image: url('../assets/menu/mm-clan.webp'); }
 .sm-label {
   font-family: var(--font-display);
-  font-size: 12px;
+  font-size: clamp(10px, 3.1vw, 12px);   /* узкие Android-экраны: без переполнения */
   line-height: 1;
   letter-spacing: .12px;
   text-transform: uppercase;
   color: #f2e4ba;
   text-shadow: 0 1px 2px #000, 0 0 6px rgba(0, 0, 0, .9);
   text-align: center;
+  width: 100%;
   max-width: 100%;
+  box-sizing: border-box;
+  padding: 0 2px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -693,6 +698,22 @@ body.loc-castle.in-battle.battle-dock-closed .binfo-panel {
 }
 .bis.ally  { border-left-color: rgba(111, 180, 255, .7); }
 .bis.enemy { border-left-color: rgba(255, 120, 90, .7); }
+
+/* кнопка «скопировать» — ячейка сетки рядом с «Длительность», единственный
+   кликабельный элемент пассивной панели (у неё pointer-events:none) */
+.binfo-copy-link {
+  pointer-events: auto;
+  justify-content: center;
+  gap: 5px;
+  border: none;
+  border-left: 3px solid rgba(201, 168, 76, .5);
+  color: var(--gold-bright);
+  font-family: var(--font-display);
+  font-size: 11.5px;
+  cursor: pointer;
+  transition: background .12s;
+}
+.binfo-copy-link:hover, .binfo-copy-link:active { background: rgba(216, 169, 63, .18); }
 .bis-k { font-size: 11px; color: rgba(239, 227, 194, .72); white-space: nowrap; }
 .bis-v { font-size: 14px; font-weight: 700; color: #f3e6c4; text-shadow: 0 1px 2px #000; }
 .bis.ally  .bis-v { color: #9fccff; }
@@ -889,7 +910,9 @@ body.loc-castle.in-battle .sprite-main .sm-ico {
   font-family: var(--font-display);
   font-size: 8px;
   font-weight: 700;
-  letter-spacing: 2px;
+  letter-spacing: .4px;
+  text-transform: uppercase;
+  white-space: nowrap;
   color: var(--gold);
   text-shadow: 0 1px 2px #000;
   opacity: .8;
@@ -1036,7 +1059,7 @@ body.loc-castle.in-battle .sprite-main .sm-ico {
 .pp-money {
   flex: 0 0 auto;
   display: grid;
-  grid-template-columns: auto auto;
+  grid-template-columns: auto auto;   /* 2×2: золото·серебро / медь·бриллианты */
   gap: 4px 12px;
   padding: 7px 12px;
   background: linear-gradient(180deg, rgba(48, 36, 14, .55), rgba(20, 14, 6, .55));
@@ -1392,8 +1415,9 @@ body.loc-castle.in-battle .sprite-main .sm-ico {
   width: min(420px, calc(100% - 24px));
   max-height: min(48vh, 360px);
   padding: 12px 14px 14px;
-  background:
-    linear-gradient(180deg, rgba(24, 30, 16, .94), rgba(12, 16, 8, .92));
+  /* непрозрачный фон как у остальных окон — на Android backdrop-filter часто
+     не работает, и панель «просвечивала» сцену (#3) */
+  background: linear-gradient(180deg, var(--panel-hi), var(--panel-lo));
   border: 1px solid rgba(138, 111, 60, .55);
   border-radius: 18px;
   backdrop-filter: blur(6px);
@@ -3731,8 +3755,9 @@ body.tg-fullscreen .net-status { display: flex; }
 .menu-icon { position: relative; }
 .mail-badge {
   position: absolute;
-  top: -4px;
-  right: 6px;
+  top: 4px;
+  right: 50%;
+  margin-right: -26px;
   min-width: 17px;
   height: 17px;
   padding: 0 4px;
@@ -4008,6 +4033,86 @@ body.tg-fullscreen .net-status { display: flex; }
 /* строка-ошибка прямо в чате (тосты в фуллскрине Telegram прячутся за шапкой) */
 .chat-line.chat-error { color: #ffb4a0; font-style: normal; }
 .chat-line.chat-error b { color: #ffb4a0; }
+
+/* настройка «Скрыть системные сообщения» (ошибки чата оставляем видимыми) */
+body.hide-sys-chat .chat-line.system:not(.chat-error) { display: none; }
+
+/* время сообщения (#6) */
+.chat-time {
+  display: inline-block;
+  margin-right: 5px;
+  font-size: 10.5px;
+  color: #8d845f;
+  font-variant-numeric: tabular-nums;
+  vertical-align: baseline;
+}
+
+/* начало/длительность боя в окне инфо (#7) */
+.bi-meta {
+  font-size: 12px;
+  color: #cdbd8d;
+  text-align: center;
+  margin: 0 0 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(138, 111, 60, .3);
+}
+
+/* бейдж новых личных сообщений над иконкой «Чат» нижнего меню (#10) */
+.sprite-main { position: relative; }
+.mm-badge {
+  position: absolute;
+  top: -2px;
+  right: 50%;
+  margin-right: -26px;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-display);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  color: #fff;
+  background: linear-gradient(180deg, #d4452f, #9c2417);
+  border: 1px solid #f0b48a;
+  border-radius: 999px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, .55), 0 0 8px rgba(212, 69, 47, .5);
+  pointer-events: none;
+  z-index: 3;
+}
+.mm-badge.hidden { display: none; }
+
+/* список игроков: счётчик и кнопки действий (#9) */
+.players-head {
+  font-size: 12.5px;
+  color: #cdbd8d;
+  padding: 4px 12px 8px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid rgba(138, 111, 60, .25);
+}
+.players-list .player-actions { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
+.player-act {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  color: #cdbd8d;
+  background: rgba(255, 255, 255, .03);
+  border: 1px solid rgba(138, 111, 60, .35);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: color .12s, border-color .12s, background .12s;
+}
+.player-act svg { width: 16px; height: 16px; }
+.player-act:hover, .player-act:active {
+  color: var(--gold-bright);
+  border-color: var(--gold);
+  background: rgba(216, 169, 63, .12);
+}
 
 /* карточка игрока (информация) */
 .pinfo { display: flex; flex-direction: column; gap: 8px; padding: 4px 2px; }

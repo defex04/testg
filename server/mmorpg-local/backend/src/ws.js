@@ -19,7 +19,7 @@ export function createHub(server) {
 
   subscribeChat((msg) => {
     const out = JSON.stringify({ type: 'chat', from: msg.senderName,
-      fromId: msg.senderId ?? null, text: msg.body,
+      fromId: msg.senderId ?? null, text: msg.body, ts: msg.ts ?? Date.now(),
       to: msg.toName ?? null, toId: msg.toId ?? null });
     for (const conn of byChar.values()) {
       if (conn.locId === msg.locId && conn.ws.readyState === 1) conn.ws.send(out);

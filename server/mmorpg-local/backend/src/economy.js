@@ -13,14 +13,22 @@ export async function addCurrency(client, charId, currencyId, amount, reason, re
      ON CONFLICT DO NOTHING`, [key]);
   if (ins.rowCount === 0) return null; // повтор — уже выполнено
 
-  const { rows } = await client.query(
-    `INSERT INTO character_currencies (character_id, currency_id, balance)
-     VALUES ($1, $2, $3)
-     ON CONFLICT (character_id, currency_id)
-     DO UPDATE SET balance = character_currencies.balance + $3, updated_at = now()
-     RETURNING balance`, [charId, currencyId, amount]);
+  let rows;
+  try {
+    ({ rows } = await client.query(
+      `INSERT INTO character_currencies (character_id, currency_id, balance)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (character_id, currency_id)
+       DO UPDATE SET balance = character_currencies.balance + $3, updated_at = now()
+       RETURNING balance`, [charId, currencyId, amount]));
+  } catch (e) {
+    // CHECK (balance >= 0): списание уводит баланс в минус — чистая ошибка вместо
+    // сырого текста БД (важно для UI: «не хватает денег», а не constraint name)
+    if (e.code === '23514') throw Object.assign(new Error('insufficient_funds'), { status: 400 });
+    throw e;
+  }
   const balance = rows[0].balance;
-  if (BigInt(balance) < 0n) throw new Error('insufficient_funds');
+  if (BigInt(balance) < 0n) throw Object.assign(new Error('insufficient_funds'), { status: 400 });
 
   await client.query(
     `INSERT INTO currency_ledger (idempotency_key, subject_type, subject_id,

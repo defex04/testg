@@ -81,7 +81,7 @@
       <div class="player-plate">
         <div class="pp-level-holder">
           <div class="pp-level" id="pp-level">15</div>
-          <span class="pp-level-cap" aria-hidden="true">УР.</span>
+          <span class="pp-level-cap" aria-hidden="true">Уровень</span>
         </div>
         <div class="pp-main">
           <div class="pp-name" id="pp-name">ИгрокА</div>
@@ -99,9 +99,9 @@
           </div>
         </div>
         <div class="pp-money">
-          <span class="pp-money-cell" title="Медь"><span class="coin coin-copper"></span><span id="pp-copper">0</span></span>
-          <span class="pp-money-cell" title="Серебро"><span class="coin coin-silver"></span><span id="pp-silver">0</span></span>
           <span class="pp-money-cell" title="Золото"><span class="coin coin-gold"></span><span id="pp-gold">0</span></span>
+          <span class="pp-money-cell" title="Серебро"><span class="coin coin-silver"></span><span id="pp-silver">0</span></span>
+          <span class="pp-money-cell" title="Медь"><span class="coin coin-copper"></span><span id="pp-copper">0</span></span>
           <span class="pp-money-cell" title="Бриллианты"><span class="gem"></span><span id="pp-diamond">0</span></span>
         </div>
         <button type="button" class="pp-settings" id="pp-settings" title="Настройки" aria-label="Настройки">
@@ -133,6 +133,7 @@
         </button>
         <button type="button" class="menu-icon" data-castle="battles" title="Идущие бои в локации — вмешаться или посмотреть">
           <img src="assets/menu/tm-battle.webp" alt="" draggable="false">
+          <span class="mail-badge hidden" id="battles-badge" aria-label="Идущих боёв">0</span>
           <span class="mi-label">Текущие бои</span>
         </button>
       </div>
@@ -267,6 +268,7 @@
         </button>
         <button type="button" class="sprite-main" data-mm="chat" title="Чат локации">
           <span class="sm-ico"></span><span class="sm-label">Чат</span>
+          <span class="mm-badge hidden" id="chat-badge" aria-label="Новые сообщения вам">0</span>
         </button>
         <button type="button" class="sprite-main" data-mm="players" title="Список игроков в локации">
           <span class="sm-ico"></span><span class="sm-label">Игроки</span>
@@ -360,6 +362,16 @@
           </span>
           <span class="switch">
             <input type="checkbox" id="set-members-start" checked>
+            <span class="switch-track"><span class="switch-knob"></span></span>
+          </span>
+        </label>
+        <label class="settings-row" for="set-hide-sys">
+          <span class="settings-row-main">
+            <span class="settings-row-name">Скрыть системные сообщения</span>
+            <span class="settings-row-desc">Не показывать строки «[Система]» в чате</span>
+          </span>
+          <span class="switch">
+            <input type="checkbox" id="set-hide-sys">
             <span class="switch-track"><span class="switch-knob"></span></span>
           </span>
         </label>

@@ -138,6 +138,18 @@ function setMembersOnStartPref(on) {
   try { localStorage.setItem(MEMBERS_START_KEY, on ? '1' : '0'); } catch {}
 }
 
+// --- Скрывать системные сообщения в чате (по умолчанию показывать) -----------
+const HIDE_SYS_KEY = 'arena.hideSysChat';
+const hideSysChatPref = () => {
+  try { return localStorage.getItem(HIDE_SYS_KEY) === '1'; } catch { return false; }
+};
+function applyHideSysChat(on) { document.body.classList.toggle('hide-sys-chat', on); }
+function setHideSysChatPref(on) {
+  try { localStorage.setItem(HIDE_SYS_KEY, on ? '1' : '0'); } catch {}
+  applyHideSysChat(on);
+}
+applyHideSysChat(hideSysChatPref());
+
 // Безопасные зоны: device (safeAreaInset: вырез/статус-бар) + контентная
 // (contentSafeAreaInset: место под плавающими кнопками Telegram ✕/⋯ сверху).
 // Кладём суммой в CSS-переменные --tg-inset-* — по ним бокс игры вписывается в
@@ -192,10 +204,12 @@ function confirmExit() {
   const fsInput = $('set-fullscreen');
   const hintsInput = $('set-hints');
   const membersStartInput = $('set-members-start');
+  const hideSysInput = $('set-hide-sys');
   const open = () => {
     if (fsInput) fsInput.checked = fullscreenPref();
     if (hintsInput) hintsInput.checked = hintsPref();
     if (membersStartInput) membersStartInput.checked = membersOnStartPref();
+    if (hideSysInput) hideSysInput.checked = hideSysChatPref();
     el.classList.remove('hidden');
   };
   const close = () => el.classList.add('hidden');
@@ -205,6 +219,7 @@ function confirmExit() {
   fsInput?.addEventListener('change', () => setFullscreenPref(fsInput.checked));
   hintsInput?.addEventListener('change', () => setHintsPref(hintsInput.checked));
   membersStartInput?.addEventListener('change', () => setMembersOnStartPref(membersStartInput.checked));
+  hideSysInput?.addEventListener('change', () => setHideSysChatPref(hideSysInput.checked));
   $('settings-exit')?.addEventListener('click', confirmExit);
 
   // Принудительный сброс кэша: Telegram WebView держит старые index.html/js/css
@@ -406,6 +421,10 @@ function openCastleDock(pane) {
   activateTab(pane);
   updateCastleMainMenu();
   updateBattleDockState();
+  // открыли чат на общей вкладке — гасим звоночек личных сообщений (#10)
+  if (pane === 'chat' && typeof clearMentions === 'function' && activeChat === 'common') {
+    clearMentions();
+  }
   // запоминаем выбранное окно боя — чтобы восстановить его после F5/реконнекта
   if (mode === 'battle') saveBattlePane(pane);
 }
@@ -455,50 +474,70 @@ const BATTLE_TIPS = [
   'Окна боя открываются кнопками в нижнем меню.',
 ];
 let biEls = null;
+let battleStartedAt = null;     // когда начался бой (для длительности в сводке)
+let battleDurTimer = null;      // тикер длительности раз в секунду
 function ensureBattleInfo() {
   if (!battleForeground) return null;
   if (biEls && battleForeground.contains(biEls.root)) return biEls;
   battleForeground.innerHTML = `
-    <div class="binfo-panel" aria-hidden="true">
+    <div class="binfo-panel">
       <div class="binfo-panel-head">Сводка боя</div>
       <div class="binfo-stats">
-        <div class="bis"><span class="bis-k">Ход</span><span class="bis-v" data-bi="turn">1</span></div>
-        <div class="bis"><span class="bis-k">Урон</span><span class="bis-v" data-bi="dmg">0</span></div>
         <div class="bis ally"><span class="bis-k">Союзники</span><span class="bis-v" data-bi="ally">—</span></div>
         <div class="bis enemy"><span class="bis-k">Противники</span><span class="bis-v" data-bi="enemy">—</span></div>
+        <div class="bis"><span class="bis-k">Урон</span><span class="bis-v" data-bi="dmg">0</span></div>
+        <div class="bis"><span class="bis-k">Убито</span><span class="bis-v" data-bi="kills">0</span></div>
+        <div class="bis"><span class="bis-k">Длительность</span><span class="bis-v" data-bi="dur">—</span></div>
+        <button type="button" class="bis binfo-copy-link" data-bi="copy">🔗 Скопировать</button>
       </div>
       <div class="binfo-tip" data-bi="tip"></div>
     </div>`;
   const q = (s) => battleForeground.querySelector(s);
   biEls = {
     root: battleForeground.firstElementChild,
-    turn: q('[data-bi="turn"]'), dmg: q('[data-bi="dmg"]'),
-    ally: q('[data-bi="ally"]'), enemy: q('[data-bi="enemy"]'), tip: q('[data-bi="tip"]'),
+    dmg: q('[data-bi="dmg"]'), kills: q('[data-bi="kills"]'),
+    ally: q('[data-bi="ally"]'), enemy: q('[data-bi="enemy"]'),
+    dur: q('[data-bi="dur"]'), tip: q('[data-bi="tip"]'), copy: q('[data-bi="copy"]'),
   };
+  biEls.copy.addEventListener('click', async () => {
+    const id = battle && battle.battleId;
+    if (!id) { showToast('Ссылка доступна в бою на сервере'); return; }
+    if (await writeClipboard(battleLink(id))) showToast('Ссылка на бой скопирована');
+    else window.prompt('Ссылка на бой:', battleLink(id));
+  });
   return biEls;
 }
 function aliveCount(side) {
   const list = (battle && battle.roster && battle.roster[side]) || [];
   let alive = 0;
   for (const f of list) if (f.alive !== false && (f.hp == null || f.hp > 0)) alive++;
-  return { alive, total: list.length };
+  return { alive, total: list.length, dead: list.length - alive };
+}
+function updateBattleDuration() {
+  if (!biEls || !battleStartedAt) return;
+  biEls.dur.textContent = fmtDuration(Date.now() - battleStartedAt);
 }
 function updateBattleInfo() {
   if (mode !== 'battle') return;
   const e = ensureBattleInfo();
   if (!e) return;
+  if (!battleStartedAt) battleStartedAt = Date.now();
+  if (!battleDurTimer) battleDurTimer = setInterval(updateBattleDuration, 1000);
   const turn = lastTurnShown || 1;
-  e.turn.textContent = turn;
   e.dmg.textContent = totalDamage;
   const a = aliveCount('left');
   const en = aliveCount('right');
-  e.ally.textContent = `${a.alive}/${a.total}`;
+  e.ally.textContent = `${a.alive}/${a.total}`;      // живых/всего, как раньше
   e.enemy.textContent = `${en.alive}/${en.total}`;
+  e.kills.textContent = en.dead;            // сколько противников пало (убито нашей стороной)
+  updateBattleDuration();
   e.tip.textContent = BATTLE_TIPS[(turn - 1) % BATTLE_TIPS.length];
 }
 function clearBattleInfo() {
   if (battleForeground) battleForeground.innerHTML = '';
   biEls = null;
+  battleStartedAt = null;
+  clearInterval(battleDurTimer); battleDurTimer = null;
 }
 
 /** Переключение «локация» ⇄ «бой». */
@@ -549,6 +588,7 @@ async function gotoLocation(key) {
     serverLocId = loc.id;
     setLocation(key);
     refreshPlayers();
+    refreshBattlesBadge();
   } catch (e) {
     showToast('Туда не пройти: ' + e.message);
   }
@@ -1233,8 +1273,23 @@ function nickEl(name, id) {
 
 // ── Построение строк чата ──
 
+/** Время сообщения «ЧЧ:ММ» отдельным приглушённым значком в начале строки. */
+function chatTime(ts) {
+  if (!ts) return '';
+  const d = new Date(ts);
+  const p = (n) => String(n).padStart(2, '0');
+  return `${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+function timeEl(ts) {
+  const s = document.createElement('span');
+  s.className = 'chat-time';
+  s.textContent = chatTime(ts);
+  return s;
+}
+
 function chatLineEl(msg) {
   const line = document.createElement('div');
+  if (msg.ts) line.appendChild(timeEl(msg.ts));
   if (msg.kind === 'system') {
     line.className = 'chat-line system';
     const b = document.createElement('b');
@@ -1257,6 +1312,7 @@ function chatLineEl(msg) {
 function dmLineEl(m) {
   const line = document.createElement('div');
   line.className = 'chat-line dm ' + (m.mine ? 'mine' : 'their');
+  if (m.ts) line.appendChild(timeEl(m.ts));
   const b = document.createElement('b');
   b.textContent = m.mine ? 'Вы' : (m.peerName || '');
   line.append(b, document.createTextNode(': '));
@@ -1323,9 +1379,11 @@ function setActiveChat(tab) {
     const convo = dmConvos.get(tab.slice(3));
     if (convo) convo.unread = 0;
   }
+  if (tab === 'common') mentionUnread = 0;   // увидели общий — гасим звоночек личных
   updateChatInputMode();
   renderChatTabs();
   renderActiveChat();
+  updateChatBadge();
 }
 
 function updateChatInputMode() {
@@ -1354,16 +1412,21 @@ function pushCommon(msg) {
 
 /** Системная строка в общий чат (вход в локацию, объявления боёв, чек об оплате почты). */
 function chatMessage(author, text, system = false) {
-  if (system || author === 'Система') pushCommon({ kind: 'system', text: String(text) });
-  else pushCommon({ kind: 'msg', author, authorId: null, text: String(text) });
+  const ts = Date.now();
+  if (system || author === 'Система') pushCommon({ kind: 'system', text: String(text), ts });
+  else pushCommon({ kind: 'msg', author, authorId: null, text: String(text), ts });
 }
-function chatSystem(text) { pushCommon({ kind: 'system', text: String(text) }); }
+function chatSystem(text) { pushCommon({ kind: 'system', text: String(text), ts: Date.now() }); }
 
 /** Входящее сообщение общего чата (из pub/sub): обычное или личное (to). */
 function onCommonChat(m) {
-  if (m.from === 'Система') { pushCommon({ kind: 'system', text: String(m.text) }); return; }
-  pushCommon({ kind: 'msg', author: m.from, authorId: m.fromId ?? null,
-    text: String(m.text), to: m.to || null, toId: m.toId ?? null });
+  const ts = m.ts || Date.now();
+  if (m.from === 'Система') { pushCommon({ kind: 'system', text: String(m.text), ts }); return; }
+  pushCommon({ kind: 'msg', author: m.from, authorId: m.fromId ?? null, text: String(m.text),
+    to: m.to || null, toId: m.toId ?? null, ts });
+  // личное, адресованное мне — отметить «звоночком» над чатом (#10)
+  if (m.toId != null && String(m.toId) === String(PLAYER.id)
+      && String(m.fromId) !== String(PLAYER.id)) noteMention();
 }
 
 /** История общего чата локации: только сообщения игроков и полезные системные. */
@@ -1371,9 +1434,10 @@ function loadChatHistory(rows) {
   commonMsgs.length = 0;
   for (const h of rows) {
     if (isChatJunk(h.sender_name, h.body)) continue;
-    if (h.sender_name === 'Система') commonMsgs.push({ kind: 'system', text: String(h.body) });
+    const ts = h.created_at ? new Date(h.created_at).getTime() : null;
+    if (h.sender_name === 'Система') commonMsgs.push({ kind: 'system', text: String(h.body), ts });
     else commonMsgs.push({ kind: 'msg', author: h.sender_name, authorId: h.sender_id ?? null,
-      text: String(h.body), to: h.target_name || null, toId: null });
+      text: String(h.body), to: h.target_name || null, toId: null, ts });
   }
   if (activeChat === 'common') renderActiveChat();
 }
@@ -1393,11 +1457,14 @@ function ensureConvo(peer) {
 }
 
 /** Открыть (или создать) вкладку лички с игроком и переключиться на неё. */
+/** Показать чат-панель, не сворачивая её повторным тапом (openCastleDock — тоггл). */
+function ensureChatDock() { if (castleDockPane !== 'chat') openCastleDock('chat'); }
+
 async function openDmTab(peer) {
   const pid = String(peer.id);
   const convo = ensureConvo(peer);
   closeMail(); closeBattleInfo();     // освободить чат из-под модалок
-  openCastleDock('chat');             // показать чат-панель
+  ensureChatDock();                   // показать чат-панель (без сворачивания)
   setActiveChat(dmKey(pid));
   if (!convo.loaded && online) {
     convo.loaded = true;
@@ -1417,6 +1484,7 @@ function closeDmTab(pid) {
   updateChatInputMode();
   renderChatTabs();
   renderActiveChat();
+  updateChatBadge();
 }
 
 /** Входящее приватное сообщение. */
@@ -1433,6 +1501,7 @@ function onDmMessage(m) {
     convo.unread++;
   }
   renderChatTabs();
+  updateChatBadge();
 }
 
 const CHAT_ERRORS = {
@@ -1456,7 +1525,7 @@ function onServerChatError(m) {
 function setPersonalTarget(peer) {
   personalTarget = { id: peer.id, name: peer.name };
   closeMail(); closeBattleInfo();     // показать общий чат под модалками
-  openCastleDock('chat');
+  ensureChatDock();
   setActiveChat('common');
   $('cpb-name').textContent = peer.name;
   personalBar.classList.remove('hidden');
@@ -2046,15 +2115,34 @@ async function refreshSelf() {
 
 const playersList = $('players-list');
 
-// меч возле ника: нападение на игрока (дуэль PvP)
+// иконки действий в списке игроков
 const ICON_SWORD = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.5 17.5 3 6V3h3l11.5 11.5"/><path d="m13 19 6-6"/><path d="m16 16 4 4"/><path d="m19 21 2-2"/></svg>`;
+const ICON_INFO = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><path d="M12 7.6h.01"/></svg>`;
+const ICON_DM = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 11.5a8.4 8.4 0 0 1-8.5 8.5 8.5 8.5 0 0 1-3.8-.9L3 21l1.9-5.7A8.5 8.5 0 1 1 21 11.5z"/></svg>`;
+const ICON_SAY = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.5 20 5v13l-17-4.5z"/><path d="M7 13.5V18l3 1"/></svg>`;
+
+function playerActBtn(cls, svg, title, onClick) {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = cls;
+  b.title = title;
+  b.setAttribute('aria-label', title);
+  b.innerHTML = svg;
+  b.addEventListener('click', onClick);
+  return b;
+}
 
 async function refreshPlayers() {
   if (!online) return;
   try {
     const players = await api.players();
     playersList.innerHTML = '';
+    const head = document.createElement('div');     // всего игроков в локации (#9)
+    head.className = 'players-head';
+    head.textContent = `Игроков в локации: ${players.length}`;
+    playersList.appendChild(head);
     for (const p of players) {
+      const self = String(p.id) === String(PLAYER.id);
       const row = document.createElement('div');
       row.className = 'player-row';
       const name = document.createElement('span');
@@ -2064,20 +2152,27 @@ async function refreshPlayers() {
       lvl.className = 'm-lvl';
       lvl.textContent = `[${p.level}]`;
       name.appendChild(lvl);
-      if (String(p.id) !== String(PLAYER.id)) {        // тап по нику — меню действий
+      if (!self) {                                   // тап по нику — меню действий
         name.classList.add('tappable');
         name.addEventListener('click', (e) => openNickMenu(e, { id: p.id, name: p.name }));
       }
       row.appendChild(name);
-      if (String(p.id) !== String(PLAYER.id)) {
-        const atk = document.createElement('button');
-        atk.type = 'button';
-        atk.className = 'pvp-btn';
-        atk.title = `Напасть на ${p.name}`;
-        atk.innerHTML = ICON_SWORD;
-        atk.addEventListener('click', () => startPvp(p));
-        row.appendChild(atk);
+      const acts = document.createElement('div');
+      acts.className = 'player-actions';
+      const peer = { id: p.id, name: p.name };
+      acts.appendChild(playerActBtn('player-act', ICON_INFO,
+        self ? 'Моя информация' : `Информация: ${p.name}`, () => openPlayerInfo(peer)));
+      if (!self) {                       // личка/общий/атака — только для других
+        acts.append(
+          playerActBtn('player-act', ICON_DM, `Личное сообщение: ${p.name}`,
+            () => openDmTab(peer)),
+          playerActBtn('player-act', ICON_SAY, `Написать ${p.name} в общий чат`,
+            () => setPersonalTarget(peer)),
+          playerActBtn('pvp-btn', ICON_SWORD, `Напасть на ${p.name}`,
+            () => startPvp(p)),
+        );
       }
+      row.appendChild(acts);
       playersList.appendChild(row);
     }
   } catch (e) {
@@ -2085,11 +2180,44 @@ async function refreshPlayers() {
   }
 }
 
+// ── Бейджи над иконками: идущие бои (#8) и личные сообщения мне (#10) ──
+
+const battlesBadge = $('battles-badge');
+const chatBadge = $('chat-badge');
+let mentionUnread = 0;        // личные мне (в общем чате), ещё не просмотренные
+
+function setBattlesBadge(n) {
+  if (!battlesBadge) return;
+  n = Math.max(0, Number(n) || 0);
+  battlesBadge.textContent = n > 99 ? '99+' : String(n);
+  battlesBadge.classList.toggle('hidden', n === 0);
+}
+async function refreshBattlesBadge() {
+  if (!online) return;
+  try { setBattlesBadge((await api.locationBattles()).length); } catch (e) { /* не критично */ }
+}
+
+/** Бейдж чата = непрочитанная личка + личные мне в общем чате. */
+function updateChatBadge() {
+  if (!chatBadge) return;
+  let dm = 0;
+  for (const c of dmConvos.values()) dm += c.unread;
+  const total = dm + mentionUnread;
+  chatBadge.textContent = total > 99 ? '99+' : String(total);
+  chatBadge.classList.toggle('hidden', total === 0);
+}
+function noteMention() {       // личное мне пришло — звоночек, если не смотрим общий чат
+  if (!(castleDockPane === 'chat' && activeChat === 'common')) mentionUnread++;
+  updateChatBadge();
+}
+function clearMentions() { mentionUnread = 0; updateChatBadge(); }
+
 /** Список идущих боёв в локации — панель «Текущие бои». */
 async function refreshBattles() {
   if (!online || !battlesList) return;
   try {
     const battles = await api.locationBattles();
+    setBattlesBadge(battles.length);
     battlesList.innerHTML = '';
     if (!battles.length) {
       battlesList.innerHTML = '<div class="bi-empty">В локации нет идущих боёв</div>';
@@ -2192,6 +2320,19 @@ binfoCopyBtn?.addEventListener('click', copyBattleLink);
 
 const RESULT_LABELS = { 1: 'победа', 2: 'поражение', 3: 'ничья', 4: 'побег', 5: 'таймаут' };
 
+/** Время «ЧЧ:ММ» и человекочитаемая длительность боя. */
+function fmtClock(ts) {
+  if (!ts) return '?';
+  const d = new Date(ts), p = (n) => String(n).padStart(2, '0');
+  return `${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+function fmtDuration(ms) {
+  if (ms == null || ms < 0) return '—';
+  const s = Math.floor(ms / 1000), m = Math.floor(s / 60);
+  if (m >= 60) return `${Math.floor(m / 60)} ч ${m % 60} мин`;
+  return m > 0 ? `${m} мин ${s % 60} с` : `${s} с`;
+}
+
 /** Вмешаться в идущий бой #id на сторону side — войти как в свой бой. */
 function intervene(id, side) {
   closeBattleInfo();
@@ -2279,7 +2420,10 @@ async function renderBattleInfo(id) {
       : (mode === 'battle'
         ? '<div class="bi-join-closed">Выйдите из текущего боя, чтобы вмешаться.</div>'
         : ''));
-    binfoBody.innerHTML = `
+    const started = d.startedAt ? new Date(d.startedAt).getTime() : null;
+    const metaBar = `<div class="bi-meta">Начало ${fmtClock(started)}`
+      + ` · идёт ${fmtDuration(started ? Date.now() - started : null)}</div>`;
+    binfoBody.innerHTML = `${metaBar}
       <div class="bi-teams">
         <div class="bi-team bi-team-ally"><div class="bi-team-title">Союзники</div>
           ${d.teams.left.map(member).join('')}</div>
@@ -2316,7 +2460,11 @@ async function renderBattleInfo(id) {
       <td>${num(r.exp)}</td>
       ${showValor ? `<td>${num(r.valor)}</td>` : ''}
     </tr>`).join('');
-  binfoBody.innerHTML = `
+  const started = d.startedAt ? new Date(d.startedAt).getTime() : null;
+  const ended = d.endedAt ? new Date(d.endedAt).getTime() : null;
+  const metaBar = `<div class="bi-meta">Начало ${fmtClock(started)}`
+    + ` · длилась ${fmtDuration(started && ended ? ended - started : null)}</div>`;
+  binfoBody.innerHTML = `${metaBar}
     <table class="bi-table">
       <thead><tr>
         <th>Команда</th><th>Имя</th><th>Итог</th><th>Урон</th>
@@ -3183,6 +3331,9 @@ function adminEntryChoice() {
     serverLocId = ch.location_id;
     setLocation(LOC_BY_ID[ch.location_id] || 'village', { quiet: true });
     refreshPlayers();
+    refreshBattlesBadge();
+    // счётчик идущих боёв над иконкой — обновляем периодически (когда вкладка видна)
+    setInterval(() => { if (!document.hidden && mode !== 'battle') refreshBattlesBadge(); }, 15000);
 
     // ссылки из адреса: ?battle=N — статистика боя, ?info=Ник — карточка игрока
     const params = new URLSearchParams(location.search);

@@ -889,6 +889,7 @@ export function battleRoutes(app, authed) {
         battleId: id, status: 'active', turn: b.engine.turn,
         intervention: b.policy.intervention,
         allowJoin: b.policy.intervention === 'open',
+        startedAt: battle.started_at,
         teams: { left: await teamMembers('left'), right: await teamMembers('right') },
       });
     }
@@ -924,6 +925,8 @@ export function battleRoutes(app, authed) {
       battleId: id,
       status: battle.status === 3 ? 'finished' : 'aborted',
       winnerSide: battle.winner_side,
+      startedAt: battle.started_at,
+      endedAt: battle.ended_at,
       results,
     });
   });
