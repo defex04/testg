@@ -424,6 +424,7 @@ function openCastleDock(pane) {
   // открыли чат на общей вкладке — гасим звоночек личных сообщений (#10)
   if (pane === 'chat' && typeof clearMentions === 'function' && activeChat === 'common') {
     clearMentions();
+    refreshCommonChatHistory?.();
   }
   // запоминаем выбранное окно боя — чтобы восстановить его после F5/реконнекта
   if (mode === 'battle') saveBattlePane(pane);
@@ -1199,7 +1200,7 @@ const chatLog = $('chat-log');
 const chatTabsEl = $('chat-tabs');
 const chatInput = $('chat-input');
 const personalBar = $('chat-personal-bar');
-const MAX_CHAT_LINES = 150;   // история не растёт бесконечно
+const MAX_CHAT_LINES = 1000;   // суточная история без мелкого обрезания
 
 let activeChat = 'common';          // 'common' | 'clan' | 'dm:<peerId>'
 let personalTarget = null;          // {id, name} — следующее сообщение в общий чат как личное
@@ -1256,7 +1257,10 @@ function linkifyInto(el, text) {
   const re = /(https?:\/\/[^\s]+)|Бой #(\d+)/g;
   let last = 0, m;
   while ((m = re.exec(text))) {
-    if (m.index > last) el.appendChild(document.createTextNode(text.slice(last, m.index)));
+    if (m.index > last) {
+      const plain = text.slice(last, m.index).replace(/⚔\s*$/, '');
+      if (plain) el.appendChild(document.createTextNode(plain));
+    }
     if (m[1]) {
       const chip = chipFromUrl(m[1]);
       el.appendChild(chip || document.createTextNode(m[1]));
@@ -1386,6 +1390,7 @@ function setActiveChat(tab) {
     if (convo) convo.unread = 0;
   }
   if (tab === 'common') mentionUnread = 0;   // увидели общий — гасим звоночек личных
+  if (tab === 'common' && castleDockPane === 'chat') refreshCommonChatHistory();
   updateChatInputMode();
   renderChatTabs();
   renderActiveChat();
@@ -1448,6 +1453,19 @@ function loadChatHistory(rows) {
   if (activeChat === 'common') renderActiveChat();
 }
 
+let commonHistoryLoading = false;
+async function refreshCommonChatHistory() {
+  if (!online || commonHistoryLoading) return;
+  commonHistoryLoading = true;
+  try {
+    loadChatHistory(await api.chatHistory());
+  } catch (e) {
+    console.error('История чата:', e);
+  } finally {
+    commonHistoryLoading = false;
+  }
+}
+
 // ── Личка (DM) ──
 
 function ensureConvo(peer) {
@@ -1472,11 +1490,11 @@ async function openDmTab(peer) {
   closeMail(); closeBattleInfo();     // освободить чат из-под модалок
   ensureChatDock();                   // показать чат-панель (без сворачивания)
   setActiveChat(dmKey(pid));
-  if (!convo.loaded && online) {
-    convo.loaded = true;
+  if (online) {
     try {
       const rows = await api.privateHistory(peer.id);
       convo.msgs = rows.map((r) => ({ mine: r.mine, text: r.body, ts: r.ts }));
+      convo.loaded = true;
       if (activeChat === dmKey(pid)) renderActiveChat();
       else renderChatTabs();
     } catch (e) { console.error('История лички:', e); }
@@ -1683,6 +1701,7 @@ const mailBadge = $('mail-badge');
 let mailUnreadN = 0;
 let mailTariffs = { taxSend: 100, itemPct: 0.1, maxAtt: 8 };
 let mailCompose = null;   // null | { to, attach:[{id,name,icon,price,qty,maxQty,stackable}] }
+let mailBox = 'inbox';
 
 function setMailBadge(n) {
   mailUnreadN = Math.max(0, Number(n) || 0);
@@ -1705,6 +1724,13 @@ function itemIconText(icon, type, stats) {
 function closeMail() { mailEl.classList.add('hidden'); mailCompose = null; }
 $('mail-close').addEventListener('click', closeMail);
 mailEl.addEventListener('click', (e) => { if (e.target === mailEl) closeMail(); });
+mailEl.addEventListener('pointerdown', (e) => {
+  const active = document.activeElement;
+  if (!active || !mailEl.contains(active)) return;
+  if (!active.matches('input, textarea')) return;
+  if (e.target.closest('input, textarea')) return;
+  active.blur();
+});
 $('mail-compose').addEventListener('click', () => openCompose());
 
 /** Открыть почту: список писем (или сразу написать письмо адресату opts.to). */
@@ -1712,25 +1738,45 @@ async function openMail(opts = {}) {
   if (!online) { showToast('Почта доступна только онлайн'); return; }
   mailEl.classList.remove('hidden');
   if (opts.to) { await openCompose(opts.to); return; }
-  await renderInbox();
+  await renderMailBox('inbox');
 }
 
-async function renderInbox() {
+function renderInbox() { return renderMailBox('inbox'); }
+
+function mailTabsHtml(active) {
+  return `<div class="mail-tabs">
+    <button type="button" class="mail-tab ${active === 'inbox' ? 'active' : ''}" data-mail-box="inbox">Входящие</button>
+    <button type="button" class="mail-tab ${active === 'sent' ? 'active' : ''}" data-mail-box="sent">Отправленные</button>
+  </div>`;
+}
+
+function bindMailTabs() {
+  mailBody.querySelectorAll('.mail-tab').forEach((tab) => {
+    tab.addEventListener('click', () => renderMailBox(tab.dataset.mailBox));
+  });
+}
+
+async function renderMailBox(box = 'inbox') {
+  mailBox = box === 'sent' ? 'sent' : 'inbox';
   mailCompose = null;
   mailTitle.textContent = 'Почта';
   $('mail-compose').style.display = '';
-  mailBody.innerHTML = '<div class="bi-empty">Загрузка…</div>';
+  mailBody.innerHTML = mailTabsHtml(mailBox) + '<div class="mail-list-wrap"><div class="bi-empty">Загрузка…</div></div>';
+  bindMailTabs();
+  const host = mailBody.querySelector('.mail-list-wrap');
   let data;
   try {
-    data = await api.mail();
+    data = mailBox === 'sent' ? await api.mailSent() : await api.mail();
   } catch (e) {
-    mailBody.innerHTML = `<div class="bi-empty">Не удалось загрузить: ${esc(e.message)}</div>`;
+    host.innerHTML = `<div class="bi-empty">Не удалось загрузить: ${esc(e.message)}</div>`;
     return;
   }
   if (data.tariffs) mailTariffs = data.tariffs;
   setMailBadge(data.unread);
   if (!data.items.length) {
-    mailBody.innerHTML = '<div class="bi-empty">Писем нет. Нажмите «Написать», чтобы отправить.</div>';
+    host.innerHTML = mailBox === 'sent'
+      ? '<div class="bi-empty">Отправленных писем нет.</div>'
+      : '<div class="bi-empty">Писем нет. Нажмите «Написать», чтобы отправить.</div>';
     return;
   }
   const list = document.createElement('div');
@@ -1738,20 +1784,26 @@ async function renderInbox() {
   for (const it of data.items) {
     const row = document.createElement('button');
     row.type = 'button';
-    row.className = 'mail-row' + (it.isRead ? '' : ' unread');
+    row.className = 'mail-row' + (mailBox === 'inbox' && !it.isRead ? ' unread' : '');
     const att = it.attCount ? `<span class="mail-clip" title="Вложения">📎${it.attCount}</span>` : '';
+    const peer = mailBox === 'sent'
+      ? `Кому: ${esc(it.recipientName || '')}`
+      : esc(it.senderName);
+    const readState = mailBox === 'sent'
+      ? `<span class="mail-read-state ${it.isRead ? 'read' : 'unread'}">${it.isRead ? 'прочитано' : 'не прочитано'}</span>`
+      : '';
     row.innerHTML = `
       <span class="mail-dot" aria-hidden="true"></span>
       <span class="mail-row-main">
-        <span class="mail-row-from">${esc(it.senderName)}</span>
+        <span class="mail-row-from">${peer}</span>
         <span class="mail-row-subj">${esc(it.subject || '(без темы)')}</span>
       </span>
-      <span class="mail-row-meta">${att}<span class="mail-row-date">${mailDate(it.ts)}</span></span>`;
-    row.addEventListener('click', () => openLetter(it.id));
+      <span class="mail-row-meta">${readState}${att}<span class="mail-row-date">${mailDate(it.ts)}</span></span>`;
+    row.addEventListener('click', () => openLetter(it.id, mailBox));
     list.appendChild(row);
   }
-  mailBody.innerHTML = '';
-  mailBody.appendChild(list);
+  host.innerHTML = '';
+  host.appendChild(list);
 }
 
 function mailDate(ts) {
@@ -1760,65 +1812,85 @@ function mailDate(ts) {
   return `${pad(d.getDate())}.${pad(d.getMonth() + 1)} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-async function openLetter(id) {
+async function openLetter(id, box = mailBox) {
+  const sentBox = box === 'sent';
+  mailBox = sentBox ? 'sent' : 'inbox';
   $('mail-compose').style.display = 'none';
-  mailTitle.textContent = 'Письмо';
+  mailTitle.textContent = sentBox ? 'Отправленное письмо' : 'Письмо';
   mailBody.innerHTML = '<div class="bi-empty">Загрузка…</div>';
   let m;
   try {
-    m = await api.mailRead(id);
+    m = sentBox ? await api.mailReadSent(id) : await api.mailRead(id);
   } catch (e) {
     mailBody.innerHTML = `<div class="bi-empty">Не удалось открыть: ${esc(e.message)}</div>`;
     return;
   }
-  refreshMailUnread();   // письмо стало прочитанным — обновить бейдж
-  const fromTappable = m.senderId && String(m.senderId) !== String(PLAYER.id);
-  const att = m.attachments.map((a) => `
+  if (!sentBox) refreshMailUnread();   // письмо стало прочитанным — обновить бейдж
+  const peerId = sentBox ? m.recipientId : m.senderId;
+  const peerName = sentBox ? m.recipientName : m.senderName;
+  const peerTappable = peerId && String(peerId) !== String(PLAYER.id);
+  const attachments = m.attachments || [];
+  const att = attachments.map((a) => `
     <div class="mail-att">
       <span class="mail-att-icon">${esc(itemIconText(a.icon, a.type, a.stats))}</span>
       <span class="mail-att-name">${esc(a.name)}${a.quantity > 1 ? ` ×${a.quantity}` : ''}</span>
     </div>`).join('');
+  const readState = sentBox
+    ? `<span class="mail-status ${m.isRead ? 'read' : 'unread'}">${m.isRead ? 'Получатель прочитал' : 'Получатель еще не прочитал'}</span>`
+    : '';
+  const attTitle = sentBox ? 'Вложения' : `Вложения${m.canClaim ? '' : ' (получены)'}`;
   mailBody.innerHTML = `
     <div class="mail-read">
       <div class="mail-read-head">
-        <span>От: <b class="mail-from ${fromTappable ? 'tappable' : ''}">${esc(m.senderName)}</b></span>
+        <span>${sentBox ? 'Кому' : 'От'}: <b class="mail-from ${peerTappable ? 'tappable' : ''}">${esc(peerName || 'Система')}</b></span>
         <span class="mail-read-date">${mailDate(m.ts)}</span>
       </div>
+      ${readState}
       <div class="mail-read-subj">${esc(m.subject || '(без темы)')}</div>
       <div class="mail-read-body">${esc(m.body) || '<i>пусто</i>'}</div>
-      ${m.attachments.length ? `<div class="mail-att-box">
-        <div class="mail-att-title">Вложения${m.canClaim ? '' : ' (получены)'}</div>${att}
-        ${m.canClaim ? '<button type="button" class="mail-btn mail-take">Забрать в рюкзак</button>' : ''}
+      ${attachments.length ? `<div class="mail-att-box">
+        <div class="mail-att-title">${attTitle}</div>${att}
+        ${!sentBox && m.canClaim ? '<button type="button" class="mail-btn mail-take">Забрать в рюкзак</button>' : ''}
       </div>` : ''}
       <div class="mail-read-actions">
-        <button type="button" class="mail-btn mail-reply">Ответить</button>
-        <button type="button" class="mail-btn mail-del">Удалить</button>
+        <button type="button" class="mail-btn mail-back">Назад</button>
+        ${sentBox ? '<button type="button" class="mail-btn mail-del-sent">Удалить из отправленных</button>' : `
+          <button type="button" class="mail-btn mail-reply">Ответить</button>
+          <button type="button" class="mail-btn mail-del">Удалить</button>`}
       </div>
     </div>`;
-  if (fromTappable) {
+  if (peerTappable) {
     mailBody.querySelector('.mail-from').addEventListener('click', (e) =>
-      openNickMenu(e, { id: m.senderId, name: m.senderName }));
+      openNickMenu(e, { id: peerId, name: peerName }));
   }
+  mailBody.querySelector('.mail-back').addEventListener('click', () => renderMailBox(mailBox));
   mailBody.querySelector('.mail-take')?.addEventListener('click', async (e) => {
     e.target.disabled = true;
     try {
       const r = await api.mailTake(id);
       await refreshSelf();
       showToast(r.taken ? 'Вложения в рюкзаке' : 'Уже получено');
-      openLetter(id);
+      openLetter(id, 'inbox');
     } catch (err) { e.target.disabled = false; showToast('Не удалось забрать: ' + err.message); }
   });
-  mailBody.querySelector('.mail-reply').addEventListener('click', () => {
+  mailBody.querySelector('.mail-reply')?.addEventListener('click', () => {
     if (m.senderId) openCompose(m.senderName);
     else showToast('Системному отправителю ответить нельзя');
   });
-  mailBody.querySelector('.mail-del').addEventListener('click', async (e) => {
+  mailBody.querySelector('.mail-del')?.addEventListener('click', async (e) => {
     e.target.disabled = true;
     try {
       await api.mailDelete(id);
       await refreshSelf();
       refreshMailUnread();
-      renderInbox();
+      renderMailBox('inbox');
+    } catch (err) { e.target.disabled = false; showToast('Не удалось удалить: ' + err.message); }
+  });
+  mailBody.querySelector('.mail-del-sent')?.addEventListener('click', async (e) => {
+    e.target.disabled = true;
+    try {
+      await api.mailDeleteSent(id);
+      renderMailBox('sent');
     } catch (err) { e.target.disabled = false; showToast('Не удалось удалить: ' + err.message); }
   });
 }
@@ -1850,7 +1922,7 @@ async function openCompose(prefillTo = '') {
         <button type="button" class="mail-btn" id="mc-cancel">Отмена</button>
       </div>
     </div>`;
-  $('mc-cancel').addEventListener('click', renderInbox);
+  $('mc-cancel').addEventListener('click', () => renderMailBox(mailBox));
   $('mc-add').addEventListener('click', openAttachPicker);
   $('mc-send').addEventListener('click', sendComposed);
   renderComposeAttach();
@@ -1969,7 +2041,7 @@ async function sendComposed() {
     // чек об оплате — в общий чат
     chatSystem(`Письмо игроку «${r.recipientName}» отправлено. Списано ${r.tax} меди.`);
     showToast(`Письмо отправлено · налог ${r.tax} меди`);
-    renderInbox();
+    renderMailBox('sent');
   } catch (e) {
     btn.disabled = false;
     mailError(MAIL_ERRORS[e.message] || ('Не удалось отправить: ' + e.message));

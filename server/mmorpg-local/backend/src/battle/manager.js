@@ -267,7 +267,7 @@ export async function startHunt(ch, send) {
     `INSERT INTO battle_participants (battle_id, character_id, side, status)
      VALUES ($1, $2, 1, 1)`, [battleId, ch.id]);
 
-  const npcStats = { ...(npc.stats || {}), hp: 1500,
+  const npcStats = { ...(npc.stats || {}), hp: 1100,
     aiHealUses: 1, aiPowerUses: 1, aiHealAmount: 800, aiHealAt: 0.6,
     aiPowerMult: 1.5, aiPowerTurns: 3 };
 
@@ -284,7 +284,7 @@ export async function startHunt(ch, send) {
   await snapshot(battleId, b);
   console.log(`Бой ${battleId}: старт охоты, char=${ch.id} (${ch.name})`);
   sendSystemChat(ch.location_id,
-    `⚔ Бой #${battleId}: ${ch.name} против «${npc.name}» — начался!`)
+    `Бой #${battleId}: ${ch.name} против «${npc.name}» — начался!`)
     .catch(console.error);
 
   p.send({ type: 'battleStart', battleId, kind: 'hunt', ...startView(b, p) });
@@ -350,7 +350,7 @@ export async function startDuel(att, def, sendAtt, sendDef) {
   await snapshot(battleId, b);
   console.log(`Бой ${battleId}: PvP, ${att.name} (${att.id}) напал на ${def.name} (${def.id})`);
   sendSystemChat(att.location_id,
-    `⚔ Бой #${battleId}: ${att.name} против ${def.name} — начался!`)
+    `Бой #${battleId}: ${att.name} против ${def.name} — начался!`)
     .catch(console.error);
 
   broadcast(b, (p) => ({ type: 'battleStart', battleId, kind: 'pvp', ...startView(b, p) }));
@@ -387,7 +387,7 @@ export async function joinBattle(charId, battleId, side, send) {
   await snapshot(b.id, b);
   console.log(`Бой ${b.id}: вмешательство char=${ch.id} (${ch.name}) на сторону ${side}`);
   sendSystemChat(b.locationId,
-    `⚔ Бой #${b.id}: ${ch.name} вмешивается в бой!`).catch(console.error);
+    `Бой #${b.id}: ${ch.name} вмешивается в бой!`).catch(console.error);
 
   p.send({ type: 'battleStart', battleId: b.id, kind: b.kind, ...startView(b, p) });
   // сразу синхронизируем ход — иначе UI вмешавшегося «зависает» до следующего turnStart

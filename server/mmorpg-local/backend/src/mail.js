@@ -65,6 +65,47 @@ export async function inbox(charId) {
 }
 
 /** Полный текст письма + список вложений; помечает прочитанным. */
+/** Отправленные: шапки писем + статус прочтения получателем. */
+export async function sent(charId) {
+  const { rows } = await game.query(
+    `SELECT m.id, m.recipient_id, m.subject, m.is_read, m.type,
+            m.money_attached, m.has_attachments, m.attachments_taken, m.created_at,
+            r.name AS recipient_name,
+            (SELECT count(*)::int FROM mail_attachments a WHERE a.mail_id = m.id) AS att_count
+       FROM mail_messages m
+       JOIN characters r ON r.id = m.recipient_id
+      WHERE m.sender_id = $1 AND m.deleted_by_sender = FALSE
+      ORDER BY m.created_at DESC
+      LIMIT 100`, [charId]);
+  return rows.map(r => ({
+    id: r.id,
+    recipientId: Number(r.recipient_id),
+    recipientName: r.recipient_name,
+    subject: r.subject || '',
+    isRead: r.is_read,
+    money: Number(r.money_attached) || 0,
+    hasAttachments: r.has_attachments,
+    attachmentsTaken: r.attachments_taken,
+    attCount: r.att_count,
+    canClaim: false,
+    ts: new Date(r.created_at).getTime(),
+  }));
+}
+
+async function mailAttachments(mailId) {
+  const { rows } = await game.query(
+    `SELECT a.item_instance_id, a.quantity, t.name, t.icon, t.type, t.price
+       FROM mail_attachments a
+       JOIN item_instances i ON i.id = a.item_instance_id
+       JOIN item_templates t ON t.id = i.template_id
+      WHERE a.mail_id = $1
+      ORDER BY a.item_instance_id`, [mailId]);
+  return rows.map(a => ({
+    itemId: Number(a.item_instance_id), quantity: a.quantity,
+    name: a.name, icon: a.icon, type: a.type, price: Number(a.price) || 0,
+  }));
+}
+
 export async function readMail(charId, mailId) {
   const { rows } = await game.query(
     `SELECT m.*, s.name AS sender_name
@@ -77,13 +118,7 @@ export async function readMail(charId, mailId) {
   if (!m.is_read) {
     await game.query(`UPDATE mail_messages SET is_read = TRUE WHERE id = $1`, [mailId]);
   }
-  const att = await game.query(
-    `SELECT a.item_instance_id, a.quantity, t.name, t.icon, t.type, t.price
-       FROM mail_attachments a
-       JOIN item_instances i ON i.id = a.item_instance_id
-       JOIN item_templates t ON t.id = i.template_id
-      WHERE a.mail_id = $1
-      ORDER BY a.item_instance_id`, [mailId]);
+  const attachments = await mailAttachments(mailId);
   return {
     id: m.id,
     senderId: m.sender_id ? Number(m.sender_id) : null,
@@ -95,10 +130,33 @@ export async function readMail(charId, mailId) {
     attachmentsTaken: m.attachments_taken,
     canClaim: m.has_attachments && !m.attachments_taken,
     ts: new Date(m.created_at).getTime(),
-    attachments: att.rows.map(a => ({
-      itemId: Number(a.item_instance_id), quantity: a.quantity,
-      name: a.name, icon: a.icon, type: a.type, price: Number(a.price) || 0,
-    })),
+    attachments,
+  };
+}
+
+/** Полный текст отправленного письма. Не меняет is_read: это статус получателя. */
+export async function readSentMail(charId, mailId) {
+  const { rows } = await game.query(
+    `SELECT m.*, r.name AS recipient_name
+       FROM mail_messages m JOIN characters r ON r.id = m.recipient_id
+      WHERE m.id = $1 AND m.sender_id = $2 AND m.deleted_by_sender = FALSE`,
+    [mailId, charId]);
+  const m = rows[0];
+  if (!m) throw bad('not_found', 404);
+  const attachments = await mailAttachments(mailId);
+  return {
+    id: m.id,
+    recipientId: Number(m.recipient_id),
+    recipientName: m.recipient_name,
+    subject: m.subject || '',
+    body: m.body || '',
+    money: Number(m.money_attached) || 0,
+    hasAttachments: m.has_attachments,
+    attachmentsTaken: m.attachments_taken,
+    canClaim: false,
+    isRead: m.is_read,
+    ts: new Date(m.created_at).getTime(),
+    attachments,
   };
 }
 
@@ -297,6 +355,14 @@ export async function deleteMail(charId, mailId) {
   return { ok: true };
 }
 
+export async function deleteSentMail(charId, mailId) {
+  const r = await game.query(
+    `UPDATE mail_messages SET deleted_by_sender = TRUE
+      WHERE id = $1 AND sender_id = $2`, [mailId, charId]);
+  if (r.rowCount === 0) throw bad('not_found', 404);
+  return { ok: true };
+}
+
 export function mailRoutes(app, authed, hub) {
   const me = (req) => req.session.character_id;
 
@@ -308,6 +374,15 @@ export function mailRoutes(app, authed, hub) {
 
   app.get('/api/mail/unread', authed, async (req, res) =>
     res.json({ unread: await unreadCount(me(req)) }));
+
+  app.get('/api/mail/sent', authed, async (req, res) => {
+    const t = await mailTariffs();
+    res.json({ unread: await unreadCount(me(req)), items: await sent(me(req)),
+      tariffs: { taxSend: t.taxSend, itemPct: t.itemPct, maxAtt: t.maxAtt } });
+  });
+
+  app.get('/api/mail/sent/:id', authed, async (req, res) =>
+    res.json(await readSentMail(me(req), Number(req.params.id))));
 
   app.get('/api/mail/:id', authed, async (req, res) =>
     res.json(await readMail(me(req), Number(req.params.id))));
@@ -324,4 +399,7 @@ export function mailRoutes(app, authed, hub) {
 
   app.post('/api/mail/:id/delete', authed, async (req, res) =>
     res.json(await deleteMail(me(req), Number(req.params.id))));
+
+  app.post('/api/mail/sent/:id/delete', authed, async (req, res) =>
+    res.json(await deleteSentMail(me(req), Number(req.params.id))));
 }

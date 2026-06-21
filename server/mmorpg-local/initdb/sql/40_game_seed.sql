@@ -22,7 +22,7 @@ VALUES (101, 'Бронзовый доспех', 2, 1, 2, FALSE, '{"hp": 250, "do
 -- NPC «Разбойник» для «Охоты»: статы brawlerElite из main.js
 INSERT INTO npc_templates (id, name, level, stats, props) VALUES
     (1, 'Разбойник', 15,
-     '{"hp": 1500, "damage": [140, 220], "crit": 0.1, "dodge": 0.05, "height": 1.92,
+     '{"hp": 1100, "damage": [140, 220], "crit": 0.1, "dodge": 0.05, "height": 1.92,
        "aiHealUses": 1, "aiPowerUses": 1, "aiHealAmount": 800, "aiHealAt": 0.6,
        "aiPowerMult": 1.5, "aiPowerTurns": 3}',
      '{"injury_chance": 0}');

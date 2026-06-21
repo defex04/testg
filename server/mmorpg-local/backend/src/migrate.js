@@ -62,7 +62,7 @@ const STATEMENTS = [
    ON CONFLICT (from_id, to_id) DO NOTHING`,
   `UPDATE npc_templates
       SET stats = coalesce(stats, '{}'::jsonb)
-        || '{"hp": 1500, "aiHealUses": 1, "aiPowerUses": 1,
+        || '{"hp": 1100, "aiHealUses": 1, "aiPowerUses": 1,
              "aiHealAmount": 800, "aiHealAt": 0.6,
              "aiPowerMult": 1.5, "aiPowerTurns": 3}'::jsonb
     WHERE id = 1`,
@@ -84,6 +84,10 @@ const STATEMENTS = [
    ON CONFLICT (key) DO NOTHING`,
   `INSERT INTO game_config (key, value) VALUES ('mail.expire_days', '30')
    ON CONFLICT (key) DO NOTHING`,
+  `ALTER TABLE mail_messages ADD COLUMN IF NOT EXISTS deleted_by_sender BOOLEAN NOT NULL DEFAULT FALSE`,
+  `ALTER TABLE mail_messages ADD COLUMN IF NOT EXISTS deleted_by_recipient BOOLEAN NOT NULL DEFAULT FALSE`,
+  `CREATE INDEX IF NOT EXISTS ix_mail_sender ON mail_messages (sender_id, created_at)
+     WHERE deleted_by_sender = FALSE`,
   // --- Приватный чат (личка) ------------------------------------------
   // Канал лички на пару игроков: chat_channels(type=6) хранит сообщения,
   // dm_pairs стабильно отображает упорядоченную пару (lo,hi) -> channel_id.

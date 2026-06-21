@@ -1,4 +1,4 @@
-import { game, redis, redisSub, gameConfig, tx } from './db.js';
+import { game, redis, redisSub, tx } from './db.js';
 
 /** Канал чата локации: создаётся по требованию (type=2, ref=location_id). */
 const channelCache = new Map();
@@ -134,12 +134,12 @@ export async function privateHistory(charId, peerId) {
   const found = await game.query(
     `SELECT channel_id FROM dm_pairs WHERE lo = $1 AND hi = $2`, [lo, hi]);
   if (!found.rows[0]) return [];
-  const limit = Number(await gameConfig('chat.history_limit')) || 50;
   const { rows } = await game.query(
     `SELECT sender_id, sender_name, body, created_at FROM chat_messages
-      WHERE channel_id = $1 ORDER BY created_at DESC LIMIT $2`,
-    [found.rows[0].channel_id, limit]);
-  return rows.reverse().map(r => ({
+      WHERE channel_id = $1 AND created_at >= now() - interval '24 hours'
+      ORDER BY created_at ASC`,
+    [found.rows[0].channel_id]);
+  return rows.map(r => ({
     fromId: Number(r.sender_id), fromName: r.sender_name, body: r.body,
     mine: String(r.sender_id) === String(charId),
     ts: new Date(r.created_at).getTime(),
@@ -158,12 +158,12 @@ export async function sendSystemChat(locId, text) {
 }
 
 export async function history(locId) {
-  const limit = Number(await gameConfig('chat.history_limit')) || 50;
   const channelId = await locationChannel(locId);
   const { rows } = await game.query(
     `SELECT sender_id, sender_name, body, target_name, created_at FROM chat_messages
-      WHERE channel_id = $1 ORDER BY created_at DESC LIMIT $2`, [channelId, limit]);
-  return rows.reverse();
+      WHERE channel_id = $1 AND created_at >= now() - interval '24 hours'
+      ORDER BY created_at ASC`, [channelId]);
+  return rows;
 }
 
 /** Подписка процессом на все локационные каналы; hub раздаёт по сокетам. */

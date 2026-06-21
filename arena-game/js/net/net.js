@@ -116,11 +116,14 @@ export const api = {
     (id ? 'id=' + Number(id) : 'name=' + encodeURIComponent(name))),
   // ── почта ──
   mail:       () => rest('/api/mail'),
+  mailSent:   () => rest('/api/mail/sent'),
   mailUnread: () => rest('/api/mail/unread'),
   mailRead:   (id) => rest('/api/mail/' + Number(id)),
+  mailReadSent: (id) => rest('/api/mail/sent/' + Number(id)),
   mailSend:   (payload) => rest('/api/mail/send', payload),
   mailTake:   (id) => rest('/api/mail/' + Number(id) + '/take', {}),
   mailDelete: (id) => rest('/api/mail/' + Number(id) + '/delete', {}),
+  mailDeleteSent: (id) => rest('/api/mail/sent/' + Number(id) + '/delete', {}),
   /** Регистрировать ДО login: cb получит ServerBattle, если бой ещё идёт. */
   onBattleResume: (fn) => { resumeCb = fn; },
 };

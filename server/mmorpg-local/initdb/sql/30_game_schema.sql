@@ -669,6 +669,8 @@ CREATE TABLE mail_messages (
 -- в проде партиционировать по created_at
 CREATE INDEX ix_mail_recipient ON mail_messages (recipient_id, created_at)
     WHERE deleted_by_recipient = FALSE;
+CREATE INDEX ix_mail_sender ON mail_messages (sender_id, created_at)
+    WHERE deleted_by_sender = FALSE;
 CREATE INDEX ix_mail_expiry ON mail_messages (expires_at)
     WHERE has_attachments AND NOT attachments_taken;
 

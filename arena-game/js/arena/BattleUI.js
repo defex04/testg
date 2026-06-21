@@ -549,11 +549,11 @@ export class BattleUI {
         // две полосы вплотную: жизнь (красная) + энергия (синяя), БЕЗ значков (#6.2);
         // «инфо» сидит рядом с ником (#6.3 — раскладка в CSS)
         m.innerHTML = `<div class="m-line"><span class="m-name">${esc(f.name)} <span class="m-lvl">[${f.level ?? '?'}]</span></span>${infoBtn}</div>
-          <div class="m-effects">${miniEffectsHtml(fighterEffects(f))}</div>
           <div class="m-bars">
             <div class="m-bar m-hp"><div class="m-fill" style="width:${pct}%"></div></div>
             <div class="m-bar m-en"><div class="m-fill" style="width:${enPct}%"></div></div>
-          </div>`;
+          </div>
+          <div class="m-effects">${miniEffectsHtml(fighterEffects(f))}</div>`;
         if (f.id != null) {
           m.dataset.id = f.id;
           m.dataset.side = side;
