@@ -260,6 +260,9 @@ function confirmExit() {
     dot.dataset.q = ms < 120 ? 'good' : ms < 300 ? 'ok' : 'bad';
   };
   const ping = async () => {
+    // в фоне (Mini App свёрнут / экран погашен) не шлём health-запросы:
+    // setInterval в фоне не останавливается сам, а сеть/радио зря не будим
+    if (document.hidden) return;
     const t0 = performance.now();
     const ctrl = new AbortController();
     const to = setTimeout(() => ctrl.abort(), 4000);
@@ -376,6 +379,7 @@ async function toggleBattlesPanel(force) {
     clearInterval(battlesTimer);
     battlesTimer = setInterval(() => {
       if (!battlesPanelOpen) { closeBattlesPanel(); return; }
+      if (document.hidden) return;   // в фоне список боёв не опрашиваем
       refreshBattles();
     }, 2000);
   } else {
@@ -1594,7 +1598,7 @@ async function renderBattleInfo(id) {
     if (!binfoTimer) {
       binfoTimer = setInterval(() => {
         if (binfoEl.classList.contains('hidden')) closeBattleInfo();
-        else renderBattleInfo(id);
+        else if (!document.hidden) renderBattleInfo(id);   // в фоне не опрашиваем
       }, 2000);
     }
     return;
@@ -2120,6 +2124,25 @@ const dressingEl = $('dressing');
 const dressingItemsEl = $('dressing-items');
 const dressing = new DressingRoom($('dressing-view'));
 const dressingSide = 'left';   // одевать можно только себя
+
+// Сворачивание Mini App / гашение экрана: явно гасим WebGL-циклы (арена +
+// примерочная), чтобы фоновая вкладка не жгла GPU/батарею. На возврате
+// поднимаем ровно те циклы, что работали до сворачивания. rAF и сам тормозит
+// в фоне, но в Telegram-WebView это не гарантировано — стопаем надёжно.
+let _hiddenArena = false;
+let _hiddenDressing = false;
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    if ((_hiddenArena = arena._running)) arena.stop();
+    if ((_hiddenDressing = dressing._running)) dressing.stop();
+  } else {
+    // поднимаем цикл, только если он всё ещё нужен: пока были в фоне, бой мог
+    // закончиться по сети, а гардероб — закрыться, тогда GPU будить незачем
+    if (_hiddenArena && mode === 'battle') arena.start();
+    if (_hiddenDressing && !dressingEl.classList.contains('hidden')) dressing.start();
+    _hiddenArena = _hiddenDressing = false;
+  }
+});
 let dressingBusy = false;
 let selectedSlot = null;       // клик по пустому слоту куклы подсвечивает вещи
 

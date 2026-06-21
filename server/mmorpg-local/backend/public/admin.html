@@ -119,6 +119,49 @@
   #toast.err{border-color:var(--debit);color:var(--debit)}
   @media (prefers-reduced-motion: reduce){#toast{transform:none;transition:none}}
 
+  /* ── модалки: формы с выбором из списков вместо prompt()/confirm() ── */
+  .modal-back{position:fixed;inset:0;background:rgba(8,10,16,.66);z-index:200;
+    display:flex;align-items:center;justify-content:center;padding:18px}
+  .modal-card{background:var(--panel);border:1px solid var(--brass);border-radius:6px;
+    width:430px;max-width:100%;max-height:90vh;display:flex;flex-direction:column;
+    box-shadow:0 18px 50px rgba(0,0,0,.55)}
+  .modal-card.wide{width:780px}
+  .modal-head{display:flex;align-items:center;justify-content:space-between;gap:10px;
+    padding:13px 16px;border-bottom:1px solid var(--line);
+    font-family:Georgia,serif;font-variant:small-caps;letter-spacing:.06em;color:var(--brass2)}
+  .modal-x{background:none;border:none;color:var(--dim);font-size:16px;padding:2px 7px}
+  .modal-x:hover{color:var(--paper)}
+  .modal-body{padding:16px;overflow:auto}
+  .m-form{display:flex;flex-direction:column;gap:13px}
+  .m-field label{margin-bottom:4px}
+  .m-field input,.m-field select,.m-field textarea{width:100%}
+  .m-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:2px}
+  /* пикер «выбрать из списка» */
+  .picker{position:relative}
+  .picker-chip{margin-top:6px;font:12px var(--mono);color:var(--brass2)}
+  .picker-chip:empty{display:none}
+  .picker-drop{position:absolute;left:0;right:0;top:100%;margin-top:3px;z-index:5;
+    background:var(--ink2);border:1px solid var(--brass);border-radius:4px;max-height:240px;
+    overflow:auto;box-shadow:0 12px 30px rgba(0,0,0,.5)}
+  .picker-drop.hide{display:none}
+  .picker-opt{padding:7px 11px;border-bottom:1px solid var(--line);cursor:pointer;font-size:12.5px}
+  .picker-opt:hover{background:rgba(201,149,63,.12)}
+  .picker-opt small{color:var(--dim)}
+  /* характеристики предмета — строки ключ/значение */
+  .stat-row{display:grid;grid-template-columns:1fr 120px 32px;gap:8px;margin-bottom:7px;align-items:center}
+  .stat-row .sx-del{padding:3px 0}
+  /* 3D-превью модели */
+  .model-preview{margin-top:10px;height:280px;border:1px solid var(--line);border-radius:4px;
+    background:radial-gradient(circle at 50% 32%,#262f43,#11151e);position:relative;overflow:hidden}
+  .model-preview canvas{display:block;width:100%;height:100%;cursor:grab;touch-action:none}
+  .model-preview canvas:active{cursor:grabbing}
+  .mp-hint{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+    color:var(--dim);font:12px var(--mono);text-align:center;padding:12px}
+  .mp-hint.err{color:var(--debit)}
+  .hdr-give{margin-left:6px}
+  @media (max-width:640px){.modal-card,.modal-card.wide{width:100%}
+    .stat-row{grid-template-columns:1fr 88px 30px}}
+
   #login{height:100%;display:flex;align-items:center;justify-content:center}
   #login form{background:var(--ink2);border:1px solid var(--line);border-radius:4px;
     padding:28px 30px;width:300px;text-align:center}
@@ -143,6 +186,7 @@
     <nav id="nav"></nav>
   </aside>
   <header><h1 id="hdr-title"></h1>
+    <button class="brass sm hdr-give" type="button" onclick="grant()">+ Выдать</button>
     <span class="stamp-env">LOCAL</span><span id="hdr-online"></span></header>
   <main id="main"></main>
 </div>
@@ -186,6 +230,232 @@ function stamp(text, err = false){
 const ok = (t) => stamp('Проведено · ' + t);
 const fail = (e) => stamp('Отказано · ' + e.message, true);
 
+/* ===================================================================== *
+ *  Модалки и пикеры: вместо prompt()/confirm() — формы с выбором из
+ *  списков (игрок, предмет), выпадашками валют/локаций и т.п.
+ * ===================================================================== */
+function modalKey(e){ if (e.key === 'Escape') closeModal(); }
+function closeModal(){
+  const m = $('#modal'); if (!m) return;
+  m.remove(); document.removeEventListener('keydown', modalKey);
+}
+function openModal(title, bodyHTML, { wide = false } = {}){
+  closeModal();
+  const back = document.createElement('div');
+  back.id = 'modal'; back.className = 'modal-back';
+  back.innerHTML = `<div class="modal-card${wide ? ' wide' : ''}">
+    <div class="modal-head"><span>${esc(title)}</span>
+      <button class="modal-x" type="button" aria-label="Закрыть">✕</button></div>
+    <div class="modal-body">${bodyHTML}</div></div>`;
+  back.addEventListener('mousedown', (e) => { if (e.target === back) closeModal(); });
+  back.querySelector('.modal-x').onclick = closeModal;
+  document.body.appendChild(back);
+  document.addEventListener('keydown', modalKey);
+  return back.querySelector('.modal-card');
+}
+
+let _locs = null;
+const locationsCached = async () => (_locs ||= await api('/locations'));
+
+/* HTML одного поля формы по описанию { key, label, type, value, ... } */
+function fieldHTML(f){
+  const id = 'mf-' + f.key, v = f.value ?? '';
+  let ctrl;
+  switch (f.type){
+    case 'number':
+      ctrl = `<input id="${id}" type="number" ${f.step ? `step="${f.step}"` : ''} value="${esc(v)}">`; break;
+    case 'textarea':
+      ctrl = `<textarea id="${id}" rows="${f.rows || 3}">${esc(v)}</textarea>`; break;
+    case 'checkbox':
+      ctrl = `<select id="${id}"><option value="1" ${v ? 'selected' : ''}>да</option>
+        <option value="0" ${!v ? 'selected' : ''}>нет</option></select>`; break;
+    case 'select':
+      ctrl = `<select id="${id}">${opt(f.options, v, f.empty)}</select>`; break;
+    case 'currency':
+      ctrl = `<select id="${id}">${opt(D.currency, v || 'copper')}</select>`; break;
+    case 'location':
+      ctrl = `<select id="${id}"><option>загрузка…</option></select>`; break;
+    case 'player': case 'item':
+      ctrl = `<div class="picker" data-kind="${f.type}">
+        <input id="${id}-q" autocomplete="off" placeholder="${
+          f.type === 'player' ? 'имя или ID игрока…' : 'название или ID предмета…'}">
+        <input id="${id}" type="hidden" value="${esc(v)}">
+        <div class="picker-drop hide" id="${id}-drop"></div>
+        <div class="picker-chip" id="${id}-chip"></div></div>`; break;
+    default:
+      ctrl = `<input id="${id}" value="${esc(v)}">`;
+  }
+  return `<div class="m-field" data-key="${esc(f.key)}">
+    <label for="${id}">${esc(f.label || f.key)}</label>${ctrl}
+    ${f.help ? `<div class="muted" style="font-size:11px;margin-top:4px">${esc(f.help)}</div>` : ''}</div>`;
+}
+
+async function wireField(card, f){
+  if (f.type === 'location'){
+    const sel = card.querySelector('#mf-' + f.key);
+    try {
+      const locs = await locationsCached();
+      sel.innerHTML = locs.map((l) =>
+        `<option value="${l.id}" ${String(f.value) === String(l.id) ? 'selected' : ''}>${
+          esc(l.name)} #${l.id}</option>`).join('');
+    } catch { sel.innerHTML = '<option value="">— ошибка загрузки —</option>'; }
+  }
+  if (f.type === 'player' || f.type === 'item') setupPicker(card, f);
+}
+
+/* живой поиск + выбор из выпадающего списка (игрок / предмет) */
+function setupPicker(card, f){
+  const q = card.querySelector('#mf-' + f.key + '-q');
+  const hidden = card.querySelector('#mf-' + f.key);
+  const drop = card.querySelector('#mf-' + f.key + '-drop');
+  const chip = card.querySelector('#mf-' + f.key + '-chip');
+  let timer = null;
+  const fmt = (r) => f.type === 'player'
+    ? `${esc(r.name)} <small>#${r.id} · ур.${r.level} · ${esc(r.location || '')}</small>`
+    : `${esc(r.name)} <small>#${r.id} · ${dict(D.itemType, r.type)}</small>`;
+  const chosen = (id, name) => {
+    chip.innerHTML = `выбрано: <b>${esc(name)}</b> #${id} ` +
+      `<button type="button" class="sm px-clear">сменить</button>`;
+    chip.querySelector('.px-clear').onclick = () => { hidden.value = ''; chip.textContent = ''; q.focus(); };
+  };
+  const pick = (r) => { hidden.value = r.id; q.value = ''; drop.classList.add('hide'); drop.innerHTML = '';
+    chosen(r.id, r.name); };
+  const search = async () => {
+    const term = q.value.trim();
+    if (!term){ drop.classList.add('hide'); drop.innerHTML = ''; return; }
+    try {
+      const rows = await api((f.type === 'player' ? '/characters?q=' : '/item-templates?q=')
+        + encodeURIComponent(term));
+      const top = rows.slice(0, 12);
+      drop.innerHTML = top.length
+        ? top.map((r, i) => `<div class="picker-opt" data-i="${i}">${fmt(r)}</div>`).join('')
+        : '<div class="picker-opt muted">ничего не найдено</div>';
+      drop.classList.remove('hide');
+      top.forEach((r, i) => {
+        const el = drop.querySelector(`[data-i="${i}"]`); if (el) el.onclick = () => pick(r);
+      });
+    } catch (e) {
+      drop.innerHTML = `<div class="picker-opt debit">ошибка: ${esc(e.message)}</div>`;
+      drop.classList.remove('hide');
+    }
+  };
+  q.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(search, 220); });
+  q.addEventListener('focus', () => { if (q.value.trim()) search(); });
+  // клик вне списка прячет выпадашку; слушатель на карточке — уйдёт с модалкой
+  card.addEventListener('mousedown', (e) => {
+    if (!drop.contains(e.target) && e.target !== q) drop.classList.add('hide');
+  });
+  if (f.value) chosen(f.value, '#' + f.value);   // предвыбор при редактировании
+}
+
+function readField(card, f){
+  const el = card.querySelector('#mf-' + f.key);
+  if (!el) return null;
+  if (f.type === 'number') return el.value === '' ? null : +el.value;
+  if (f.type === 'checkbox') return el.value === '1';
+  if (f.type === 'player' || f.type === 'item') return el.value === '' ? null : +el.value;
+  return el.value;
+}
+
+/* Готовая форма-модалка: возвращает {значения} или null (отмена/закрытие). */
+function formModal({ title, fields, submit = 'Провести', wide = false }){
+  return new Promise((resolve) => {
+    const card = openModal(title, `<form id="m-form" class="m-form">
+      ${fields.map(fieldHTML).join('')}
+      <div class="m-actions">
+        <button type="button" class="m-cancel">Отмена</button>
+        <button type="submit" class="brass">${esc(submit)}</button></div></form>`, { wide });
+    let done = false;
+    fields.forEach((f) => wireField(card, f));
+    card.querySelector('.m-cancel').onclick = () => { done = true; closeModal(); resolve(null); };
+    card.querySelector('#m-form').addEventListener('submit', (e) => {
+      e.preventDefault();
+      const out = {};
+      for (const f of fields){
+        const v = readField(card, f);
+        if (f.required && (v === '' || v == null))
+          return stamp('Заполните: ' + (f.label || f.key), true);
+        out[f.key] = v;
+      }
+      done = true; closeModal(); resolve(out);
+    });
+    const obs = new MutationObserver(() => {     // закрыли крестиком/фоном/Esc → null
+      if (!document.body.contains(card) && !done){ done = true; obs.disconnect(); resolve(null); }
+    });
+    obs.observe(document.body, { childList: true });
+  });
+}
+
+/* ── Ленивая загрузка three.js (из CDN) для 3D-превью моделей ── */
+let _three = null;
+async function loadThree(){
+  if (_three) return _three;
+  const base = 'https://esm.sh/three@0.160.0';
+  const THREE = await import(base);
+  const [{ GLTFLoader }, { FBXLoader }] = await Promise.all([
+    import(base + '/examples/jsm/loaders/GLTFLoader.js'),
+    import(base + '/examples/jsm/loaders/FBXLoader.js'),
+  ]);
+  _three = { THREE, GLTFLoader, FBXLoader };
+  return _three;
+}
+let _preview = null;
+function disposePreview(){ if (_preview){ try { _preview.dispose(); } catch {} _preview = null; } }
+const modelExt = (s) => String(s || '').split('?')[0].split('.').pop().toLowerCase();
+
+async function mountModelPreview(host, src, ext){
+  disposePreview();
+  if (!host) return;
+  host.innerHTML = '<div class="mp-hint">Загрузка 3D-движка…</div>';
+  let M;
+  try { M = await loadThree(); }
+  catch { host.innerHTML = '<div class="mp-hint err">3D-превью недоступно: нет доступа к CDN three.js</div>'; return; }
+  const { THREE, GLTFLoader, FBXLoader } = M;
+  host.innerHTML = '<div class="mp-hint">Загрузка модели…</div>';
+  let obj;
+  try {
+    if (ext === 'fbx') obj = await new FBXLoader().loadAsync(src);
+    else { const g = await new GLTFLoader().loadAsync(src); obj = g.scene; }
+  } catch (e) {
+    host.innerHTML = `<div class="mp-hint err">Не удалось загрузить модель: ${esc(e.message || 'ошибка')}</div>`;
+    return;
+  }
+  host.innerHTML = '';
+  const w = host.clientWidth || 420, h = host.clientHeight || 280;
+  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  renderer.setSize(w, h, false);
+  host.appendChild(renderer.domElement);
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(40, w / h, 0.01, 100);
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x33373f, 1.5));
+  const key = new THREE.DirectionalLight(0xffffff, 2.1); key.position.set(2, 4, 3); scene.add(key);
+  const rim = new THREE.DirectionalLight(0x88aaff, 0.7); rim.position.set(-3, 2, -4); scene.add(rim);
+  const pivot = new THREE.Group(); scene.add(pivot);
+  // нормализация: центр в 0, наибольший габарит → 2 единицы
+  const box = new THREE.Box3().setFromObject(obj);
+  const size = box.getSize(new THREE.Vector3());
+  const center = box.getCenter(new THREE.Vector3());
+  const maxD = Math.max(size.x, size.y, size.z) || 1;
+  obj.position.sub(center); obj.scale.setScalar(2 / maxD); pivot.add(obj);
+  camera.position.set(0, 0.3, 4); camera.lookAt(0, 0, 0);
+  let drag = false, lx = 0, ly = 0, auto = true;
+  const el = renderer.domElement;
+  el.addEventListener('pointerdown', (e) => { drag = true; auto = false; lx = e.clientX; ly = e.clientY;
+    el.setPointerCapture(e.pointerId); });
+  el.addEventListener('pointermove', (e) => { if (!drag) return;
+    pivot.rotation.y += (e.clientX - lx) * 0.01; pivot.rotation.x += (e.clientY - ly) * 0.01;
+    lx = e.clientX; ly = e.clientY; });
+  const stop = () => { drag = false; };
+  el.addEventListener('pointerup', stop); el.addEventListener('pointercancel', stop);
+  let raf = 0; const clock = new THREE.Clock();
+  const tick = () => { raf = requestAnimationFrame(tick);
+    const dt = clock.getDelta(); if (auto) pivot.rotation.y += dt * 0.6;
+    renderer.render(scene, camera); };
+  tick();
+  _preview = { dispose(){ cancelAnimationFrame(raf); renderer.dispose(); renderer.domElement.remove(); } };
+}
+
 /* словари кодов БД */
 const D = {
   curReason:{1:'квест',2:'аукцион',3:'почта',4:'магазин',5:'ремонт',6:'биржа',7:'бой',8:'админ'},
@@ -201,6 +471,7 @@ const D = {
   rep:{1:'однократное',2:'ежедневное',3:'еженедельное'},
   accStatus:{1:'активен',2:'заморожен',3:'забанен',4:'удалён'},
   bodyPart:{1:'торс'},
+  currency:{copper:'Медь',silver:'Серебро',gold:'Золото',diamond:'Бриллианты',valor:'Доблесть'},
 };
 const dict = (m, v) => (m[v] ?? v ?? '—');
 const amount = (a) => `<td class="num ${a >= 0 ? 'credit' : 'debit'}">${a >= 0 ? '+' : ''}${a}</td>`;
@@ -311,11 +582,11 @@ window.openChar = async (id) => {
       ${table([{h:'Валюта',v:r=>r[0]},{h:'Баланс',html:r=>`<td class="num">${r[1]}</td>`}],
         Object.entries(d.wallet))}
       <div class="toolbar" style="margin-top:10px">
-        <button class="brass" onclick="adjCurrency(${c.id},1)">Начислить</button>
-        <button onclick="adjCurrency(${c.id},-1)">Списать</button>
-        <button onclick="giveItem(${c.id})">Выдать предмет</button>
-        <button onclick="teleport(${c.id})">Телепорт</button>
-        <button class="danger" onclick="mute(${c.id})">Мут чата</button></div></div>
+        <button class="brass" onclick="grant(${c.id})">Выдать…</button>
+        <button onclick="adjCurrency(${c.id})">Валюта…</button>
+        <button onclick="giveItem(${c.id})">Предмет…</button>
+        <button onclick="teleport(${c.id})">Телепорт…</button>
+        <button class="danger" onclick="mute(${c.id})">Мут чата…</button></div></div>
     <div class="panel"><h3>Правка персонажа</h3>
       <div class="form">
         <div><label>Уровень</label><input id="e-level" type="number" value="${c.level}"></div>
@@ -367,49 +638,118 @@ window.saveChar = async (id) => {
     ok('персонаж #' + id); openChar(id);
   } catch (e) { fail(e); }
 };
-window.adjCurrency = async (id, sign) => {
-  const code = prompt('Валюта (copper/silver/gold/diamond/valor):', 'copper'); if (!code) return;
-  const n = Number(prompt(sign > 0 ? 'Сколько начислить:' : 'Сколько списать:', '100')); if (!n) return;
-  const note = prompt('Основание (в аудит):', '') || null;
-  try { const r = await api(`/characters/${id}/currency`,
-      { code, amount: sign * Math.abs(n), note });
-    ok(`${code} ${sign>0?'+':'−'}${Math.abs(n)} · остаток ${r.balance}`); openChar(id);
+/* Флагман: «Выдать игроку» — выбор игрока из списка + предмет ИЛИ валюта,
+   с переключателем. Доступно из шапки и со страницы персонажа (preset). */
+window.grant = async (presetCharId) => {
+  const F = {
+    player: { key:'character_id', label:'Игрок', type:'player', value: presetCharId || '' },
+    kind:   { key:'kind', label:'Что выдать', type:'select', options:{ item:'Предмет', currency:'Валюта' }, value:'item' },
+    item:   { key:'template_id', label:'Предмет', type:'item' },
+    qty:    { key:'quantity', label:'Количество', type:'number', value:1 },
+    code:   { key:'code', label:'Валюта', type:'currency', value:'copper' },
+    amount: { key:'amount', label:'Сумма', type:'number', value:100 },
+    note:   { key:'note', label:'Основание (в аудит)', type:'text' },
+  };
+  const card = openModal('Выдать игроку', `<form id="m-form" class="m-form">
+    ${fieldHTML(F.player)}${fieldHTML(F.kind)}
+    <div data-grp="item">${fieldHTML(F.item)}${fieldHTML(F.qty)}</div>
+    <div data-grp="currency" style="display:none">${fieldHTML(F.code)}${fieldHTML(F.amount)}</div>
+    ${fieldHTML(F.note)}
+    <div class="m-actions"><button type="button" class="m-cancel">Отмена</button>
+      <button type="submit" class="brass">Выдать</button></div></form>`);
+  Object.values(F).forEach((f) => wireField(card, f));
+  const sync = () => { const k = card.querySelector('#mf-kind').value;
+    card.querySelector('[data-grp="item"]').style.display = k === 'item' ? '' : 'none';
+    card.querySelector('[data-grp="currency"]').style.display = k === 'currency' ? '' : 'none'; };
+  card.querySelector('#mf-kind').addEventListener('change', sync); sync();
+  card.querySelector('.m-cancel').onclick = closeModal;
+  card.querySelector('#m-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const charId = readField(card, F.player);
+    if (!charId) return stamp('Выберите игрока', true);
+    try {
+      if (readField(card, F.kind) === 'item'){
+        const tpl = readField(card, F.item); if (!tpl) return stamp('Выберите предмет', true);
+        const r = await api(`/characters/${charId}/give-item`,
+          { template_id: tpl, quantity: readField(card, F.qty) || 1 });
+        ok('выдан предмет #' + r.itemId);
+      } else {
+        const amount = readField(card, F.amount); if (!amount) return stamp('Укажите сумму', true);
+        const r = await api(`/characters/${charId}/currency`,
+          { code: readField(card, F.code), amount, note: readField(card, F.note) || null });
+        ok('баланс ' + r.balance);
+      }
+      closeModal();
+      if (current === 'chars' && document.querySelector('h2')) openChar(charId);
+    } catch (err) { fail(err); }
+  });
+};
+
+window.adjCurrency = async (id) => {
+  const r = await formModal({ title: 'Начислить / списать валюту', submit: 'Провести', fields: [
+    { key:'code', label:'Валюта', type:'currency', value:'copper' },
+    { key:'dir', label:'Операция', type:'select', options:{ '1':'начислить', '-1':'списать' }, value:'1' },
+    { key:'amount', label:'Сумма', type:'number', value:100, required:true },
+    { key:'note', label:'Основание (в аудит)', type:'text' },
+  ]});
+  if (!r) return;
+  const amount = Math.abs(+r.amount) * (+r.dir);
+  try { const x = await api(`/characters/${id}/currency`, { code:r.code, amount, note:r.note || null });
+    ok(`${r.code} ${amount > 0 ? '+' : '−'}${Math.abs(amount)} · остаток ${x.balance}`); openChar(id);
   } catch (e) { fail(e); }
 };
 window.giveItem = async (id) => {
-  const t = Number(prompt('ID шаблона (вкладка «Предметы»):', '101')); if (!t) return;
-  const qty = Number(prompt('Количество (для стакуемых):', '1')) || 1;
-  try { const r = await api(`/characters/${id}/give-item`, { template_id: t, quantity: qty });
-    ok('предмет #' + r.itemId); openChar(id); } catch (e) { fail(e); }
+  const r = await formModal({ title: 'Выдать предмет', submit: 'Выдать', fields: [
+    { key:'template_id', label:'Предмет', type:'item', required:true },
+    { key:'quantity', label:'Количество (для стакуемых)', type:'number', value:1 },
+  ]});
+  if (!r) return;
+  try { const x = await api(`/characters/${id}/give-item`,
+      { template_id: r.template_id, quantity: r.quantity || 1 });
+    ok('предмет #' + x.itemId); openChar(id); } catch (e) { fail(e); }
 };
 window.teleport = async (id) => {
-  const to = Number(prompt('ID локации (1 Деревня, 2 Каньон, 3 Лощина):', '1')); if (!to) return;
-  try { await api(`/characters/${id}/teleport`, { location_id: to });
+  const r = await formModal({ title: 'Телепорт персонажа', submit: 'Переместить', fields: [
+    { key:'location_id', label:'Локация', type:'location', required:true },
+  ]});
+  if (!r) return;
+  try { await api(`/characters/${id}/teleport`, { location_id: r.location_id });
     ok('телепорт'); openChar(id); } catch (e) { fail(e); }
 };
 window.mute = async (id) => {
-  const hours = Number(prompt('Мут чата, часов:', '1')); if (!hours) return;
-  const reason = prompt('Причина:', '') || null;
-  try { await api(`/characters/${id}/mute`, { hours, reason }); ok(`мут ${hours} ч`); }
-  catch (e) { fail(e); }
+  const r = await formModal({ title: 'Мут чата', submit: 'Замутить', fields: [
+    { key:'hours', label:'Часов', type:'number', value:1, required:true },
+    { key:'reason', label:'Причина', type:'text' },
+  ]});
+  if (!r) return;
+  try { await api(`/characters/${id}/mute`, { hours:r.hours, reason:r.reason || null });
+    ok(`мут ${r.hours} ч`); } catch (e) { fail(e); }
 };
 window.confiscate = async (itemId, charId) => {
-  const note = prompt('Изъять предмет #' + itemId + '. Основание:', ''); if (note === null) return;
-  try { await api(`/item-instances/${itemId}/confiscate`, { note });
+  const r = await formModal({ title: 'Изъять предмет #' + itemId, submit: 'Изъять', fields: [
+    { key:'note', label:'Основание (в аудит)', type:'text' },
+  ]});
+  if (!r) return;
+  try { await api(`/item-instances/${itemId}/confiscate`, { note:r.note || null });
     ok('изъят #' + itemId); if (charId) openChar(charId); } catch (e) { fail(e); }
 };
 window.deleteItem = async (itemId, charId) => {
-  if (!confirm('Уничтожить предмет #' + itemId + '? Вернуть будет нельзя ' +
-    '(след останется в гроссбухе).')) return;
-  const note = prompt('Основание (в аудит):', '') || null;
-  try { await api(`/item-instances/${itemId}/delete`, { note });
+  const r = await formModal({ title: 'Уничтожить предмет #' + itemId, submit: 'Уничтожить', fields: [
+    { key:'note', label:'Основание (в аудит)', type:'text',
+      help:'Вернуть нельзя; след останется в гроссбухе.' },
+  ]});
+  if (!r) return;
+  try { await api(`/item-instances/${itemId}/delete`, { note:r.note || null });
     ok('уничтожен #' + itemId); if (charId) openChar(charId); else show(current); }
   catch (e) { fail(e); }
 };
 window.renameChar = async (id, oldName) => {
-  const name = prompt('Новое имя персонажа:', oldName); if (!name) return;
-  try { await api(`/characters/${id}/rename`, { name });
-    ok('переименован: ' + name); openChar(id); }
+  const r = await formModal({ title: 'Переименовать персонажа', submit: 'Сохранить', fields: [
+    { key:'name', label:'Новое имя', type:'text', value:oldName || '', required:true },
+  ]});
+  if (!r) return;
+  try { await api(`/characters/${id}/rename`, { name:r.name });
+    ok('переименован: ' + r.name); openChar(id); }
   catch (e) {
     fail(e.message === 'name_taken' ? new Error('имя уже занято')
       : e.message === 'name_blacklisted' ? new Error('имя в чёрном списке')
@@ -424,10 +764,12 @@ window.deleteAccount = async (id) => {
   catch (e) { fail(e.message === 'already_deleted' ? new Error('уже удалён') : e); }
 };
 window.enchantItem = async (itemId, cur) => {
-  const v = Number(prompt('Новая заточка:', String((cur || 0) + 1)));
-  if (Number.isNaN(v)) return;
-  try { await api(`/item-instances/${itemId}/edit`, { enchant_level: v });
-    ok(`заточка +${v}`); } catch (e) { fail(e); }
+  const r = await formModal({ title: 'Заточка предмета #' + itemId, submit: 'Сохранить', fields: [
+    { key:'enchant_level', label:'Уровень заточки', type:'number', value:(cur || 0) + 1, required:true },
+  ]});
+  if (!r) return;
+  try { await api(`/item-instances/${itemId}/edit`, { enchant_level: r.enchant_level });
+    ok(`заточка +${r.enchant_level}`); } catch (e) { fail(e); }
 };
 
 /* ================= Аккаунты ================= */
@@ -452,10 +794,12 @@ R.accounts = async () => {
   ], rows);
 };
 window.ban = async (id) => {
-  const hours = Number(prompt('Часов бана (0 = навсегда):', '24'));
-  if (Number.isNaN(hours)) return;
-  const reason = prompt('Причина:', '') || null;
-  try { await api(`/accounts/${id}/ban`, { hours, reason });
+  const r = await formModal({ title: 'Забанить аккаунт #' + id, submit: 'Забанить', fields: [
+    { key:'hours', label:'Часов бана', type:'number', value:24, help:'0 = навсегда' },
+    { key:'reason', label:'Причина', type:'text' },
+  ]});
+  if (!r) return;
+  try { await api(`/accounts/${id}/ban`, { hours:r.hours || 0, reason:r.reason || null });
     ok('бан #' + id); show('accounts'); } catch (e) { fail(e); }
 };
 window.unban = async (id) => {
@@ -635,11 +979,12 @@ R.items = async (f = {}) => {
       <input id="i-q" value="${esc(f.q||'')}" onkeydown="if(event.key==='Enter')R._is()"></div>
     <div><label>Тип</label><select id="i-type">${opt(D.itemType, f.type, 'любой')}</select></div>
     <button class="brass" onclick="R._is()">Найти</button>
-    <button onclick="editTpl()">Новый предмет</button></div>
+    <button class="brass" onclick="editTpl()">+ Новый предмет</button></div>
   ${table([
     {h:'ID',v:r=>r.id},{h:'Название',v:r=>r.name},{h:'Тип',v:r=>dict(D.itemType,r.type)},
     {h:'Слот',v:r=>dict(D.slot,r.slot)},{h:'Кач.',v:r=>r.quality},{h:'Ур.',v:r=>r.level_req},
     {h:'Параметры',v:r=>JSON.stringify(r.base_stats||{})},
+    {h:'3D',html:r=>`<td>${r.model?'<span class="credit">✓</span>':'<span class="muted">—</span>'}</td>`},
     {h:'В мире',v:r=>r.instances},{h:'v',v:r=>r.version},
   ], rows, (r)=>`class="click" onclick="openTpl(${r.id})"`)}`;
 };
@@ -649,70 +994,123 @@ window.openTpl = async (id) => {
   const r = rows.find((x) => x.id === id);
   editTpl(r);
 };
+
+/* характеристики предмета — произвольные пары ключ→значение (число/true/false) */
+const STAT_KEYS = {
+  defense:'Защита', strength:'Сила', hp:'Здоровье', crit:'Крит (доля 0–1)',
+  dodge:'Уворот (доля 0–1)', mp:'Мана', energy:'Энергия',
+  heal:'Лечение (эликсир)', power_mult:'Множитель урона (эликсир)',
+  power_turns:'Ходов усиления', escape:'Эликсир побега (true)',
+};
+let _modelFile = null;   // выбранный, но ещё не загруженный файл модели
+function statRowHTML(key = '', val = ''){
+  return `<div class="stat-row">
+    <input class="sx-key" list="stat-keys" placeholder="ключ (hp, defense…)" value="${esc(key)}">
+    <input class="sx-val" placeholder="значение" value="${esc(val)}">
+    <button type="button" class="sm danger" title="убрать"
+      onclick="this.closest('.stat-row').remove()">✕</button></div>`;
+}
+window.addStatRow = (k = '', v = '') =>
+  $('#stat-rows').insertAdjacentHTML('beforeend', statRowHTML(k, v));
+function collectStats(){
+  const out = {};
+  document.querySelectorAll('#stat-rows .stat-row').forEach((row) => {
+    const k = row.querySelector('.sx-key').value.trim(); if (!k) return;
+    const raw = row.querySelector('.sx-val').value.trim();
+    out[k] = raw === 'true' ? true : raw === 'false' ? false
+      : (raw !== '' && !isNaN(Number(raw))) ? Number(raw) : raw;
+  });
+  return out;
+}
+
 window.editTpl = (r) => {
+  disposePreview(); _modelFile = null;
   const t = r || { id:'', name:'', type:2, slot:'', quality:1, level_req:1,
-    base_stats:{}, requirements:{}, stackable:false, max_stack:1, tradable:true, icon:'' };
+    base_stats:{}, requirements:{}, stackable:false, max_stack:1, tradable:true, icon:'', model:'' };
   const bs = t.base_stats || {}, rq = t.requirements || {};
-  const extra = { ...bs };
-  for (const k of ['defense','strength','hp','crit']) delete extra[k];
-  $('#main').innerHTML = `
+  const rows = Object.entries(bs).map(([k, v]) => statRowHTML(k, v)).join('') || statRowHTML();
+  const datalist = `<datalist id="stat-keys">${Object.entries(STAT_KEYS)
+    .map(([k, l]) => `<option value="${k}">${esc(l)}</option>`).join('')}</datalist>`;
+  const isUrl = t.model && /^(https?:|\/)/.test(t.model) && /\.(glb|gltf|fbx)$/i.test(t.model);
+  $('#main').innerHTML = `${datalist}
   <div class="toolbar"><button onclick="show('items')">← К списку</button>
     <h2 style="margin:0;font-family:Georgia,serif;font-variant:small-caps">
       ${r ? 'Предмет #' + t.id + ' — ' + esc(t.name) : 'Новый предмет'}</h2>
-    ${r ? `<button onclick="giveTpl(${t.id})">Выдать игроку</button>
+    ${r ? `<button class="brass" onclick="giveTpl(${t.id})">Выдать игроку…</button>
            <button onclick="tplInstances(${t.id})">Экземпляры (${t.instances ?? 0})</button>` : ''}</div>
-  <div class="panel"><h3>Шаблон</h3><div class="form">
-    <div><label>Уникальный ID</label><input id="t-id" type="number" value="${t.id}" ${r?'disabled':''}></div>
-    <div class="wide"><label>Название</label><input id="t-name" value="${esc(t.name)}" style="width:100%"></div>
-    <div><label>Тип</label><select id="t-type">${opt(D.itemType, t.type)}</select></div>
-    <div><label>Слот (для брони)</label><select id="t-slot">${opt(D.slot, t.slot, '— не надевается')}</select></div>
-    <div><label>Качество 1–5</label><input id="t-q" type="number" value="${t.quality}"></div>
-    <div><label>Icon (ключ модели)</label><input id="t-icon" value="${esc(t.icon||'')}"></div>
-    <div><label>Стакуется</label><select id="t-stack">
-      <option value="0" ${!t.stackable?'selected':''}>нет</option>
-      <option value="1" ${t.stackable?'selected':''}>да</option></select></div>
-    <div><label>Макс. стак</label><input id="t-maxstack" type="number" value="${t.max_stack||1}"></div>
-  </div>
-  <h3 style="margin-top:14px">Характеристики</h3><div class="form">
-    <div><label>Защита</label><input id="s-def" type="number" value="${bs.defense ?? 0}"></div>
-    <div><label>Сила</label><input id="s-str" type="number" value="${bs.strength ?? 0}"></div>
-    <div><label>Здоровье</label><input id="s-hp" type="number" value="${bs.hp ?? 0}"></div>
-    <div><label>Крит, %</label><input id="s-crit" type="number" step="0.1" value="${bs.crit ?? 0}"></div>
-    <div class="wide"><label>Прочее (JSON, сольётся с характеристиками)</label>
-      <textarea id="s-extra" rows="2">${esc(JSON.stringify(extra))}</textarea></div>
-  </div>
-  <h3 style="margin-top:14px">Требования, чтобы надеть</h3><div class="form">
-    <div><label>Мин. уровень</label><input id="r-lvl" type="number" value="${rq.level ?? t.level_req ?? 1}"></div>
-  </div>
-  <div class="toolbar" style="margin-top:12px">
-    <button class="brass" onclick="saveTpl()">Сохранить предмет</button>
-    <span class="muted">ID уникален и навсегда; требования проверяет сервер при надевании</span></div></div>`;
+  <div class="grid2">
+    <div class="panel"><h3>Шаблон</h3><div class="form">
+      <div><label>Уникальный ID</label><input id="t-id" type="number" value="${t.id}" ${r?'disabled':''}></div>
+      <div class="wide"><label>Название</label><input id="t-name" value="${esc(t.name)}" style="width:100%"></div>
+      <div><label>Тип</label><select id="t-type">${opt(D.itemType, t.type)}</select></div>
+      <div><label>Слот (для брони)</label><select id="t-slot">${opt(D.slot, t.slot, '— не надевается')}</select></div>
+      <div><label>Качество 1–5</label><input id="t-q" type="number" value="${t.quality}"></div>
+      <div><label>Icon (ключ из content.js)</label><input id="t-icon" value="${esc(t.icon||'')}"></div>
+      <div><label>Стакуется</label><select id="t-stack">
+        <option value="0" ${!t.stackable?'selected':''}>нет</option>
+        <option value="1" ${t.stackable?'selected':''}>да</option></select></div>
+      <div><label>Макс. стак</label><input id="t-maxstack" type="number" value="${t.max_stack||1}"></div>
+    </div>
+    <h3 style="margin-top:14px">Характеристики
+      <button type="button" class="sm" style="margin-left:8px" onclick="addStatRow()">+ строка</button></h3>
+    <div id="stat-rows">${rows}</div>
+    <p class="muted" style="font-size:11px;margin-top:2px">Любые пары ключ→значение
+      (число, true/false). Сервер сольёт их в base_stats предмета.</p>
+    <h3 style="margin-top:14px">Требования, чтобы надеть</h3><div class="form">
+      <div><label>Мин. уровень</label><input id="r-lvl" type="number" value="${rq.level ?? t.level_req ?? 1}"></div>
+    </div>
+    <div class="toolbar" style="margin-top:12px">
+      <button class="brass" onclick="saveTpl()">Сохранить предмет</button></div></div>
+
+    <div class="panel"><h3>3D-модель и превью</h3>
+      <div class="form"><div class="wide">
+        <label>Файл модели (GLB / GLTF / FBX)</label>
+        <input id="t-model-file" type="file" accept=".glb,.gltf,.fbx">
+        <div style="margin-top:8px"><label>URL или ключ модели</label>
+          <input id="t-model" value="${esc(t.model||'')}"
+            placeholder="/uploads/… или ключ из content.js" style="width:100%"></div>
+        <div id="t-model-note" class="muted" style="font-size:11px;margin-top:4px"></div>
+      </div></div>
+      <div id="t-preview" class="model-preview"><div class="mp-hint">
+        Загрузите файл модели или укажите URL — появится вращаемое 3D-превью.</div></div>
+    </div>
+  </div>`;
+  $('#t-model-file').addEventListener('change', (e) => {
+    const f = e.target.files[0]; if (!f) return;
+    _modelFile = f;
+    $('#t-model-note').textContent = 'файл выбран: ' + f.name + ' — загрузится при сохранении';
+    mountModelPreview($('#t-preview'), URL.createObjectURL(f), modelExt(f.name));
+  });
+  if (isUrl) mountModelPreview($('#t-preview'), t.model, modelExt(t.model));
 };
 window.saveTpl = async () => {
-  let extra = {};
-  try { extra = JSON.parse($('#s-extra').value || '{}'); }
-  catch { return stamp('Отказано · «Прочее» — это не JSON', true); }
+  let model = $('#t-model').value.trim() || null;
+  if (_modelFile){
+    try { model = await upload(_modelFile); _modelFile = null; }
+    catch (e) { return fail(e); }
+  }
+  const lvl = +$('#r-lvl').value || 1;
   const body = {
     id: +$('#t-id').value, name: $('#t-name').value.trim(),
     type: +$('#t-type').value, slot: $('#t-slot').value ? +$('#t-slot').value : null,
     quality: +$('#t-q').value, icon: $('#t-icon').value.trim() || null,
     stackable: $('#t-stack').value === '1', max_stack: +$('#t-maxstack').value || 1,
-    level_req: +$('#r-lvl').value || 1,
-    requirements: { level: +$('#r-lvl').value || 1 },
-    base_stats: { ...extra,
-      defense:+$('#s-def').value||0, strength:+$('#s-str').value||0,
-      hp:+$('#s-hp').value||0, crit:+$('#s-crit').value||0 },
+    level_req: lvl, requirements: { level: lvl },
+    base_stats: collectStats(), model,
   };
   if (!body.id || !body.name) return stamp('Отказано · нужны ID и название', true);
   try { await api('/item-templates', body); ok('предмет #' + body.id); show('items'); }
   catch (e) { fail(e); }
 };
 window.giveTpl = async (tplId) => {
-  const charId = Number(prompt('ID персонажа:')); if (!charId) return;
-  const qty = Number(prompt('Количество:', '1')) || 1;
-  try { const r = await api(`/characters/${charId}/give-item`,
-      { template_id: tplId, quantity: qty });
-    ok('выдан #' + r.itemId); } catch (e) { fail(e); }
+  const r = await formModal({ title: 'Выдать предмет игроку', submit: 'Выдать', fields: [
+    { key:'character_id', label:'Игрок', type:'player', required:true },
+    { key:'quantity', label:'Количество', type:'number', value:1 },
+  ]});
+  if (!r) return;
+  try { const x = await api(`/characters/${r.character_id}/give-item`,
+      { template_id: tplId, quantity: r.quantity || 1 });
+    ok('выдан #' + x.itemId); } catch (e) { fail(e); }
 };
 window.tplInstances = async (tplId) => {
   const rows = await api('/item-instances?template_id=' + tplId);
@@ -896,6 +1294,7 @@ R.audit = async () => table([
 /* ================= навигация и вход ================= */
 window.show = async (name, arg) => {
   current = name;
+  disposePreview();   // уходим со страницы предмета — гасим 3D-цикл превью
   document.querySelectorAll('#nav button').forEach((b) =>
     b.classList.toggle('active', b.dataset.s === name));
   $('#hdr-title').textContent = SECTIONS.find(([k]) => k === name)[1];

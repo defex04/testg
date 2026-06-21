@@ -9,6 +9,9 @@ const STATEMENTS = [
   `ALTER TABLE quest_templates ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT TRUE`,
   // Требования к надеванию предметов (уровень, класс, ...)
   `ALTER TABLE item_templates ADD COLUMN IF NOT EXISTS requirements JSONB`,
+  // 3D-модель предмета (URL загруженного GLB/FBX или ключ из content.js) —
+  // для превью в админке и будущей подгрузки клиентом
+  `ALTER TABLE item_templates ADD COLUMN IF NOT EXISTS model TEXT`,
   // Эликсир побега — единственный легальный выход из боя
   `INSERT INTO item_templates (id, name, type, quality, stackable, max_stack, base_stats, icon)
    VALUES (201, 'Эликсир побега', 4, 2, TRUE, 10, '{"escape": true}', 'escapeElixir')

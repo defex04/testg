@@ -464,7 +464,7 @@ export function adminRoutes(app) {
 
   const ITEM_COLS = ['name', 'type', 'subtype', 'quality', 'level_req', 'slot',
     'base_stats', 'requirements', 'stackable', 'max_stack', 'tradable',
-    'sellable', 'droppable', 'repairable', 'icon'];
+    'sellable', 'droppable', 'repairable', 'icon', 'model'];
   const JSON_COLS = new Set(['base_stats', 'requirements']);
 
   app.post('/admin/api/item-templates', guard, async (req, res) => {
@@ -594,9 +594,10 @@ export function adminRoutes(app) {
     res.json({ ok: true });
   });
 
-  // загрузка картинки квеста: тело запроса = файл, ?name=исходное_имя
+  // загрузка картинки квеста или 3D-модели предмета: тело запроса = файл,
+  // ?name=исходное_имя. Лимит поднят под GLB/FBX (модели бывают тяжёлыми).
   app.post('/admin/api/upload', guard,
-    express.raw({ type: () => true, limit: '8mb' }),
+    express.raw({ type: () => true, limit: '48mb' }),
     async (req, res) => {
       const raw = String(req.query.name || 'image.png');
       const safe = raw.toLowerCase().replace(/[^a-z0-9._-]+/g, '_').slice(-60);

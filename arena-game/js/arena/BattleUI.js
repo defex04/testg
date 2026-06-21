@@ -468,14 +468,47 @@ export class BattleUI {
       ? (f.maxEn ? f.en / f.maxEn : 0)
       : (f.maxHp ? f.hp / f.maxHp : 0);
 
-    this._rosterEls = { all: {} };
+    // Отфильтрованные/отсортированные списки + «подпись» состава (порядок id).
+    // Ростер прилетает на каждое сообщение боя (turnStart/resolve/elixir/…),
+    // но почти всегда меняются лишь HP/энергия — состав тот же. Тогда не сносим
+    // и не пересобираем DOM (и не перевешиваем слушатели), а лишь двигаем полоски.
+    const lists = {};
+    const sigParts = [];
     for (const side of ['left', 'right']) {
-      const host = this.teamEls[side];
-      host.innerHTML = '';
       let list = (roster[side] || []).slice();
       if (q) list = list.filter((f) => String(f.name || '').toLowerCase().includes(q));
       if (sortKey) list.sort((a, b) => (frac(a) - frac(b)) * sortDir);
-      for (const f of list) {
+      lists[side] = list;
+      sigParts.push(side + ':' + list.map((f, i) => f.id ?? '#' + i).join(','));
+    }
+    const sig = sigParts.join('|');
+
+    // быстрый путь: состав и порядок прежние — обновляем только полоски/смерть
+    if (sig === this._rosterSig && this._rosterRows) {
+      for (const side of ['left', 'right']) {
+        const rows = this._rosterRows[side];
+        const list = lists[side];
+        for (let i = 0; i < list.length; i++) {
+          const f = list[i];
+          const row = rows[i];
+          if (!row) continue;
+          row.hp.style.width = (f.maxHp ? Math.max(0, (f.hp / f.maxHp) * 100) : 0) + '%';
+          row.en.style.width = (f.maxEn ? Math.max(0, (f.en / f.maxEn) * 100) : 0) + '%';
+          row.el.classList.toggle('dead', f.alive === false || f.hp <= 0);
+        }
+      }
+      this._refreshTargetMark();
+      return;
+    }
+
+    // медленный путь: состав изменился — пересобираем структуру (и кэшируем ссылки)
+    this._rosterSig = sig;
+    this._rosterEls = { all: {} };
+    this._rosterRows = { left: [], right: [] };
+    for (const side of ['left', 'right']) {
+      const host = this.teamEls[side];
+      host.innerHTML = '';
+      for (const f of lists[side]) {
         const pct = f.maxHp ? Math.max(0, (f.hp / f.maxHp) * 100) : 0;
         const enPct = f.maxEn ? Math.max(0, (f.en / f.maxEn) * 100) : 0;
         const dead = f.alive === false || f.hp <= 0;
@@ -505,6 +538,11 @@ export class BattleUI {
           });
         }
         host.appendChild(m);
+        this._rosterRows[side].push({
+          el: m,
+          hp: m.querySelector('.m-hp .m-fill'),
+          en: m.querySelector('.m-en .m-fill'),
+        });
       }
     }
     this._refreshTargetMark();
