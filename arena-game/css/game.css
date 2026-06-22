@@ -1674,19 +1674,19 @@ body.loc-castle.in-battle .sprite-main .sm-ico {
   gap: 1px;
 }
 .fighter-col.right .nick-wrap { align-items: flex-end; }
-.nick-effects,
 .m-effects {
   min-height: 13px;
   display: flex;
   gap: 2px;
   line-height: 1;
-}
-.m-effects {
   justify-content: center;
   margin-top: 3px;
 }
-.nick-effects:empty { display: none; }
 .m-effects:empty { display: none; }
+/* значки эффектов в списке участников показываем только у выделенного бойца
+   (тап по участнику = выбор цели → класс .targeted); у остальных — скрыты, чтобы
+   не засорять список (ТЗ #2) */
+.member:not(.targeted) .m-effects { display: none; }
 .nick-effect {
   display: inline-flex;
   align-items: center;
@@ -3813,6 +3813,29 @@ body.tg-fullscreen .net-status { display: flex; }
   0% { transform: translateX(-120%); }
   100% { transform: translateX(330%); }
 }
+
+/* нагрузка ЦП/ГП под пингом — видна только в бою (main.js ставит display) */
+.net-perf {
+  display: none;
+  gap: 7px;
+  padding: 1px 9px;
+  border-radius: 999px;
+  background: rgba(6, 9, 4, .5);
+  border: 1px solid rgba(138, 111, 60, .28);
+  font: 600 9.5px var(--font-display);
+  color: #c9b994;
+  text-shadow: 0 1px 2px #000;
+  white-space: nowrap;
+}
+.np-metric { display: inline-flex; align-items: baseline; }
+.net-perf b { font-variant-numeric: tabular-nums; color: #efe3c4; }
+.net-perf b[data-q="good"] { color: #58c167; }
+.net-perf b[data-q="ok"]   { color: #d8b23f; }
+.net-perf b[data-q="bad"]  { color: #d6452e; }
+
+/* режим оптимизации: убираем дорогое для GPU размытие фона (backdrop blur) —
+   на телефоне это заметный источник нагрева. Прозрачность панелей оставляем. */
+body.perf-mode * { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
 
 /* ===========================================================================
    ПОЧТА · ЛИЧКА · КЛИКАБЕЛЬНЫЕ ОБЪЕКТЫ ЧАТА · МЕНЮ НИКА

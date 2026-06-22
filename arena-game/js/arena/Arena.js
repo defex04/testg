@@ -30,8 +30,22 @@ export class Arena {
     this.camHeight = opts.camHeight ?? 1.6;        // было 1.42
     this.fighters = { left: null, right: null };
 
+    // --- режим оптимизации (меньше нагрев телефона) и счётчики нагрузки ----------
+    // dprCap — потолок плотности пикселей (в оптимизации режем до 1×: на телефоне
+    // dpr 2.5–3 заставляет рисовать в разы больше точек). _minFrameMs — ограничение
+    // кадров (в оптимизации ~30 к/с). _fps/_cpuMs/_gpuMs — сглаженные метрики для
+    // индикатора нагрузки под пингом (см. getPerf / main.js).
+    this._perfMode = false;
+    this._dprCap = 2;
+    this._minFrameMs = 0;
+    this._lastTick = null;
+    this._fps = 0;
+    this._cpuMs = 0;
+    this._gpuMs = null;
+    this._gpuQuery = null;
+
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, this._dprCap));
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.1;
@@ -40,6 +54,17 @@ export class Arena {
     renderer.domElement.className = 'arena-canvas';
     container.appendChild(renderer.domElement);
     this.renderer = renderer;
+
+    // замер времени GPU на кадр — расширение WebGL2 (на части мобильных браузеров
+    // отключено из соображений приватности; тогда метрика ГП будет недоступна)
+    try {
+      const gl = renderer.getContext();
+      this._gl = gl;
+      this._timerExt = (typeof WebGL2RenderingContext !== 'undefined'
+        && gl instanceof WebGL2RenderingContext)
+        ? gl.getExtension('EXT_disjoint_timer_query_webgl2')
+        : null;
+    } catch { this._gl = null; this._timerExt = null; }
 
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(36, 1, 0.1, 100);
@@ -58,6 +83,7 @@ export class Arena {
     key.shadow.camera.far = 20;
     key.shadow.bias = -0.0005;
     this.scene.add(key);
+    this._key = key;   // ключевой свет с тенями — гасим в режиме оптимизации
     const rim = new THREE.DirectionalLight(0x8fb7ff, 0.8);
     rim.position.set(-3, 3, -4);
     this.scene.add(rim);
@@ -166,8 +192,9 @@ export class Arena {
     const h = this.container.clientHeight;
     if (!w || !h) return;
     // dpr может меняться (другой монитор, зум браузера, телефон) —
-    // обновляем при каждом ресайзе, иначе картинка мылится
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    // обновляем при каждом ресайзе, иначе картинка мылится. В режиме оптимизации
+    // потолок dpr ниже (this._dprCap), чтобы рисовать меньше пикселей.
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, this._dprCap));
     this.renderer.setSize(w, h, false);
     this.camera.aspect = w / h;
 
@@ -220,13 +247,107 @@ export class Arena {
     return { x: cx, y: cy, diameter: d };
   }
 
+  /**
+   * Режим оптимизации: меньше нагрев телефона и расход батареи.
+   *  - тени выключаются (самый дорогой проход на кадр);
+   *  - плотность пикселей режется до 1× (на телефоне dpr 2.5–3 → в разы меньше точек);
+   *  - кадры ограничиваются ~30 к/с (примерно вдвое меньше работы CPU/GPU).
+   */
+  setPerfMode(on) {
+    on = !!on;
+    this._perfMode = on;
+    // 1) тени
+    this.renderer.shadowMap.enabled = !on;
+    if (this._key) this._key.castShadow = !on;
+    // материалы пересобрать, чтобы шейдеры перестали/снова стали учитывать тень
+    this.scene.traverse((o) => {
+      if (o.isMesh && o.material) {
+        const mats = Array.isArray(o.material) ? o.material : [o.material];
+        for (const m of mats) m.needsUpdate = true;
+      }
+    });
+    this.renderer.shadowMap.needsUpdate = true;
+    // 2) плотность пикселей и 3) частота кадров
+    this._dprCap = on ? 1 : 2;
+    this._minFrameMs = on ? 30 : 0;   // 30мс ≈ 30 к/с при экране 60/120 Гц
+    this._resize();                   // применить новый потолок dpr
+  }
+
+  /** Снимок нагрузки для индикатора под пингом (см. main.js). */
+  getPerf() {
+    return {
+      running: this._running,
+      perfMode: this._perfMode,
+      fps: this._fps || 0,
+      cpuMs: this._cpuMs || 0,
+      gpuMs: this._timerExt ? this._gpuMs : null,
+      gpuSupported: !!this._timerExt,
+    };
+  }
+
+  /** Рендер с замером времени GPU (если доступно расширение таймера). */
+  _render() {
+    const gl = this._gl, ext = this._timerExt;
+    if (!gl || !ext) { this.renderer.render(this.scene, this.camera); return; }
+    try {
+      // забрать результат прошлого запроса, когда он готов
+      if (this._gpuQuery) {
+        const avail = gl.getQueryParameter(this._gpuQuery, gl.QUERY_RESULT_AVAILABLE);
+        const disjoint = gl.getParameter(ext.GPU_DISJOINT_EXT);
+        if (avail || disjoint) {
+          if (avail && !disjoint) {
+            this._gpuMs = gl.getQueryParameter(this._gpuQuery, gl.QUERY_RESULT) / 1e6;
+          }
+          gl.deleteQuery(this._gpuQuery);
+          this._gpuQuery = null;
+        }
+      }
+      // одновременно держим только один запрос; иначе просто рисуем
+      if (!this._gpuQuery) {
+        const q = gl.createQuery();
+        gl.beginQuery(ext.TIME_ELAPSED_EXT, q);
+        this.renderer.render(this.scene, this.camera);
+        gl.endQuery(ext.TIME_ELAPSED_EXT);
+        this._gpuQuery = q;
+      } else {
+        this.renderer.render(this.scene, this.camera);
+      }
+    } catch {
+      // таймер дал сбой — дальше рисуем без него, метрику ГП отключаем
+      if (this._gpuQuery) { try { gl.deleteQuery(this._gpuQuery); } catch {} this._gpuQuery = null; }
+      this._timerExt = null;
+      this.renderer.render(this.scene, this.camera);
+    }
+  }
+
   _tick() {
+    const now = performance.now();
+    // ограничение кадров (режим оптимизации): рано — пропускаем кадр целиком.
+    // _lastTick хранит время последнего НАРИСОВАННОГО кадра, накопленное в Clock
+    // время отдадим следующему кадру (анимация не «дёргается»).
+    if (this._minFrameMs && this._lastTick != null && (now - this._lastTick) < this._minFrameMs) {
+      return;
+    }
+    // FPS — по интервалу между фактическими кадрами (сглаживаем)
+    if (this._lastTick != null) {
+      const frameMs = now - this._lastTick;
+      if (frameMs > 0) {
+        const fps = 1000 / frameMs;
+        this._fps = this._fps ? this._fps * 0.9 + fps * 0.1 : fps;
+      }
+    }
+    this._lastTick = now;
+
+    // ЦП — время работы JS на кадр (обновление + выдача команд рендера)
+    const c0 = performance.now();
     // ограничиваем dt, чтобы возврат на вкладку не "перематывал" анимацию
     const dt = Math.min(this.clock.getDelta(), 0.05);
     if (this.fighters.left) this.fighters.left.update(dt);
     if (this.fighters.right) this.fighters.right.update(dt);
     if (this.onTick) this.onTick(dt);
-    this.renderer.render(this.scene, this.camera);
+    this._render();
+    const cpuMs = performance.now() - c0;
+    this._cpuMs = this._cpuMs ? this._cpuMs * 0.9 + cpuMs * 0.1 : cpuMs;
   }
 
   dispose() {

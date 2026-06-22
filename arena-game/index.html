@@ -294,6 +294,12 @@
       <span class="net-dot" id="net-dot"></span><span id="net-ping-val">—</span>
     </span>
     <div class="net-loadbar" id="net-loadbar"><div class="net-loadbar-fill"></div></div>
+    <!-- нагрузка ЦП/ГП под пингом (виден в бою): где упор — процессор или видео -->
+    <div class="net-perf" id="net-perf">
+      <span class="np-metric" title="Кадров в секунду"><b id="np-fps">—</b>&nbsp;fps</span>
+      <span class="np-metric" title="Нагрузка процессора: время JS на кадр, мс">ЦП&nbsp;<b id="np-cpu">—</b></span>
+      <span class="np-metric" id="np-gpu-wrap" title="Нагрузка видеоядра: время GPU на кадр, мс">ГП&nbsp;<b id="np-gpu">—</b></span>
+    </div>
   </div>
 
   <!-- гардероб (примерочная) -->
@@ -372,6 +378,16 @@
           </span>
           <span class="switch">
             <input type="checkbox" id="set-hide-sys">
+            <span class="switch-track"><span class="switch-knob"></span></span>
+          </span>
+        </label>
+        <label class="settings-row" for="set-optimize">
+          <span class="settings-row-main">
+            <span class="settings-row-name">Оптимизация</span>
+            <span class="settings-row-desc">Меньше нагрев и расход батареи: без теней, упрощённая графика, 30 к/с</span>
+          </span>
+          <span class="switch">
+            <input type="checkbox" id="set-optimize">
             <span class="switch-track"><span class="switch-knob"></span></span>
           </span>
         </label>

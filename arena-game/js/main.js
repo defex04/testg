@@ -150,6 +150,24 @@ function setHideSysChatPref(on) {
 }
 applyHideSysChat(hideSysChatPref());
 
+// --- Режим оптимизации (меньше нагрев телефона; по умолчанию выкл) -----------
+// Гасит тени бойцов, режет плотность пикселей до 1× и ограничивает кадры ~30 к/с
+// (см. Arena.setPerfMode). Класс body.perf-mode дополнительно убирает дорогое
+// размытие фона панелей. arena объявлена ниже — applyPerfMode зовём после её
+// создания, поэтому здесь только функции (предпочтение применит вызов позже).
+const PERF_KEY = 'arena.perfMode';
+const perfModePref = () => {
+  try { return localStorage.getItem(PERF_KEY) === '1'; } catch { return false; }
+};
+function applyPerfMode(on) {
+  document.body.classList.toggle('perf-mode', on);
+  if (arena) arena.setPerfMode(on);
+}
+function setPerfModePref(on) {
+  try { localStorage.setItem(PERF_KEY, on ? '1' : '0'); } catch {}
+  applyPerfMode(on);
+}
+
 // Безопасные зоны: device (safeAreaInset: вырез/статус-бар) + контентная
 // (contentSafeAreaInset: место под плавающими кнопками Telegram ✕/⋯ сверху).
 // Кладём суммой в CSS-переменные --tg-inset-* — по ним бокс игры вписывается в
@@ -205,11 +223,13 @@ function confirmExit() {
   const hintsInput = $('set-hints');
   const membersStartInput = $('set-members-start');
   const hideSysInput = $('set-hide-sys');
+  const optimizeInput = $('set-optimize');
   const open = () => {
     if (fsInput) fsInput.checked = fullscreenPref();
     if (hintsInput) hintsInput.checked = hintsPref();
     if (membersStartInput) membersStartInput.checked = membersOnStartPref();
     if (hideSysInput) hideSysInput.checked = hideSysChatPref();
+    if (optimizeInput) optimizeInput.checked = perfModePref();
     el.classList.remove('hidden');
   };
   const close = () => el.classList.add('hidden');
@@ -220,6 +240,7 @@ function confirmExit() {
   hintsInput?.addEventListener('change', () => setHintsPref(hintsInput.checked));
   membersStartInput?.addEventListener('change', () => setMembersOnStartPref(membersStartInput.checked));
   hideSysInput?.addEventListener('change', () => setHideSysChatPref(hideSysInput.checked));
+  optimizeInput?.addEventListener('change', () => setPerfModePref(optimizeInput.checked));
   $('settings-exit')?.addEventListener('click', confirmExit);
 
   // Принудительный сброс кэша: Telegram WebView держит старые index.html/js/css
@@ -320,6 +341,39 @@ let currentLoc = 'village';
 // когда экран боя станет видимым (ResizeObserver). Рендер-цикл запускается
 // только на время боя (setMode) — вне боя GPU не работает вхолостую.
 const arena = new Arena(arenaStage, { autostart: false });
+// применить сохранённый режим оптимизации к только что созданной арене
+applyPerfMode(perfModePref());
+
+// --- Индикатор нагрузки ЦП/ГП под пингом (где упор: процессор или видео) ------
+// Виден только в бою, пока крутится рендер-цикл арены. ЦП — время JS на кадр
+// (высокое → упор в процессор), ГП — время GPU на кадр (если браузер даёт таймер;
+// иначе «—»). FPS ниже потолка при низком ЦП → узкое место видео/композитинг.
+(() => {
+  const wrap = $('net-perf');
+  const fpsEl = $('np-fps'), cpuEl = $('np-cpu'), gpuEl = $('np-gpu'), gpuWrap = $('np-gpu-wrap');
+  if (!wrap || !fpsEl) return;
+  const q = (el, val) => { if (el) el.dataset.q = val; };
+  const update = () => {
+    const p = (mode === 'battle' && arena.getPerf) ? arena.getPerf() : null;
+    if (!p || !p.running) { wrap.style.display = 'none'; return; }
+    wrap.style.display = 'flex';
+    const fps = Math.round(p.fps);
+    fpsEl.textContent = fps || '—';
+    q(fpsEl, fps >= 50 ? 'good' : fps >= 28 ? 'ok' : 'bad');
+    const cpu = p.cpuMs;
+    cpuEl.textContent = Math.round(cpu) + 'мс';
+    q(cpuEl, cpu < 6 ? 'good' : cpu < 12 ? 'ok' : 'bad');
+    if (p.gpuSupported && p.gpuMs != null) {
+      if (gpuWrap) gpuWrap.style.display = '';
+      gpuEl.textContent = Math.round(p.gpuMs) + 'мс';
+      q(gpuEl, p.gpuMs < 6 ? 'good' : p.gpuMs < 12 ? 'ok' : 'bad');
+    } else if (gpuWrap) {
+      gpuWrap.style.display = 'none';   // браузер не даёт таймер GPU — прячем
+    }
+  };
+  update();
+  setInterval(update, 1000);
+})();
 
 // --- состояние UI локации ---
 let locPanelOpen = false;                 // всплывающая панель «Локация»

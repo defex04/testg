@@ -126,7 +126,6 @@ export class BattleUI {
         <div class="fighter-head">
           <span class="lvl-badge" title="Уровень">${info.level ?? '?'}</span>
           <span class="nick-wrap">
-            <span class="nick-effects"></span>
             <span class="nick">${esc(info.name)}</span>
           </span>
           <button class="info-btn" type="button" data-side="${side}"
@@ -208,7 +207,6 @@ export class BattleUI {
       enFill: q('.bar-en .bar-fill'),
       enText: q('.bar-en .bar-val'),
       name: q('.nick'),
-      nameEffects: q('.nick-effects'),
       lvl: q('.lvl-badge'),
       effects: {
         left: this.headEl.querySelector('.bh-effects-left'),
@@ -446,8 +444,6 @@ export class BattleUI {
     const host = this.refs.effects[side];
     if (!host) return;
     host.innerHTML = '';
-    if (this.refs.nameEffects?.[side])
-      this.refs.nameEffects[side].innerHTML = miniEffectsHtml(list);
     for (const e of list) {
       const chip = document.createElement('span');
       chip.className = 'effect-chip ' + (e.kind === 'debuff' ? 'debuff' : 'buff');
