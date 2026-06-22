@@ -11,9 +11,9 @@ export const BELT_SLOTS = 6;
 const err = (msg, status) => Object.assign(new Error(msg), { status });
 
 // Сколько зарядов ОДНОГО эликсира помещается в ОДНУ ячейку пояса (#1).
-// Жизнь — по одному, мощь — стопкой до 10. Шаблон может переопределить через
+// Жизнь и побег — по одному, мощь — стопкой до 10. Шаблон может переопределить через
 // base_stats.belt_max. ДОЛЖНО совпадать с клиентом (content.js ELIXIR_BELT_CAP).
-const BELT_CAP = { health: 1, power: 10 };
+const BELT_CAP = { health: 1, power: 10, escape: 1 };
 function beltCapFor(kind, baseStats) {
   const s = baseStats || {};
   if (s.belt_max != null) return Math.max(1, Number(s.belt_max) || 1);
@@ -22,12 +22,13 @@ function beltCapFor(kind, baseStats) {
 
 /**
  * Параметры боевого эликсира из шаблона (base_stats), или null, если это не
- * боевой бафф/хил (напр. Эликсир побега {escape:true} — в пояс не кладётся).
+ * боевой бафф/хил/побег.
  * Формат как в сидах: здоровье {heal:N} (абсолютное лечение), мощь
  * {power_mult:M, power_turns:T} (множитель урона на T ударов).
  */
 export function elixirParams(baseStats) {
   const s = baseStats || {};
+  if (s.escape) return { kind: 'escape' };
   if (s.heal != null) return { kind: 'health', heal: Number(s.heal) || 0 };
   if (s.power_mult != null) return { kind: 'power',
     mult: Number(s.power_mult) || 1.3, turns: Number(s.power_turns) || 3 };

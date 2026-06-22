@@ -1321,6 +1321,10 @@ body.loc-castle.in-battle .sprite-main .sm-ico {
   border-color: rgba(255, 160, 90, .6);
   box-shadow: 0 0 9px rgba(216, 120, 63, .22), inset 0 1px 0 rgba(244, 205, 111, .07);
 }
+.combat-slot.elixir.filled.kind-escape {
+  border-color: rgba(120, 205, 255, .65);
+  box-shadow: 0 0 10px rgba(90, 190, 255, .24), inset 0 1px 0 rgba(244, 205, 111, .07);
+}
 .combat-slot.elixir.filled:not(:disabled):hover { transform: translateY(-2px); }
 .combat-slot.elixir.spent { opacity: .35; filter: grayscale(.6); cursor: default; }
 .combat-slot.elixir:disabled { cursor: default; }
@@ -3197,6 +3201,10 @@ button.belt-slot { padding: 0; font: inherit; color: inherit; -webkit-tap-highli
 .belt-slot.elixir.filled.kind-power {
   border-color: var(--steel);
   box-shadow: 0 0 11px rgba(111, 179, 255, .38), var(--slot-shadow);
+}
+.belt-slot.elixir.filled.kind-escape {
+  border-color: #8edcff;
+  box-shadow: 0 0 12px rgba(90, 210, 255, .42), var(--slot-shadow);
 }
 .belt-slot.elixir.filled:not(:disabled):hover { transform: translateY(-1px); }
 .belt-slot.elixir:disabled { cursor: default; filter: saturate(.5) brightness(.72); }

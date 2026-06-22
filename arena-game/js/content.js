@@ -132,9 +132,9 @@ export const SPELL_SLOTS = 3;            // ровно 3 слота заклин
 export const ELIXIR_SLOTS = 6;           // 6 эликсиров (нижняя панель, листаются стрелками)
 
 // Сколько зарядов ОДНОГО эликсира помещается в ОДНУ ячейку пояса (#1).
-// Жизнь — по одному (сильный разовый хил), мощь — стопкой до 10.
+// Жизнь и побег — по одному, мощь — стопкой до 10.
 // ДОЛЖНО совпадать с сервером (backend/src/belt.js beltCapFor).
-export const ELIXIR_BELT_CAP = { health: 1, power: 10 };
+export const ELIXIR_BELT_CAP = { health: 1, power: 10, escape: 1 };
 export const beltCapFor = (kind) => ELIXIR_BELT_CAP[kind] ?? 1;
 
 // ---------------------------------------------------------------------------

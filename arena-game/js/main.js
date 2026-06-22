@@ -2908,7 +2908,7 @@ const battleEffects = new Map();       // fighterId -> [{ icon, time, kind, labe
 let beltLive = false;                  // можно ли использовать пояс прямо сейчас
 let beltSnapshot = null;               // состав пояса на старте боя — для автозаполнения (#2)
 
-const elixirGlyph = (kind) => (kind === 'power' ? '⚡' : '🧪');
+const elixirGlyph = (kind) => (kind === 'power' ? '⚡' : kind === 'escape' ? '🏃' : '🧪');
 
 /** Подтянуть состав пояса с сервера (сервер его помнит между сессиями). */
 async function loadBelt() {
@@ -3201,7 +3201,7 @@ function renderCombatBar() {
       const qty = cell.qty != null ? cell.qty : 1;
       const slot = document.createElement('button');
       slot.type = 'button';
-      slot.className = `combat-slot elixir filled kind-${cell.kind === 'power' ? 'power' : 'health'}`
+      slot.className = `combat-slot elixir filled kind-${cell.kind || 'health'}`
         + (onCooldown ? ' cooldown' : '');
       slot.disabled = onCooldown || !beltLive;
       slot.title = onCooldown
@@ -3321,7 +3321,7 @@ function renderDressingBelt() {
     const slot = document.createElement('button');
     slot.type = 'button';
     slot.className = 'belt-slot elixir round'
-      + (cell ? ` filled kind-${cell.kind === 'power' ? 'power' : 'health'}` : '')
+      + (cell ? ` filled kind-${cell.kind || 'health'}` : '')
       + (!cell && selectedBeltSlot === i ? ' selected' : '');
     slot.title = cell
       ? `${cell.name} ×${cell.qty != null ? cell.qty : 1} из ${cap} (клик — убрать из пояса)`
@@ -3492,7 +3492,7 @@ function invRowMeta(row) {
   const isElixir = inst ? inst.type === 4 : item.type === 'elixir';
   const ekind = isElixir
     ? (inst ? elixirKindFromStats(inst.stats) : (item.kind || null)) : null;
-  const beltable = ekind === 'health' || ekind === 'power';
+  const beltable = ekind === 'health' || ekind === 'power' || ekind === 'escape';
   const tplId = inst ? inst.templateId : null;
   const qty = inst ? (inst.quantity || 1) : 1;
   const equipped = !isElixir && !!slotName && equipState[dressingSide][slotName] === key;

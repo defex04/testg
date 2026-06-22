@@ -613,11 +613,6 @@ export async function useElixir(charId, msg = {}) {
   const me = b.engine.fighter(cid(charId));
   const p = b.players.get(cid(charId));
   if (!me || !me.alive) return false;
-  // только в свой ход выбора (как пояс на клиенте: beltLive=true лишь на своём ходу)
-  if (b.engine.phase !== 'choose' || b.engine.currentActorId() !== me.id) {
-    p?.send({ type: 'error', error: 'not_your_turn' });
-    return false;
-  }
   // ячейка пояса: шаблон + заряды (quantity). Параметры эффекта — из шаблона на
   // сервере (анти-чит), не из клиента.
   const slot = Number(msg.slot);
@@ -628,6 +623,13 @@ export async function useElixir(charId, msg = {}) {
   const params = belt && elixirParams(belt.base_stats);
   if (!params || Number(belt.quantity) <= 0) {
     p?.send({ type: 'error', error: 'belt_empty' }); return false;
+  }
+  // Хил и мощь — только в свой ход. Побег можно провести сразу: это выход из боя,
+  // а не боевое действие против цели.
+  if (params.kind !== 'escape'
+      && (b.engine.phase !== 'choose' || b.engine.currentActorId() !== me.id)) {
+    p?.send({ type: 'error', error: 'not_your_turn' });
+    return false;
   }
   // нельзя пить эликсир мощи, пока его усиление ещё действует (тот же эффект)
   if (params.kind === 'power' && me.buffTurns > 0) {
@@ -675,6 +677,12 @@ export async function useElixir(charId, msg = {}) {
     }
     p?.send({ type: 'error', error: e.message || 'no_elixir' });
     return false;
+  }
+
+  if (params.kind === 'escape') {
+    broadcastElixir(b, me, me, { kind: 'escape', slot, slotQty });
+    await escapeFighter(b, cid(charId));
+    return true;
   }
 
   // цель эффекта: выбранный в ростере союзник или себя (своя сторона, живой)
