@@ -7,8 +7,13 @@ import { sendChat, sendPersonal, sendPrivate, subscribeChat, subscribePrivate } 
 import { redis, redisSub } from './db.js';
 
 const MAIL_NOTIFY = (id) => `mail.notify.${id}`;
-const configuredPresenceGrace = Number(process.env.PRESENCE_GRACE_MS);
-const PRESENCE_GRACE_MS = Number.isFinite(configuredPresenceGrace) ? configuredPresenceGrace : 0;
+const configuredCloseGrace = Number(
+  process.env.PRESENCE_CLOSE_GRACE_MS ?? process.env.PRESENCE_GRACE_MS);
+const configuredHiddenGrace = Number(process.env.PRESENCE_HIDDEN_GRACE_MS);
+const PRESENCE_CLOSE_GRACE_MS = Number.isFinite(configuredCloseGrace)
+  ? configuredCloseGrace : 30_000;
+const PRESENCE_HIDDEN_GRACE_MS = Number.isFinite(configuredHiddenGrace)
+  ? configuredHiddenGrace : 60_000;
 
 /**
  * Один WebSocket на клиента: бой + чат + присутствие.
@@ -19,12 +24,35 @@ export function createHub(server) {
   const wss = new WebSocketServer({ server, path: '/ws' });
   const byChar = new Map();
 
-  async function forgetPresence(ch, conn) {
+  function clearOfflineTimer(conn) {
+    if (conn.offlineTimer) clearTimeout(conn.offlineTimer);
+    conn.offlineTimer = null;
+  }
+
+  async function forgetPresence(ch, conn, { close = false } = {}) {
     if (byChar.get(String(ch.id)) !== conn) return;
+    clearOfflineTimer(conn);
     byChar.delete(String(ch.id));
     battle.detach(ch.id);
-    const me = await getCharacter(ch.id);
-    await leavePresence(me).catch(() => {});
+    if (conn.presenceOnline) {
+      conn.presenceOnline = false;
+      const me = await getCharacter(ch.id);
+      await leavePresence(me).catch(() => {});
+    }
+    if (close && conn.ws.readyState === 1) {
+      try { conn.ws.close(4001, 'presence_timeout'); } catch { /* already gone */ }
+    }
+  }
+
+  function scheduleOffline(ch, conn, ms, opts = {}) {
+    clearOfflineTimer(conn);
+    if (ms <= 0) {
+      forgetPresence(ch, conn, opts).catch(() => {});
+      return;
+    }
+    conn.offlineTimer = setTimeout(() => {
+      forgetPresence(ch, conn, opts).catch(() => {});
+    }, ms);
   }
 
   subscribeChat((msg) => {
@@ -68,9 +96,11 @@ export function createHub(server) {
       if (ws.readyState === 1) ws.send(JSON.stringify(o));
     } catch { /* сокет умер — бой продолжается без зрителя */ } };
     const conn = { ws, locId: ch.location_id, send, intentionalClose: false,
-      offlineTimer: null };
+      hidden: false, closeGraceMs: PRESENCE_CLOSE_GRACE_MS,
+      presenceOnline: false, offlineTimer: null };
     byChar.set(String(ch.id), conn);
     await enterLocation(ch);
+    conn.presenceOnline = true;
 
     send({ type: 'hello', character: ch });
     const resume = battle.attach(ch.id, send);   // идущий бой возвращается после F5
@@ -111,7 +141,25 @@ export function createHub(server) {
           case 'leaveBattle': battle.leaveBattle(ch.id); break;  // бросит cannot_leave
           case 'clientClose':
             conn.intentionalClose = true;
+            conn.hidden = false;
+            conn.closeGraceMs = PRESENCE_CLOSE_GRACE_MS;
+            scheduleOffline(ch, conn, PRESENCE_CLOSE_GRACE_MS);
             ws.close(1000, 'client_close');
+            break;
+          case 'visibility':
+            if (m.hidden) {
+              conn.hidden = true;
+              conn.closeGraceMs = PRESENCE_HIDDEN_GRACE_MS;
+              scheduleOffline(ch, conn, PRESENCE_HIDDEN_GRACE_MS, { close: true });
+            } else {
+              conn.hidden = false;
+              conn.closeGraceMs = PRESENCE_CLOSE_GRACE_MS;
+              clearOfflineTimer(conn);
+              if (!conn.presenceOnline) {
+                await enterLocation(await getCharacter(ch.id));
+                conn.presenceOnline = true;
+              }
+            }
             break;
           case 'chat': {
             const me = await getCharacter(ch.id);
@@ -141,15 +189,7 @@ export function createHub(server) {
     ws.on('close', async () => {
       if (byChar.get(String(ch.id)) === conn) {
         battle.detach(ch.id);                    // НЕ прерываем бой
-        if (conn.intentionalClose) {
-          await forgetPresence(ch, conn);
-        } else if (PRESENCE_GRACE_MS > 0) {
-          conn.offlineTimer = setTimeout(() => {
-            forgetPresence(ch, conn).catch(() => {});
-          }, PRESENCE_GRACE_MS);
-        } else {
-          await forgetPresence(ch, conn);
-        }
+        if (!conn.offlineTimer) scheduleOffline(ch, conn, conn.closeGraceMs);
       }
     });
   });

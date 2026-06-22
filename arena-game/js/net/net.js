@@ -22,6 +22,21 @@ let genericErrorCb = null;   // ошибки вне боя (чат/личка) �
 let socketCloseIntent = false;
 let reconnectTimer = null;
 let reconnectDelay = 1000;
+let visibleReconnectBusy = false;
+let pageShowSeen = false;
+
+function socketOpen() {
+  return socket && socket.readyState === WebSocket.OPEN;
+}
+
+function socketActive() {
+  return socket && (socket.readyState === WebSocket.OPEN
+    || socket.readyState === WebSocket.CONNECTING);
+}
+
+function reconnectPaused() {
+  return document.hidden;
+}
 
 function sendWs(payload) {
   if (socket && socket.readyState === WebSocket.OPEN) {
@@ -34,10 +49,58 @@ function sendWs(payload) {
 
 function gracefulCloseSocket() {
   socketCloseIntent = true;
-  try { sendWs({ type: 'clientClose' }); } catch { /* page is closing */ }
+  try {
+    if (socketOpen()) socket.send(JSON.stringify({ type: 'clientClose' }));
+    if (socket) socket.close(1000, 'page_close');
+  } catch { /* page is closing */ }
 }
 
 window.addEventListener('beforeunload', gracefulCloseSocket);
+window.addEventListener('pagehide', (e) => {
+  if (!e.persisted) gracefulCloseSocket();
+});
+
+function sendVisibility(hidden) {
+  try {
+    if (socketOpen()) socket.send(JSON.stringify({ type: 'visibility', hidden }));
+  } catch { /* reconnect path will handle it */ }
+}
+
+async function reconnectWhenVisible() {
+  if (!token || reconnectPaused() || visibleReconnectBusy) return;
+  if (socketActive()) {
+    sendVisibility(false);
+    return;
+  }
+  visibleReconnectBusy = true;
+  socketCloseIntent = false;
+  try {
+    await connectSocket();
+    sendVisibility(false);
+    await checkResumeBattle();
+  } catch (e) {
+    scheduleReconnect();
+  } finally {
+    visibleReconnectBusy = false;
+  }
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
+    sendVisibility(true);
+  } else reconnectWhenVisible();
+});
+window.addEventListener('pageshow', () => {
+  if (!pageShowSeen) {
+    pageShowSeen = true;
+    return;
+  }
+  if (!document.hidden) reconnectWhenVisible();
+});
 
 async function rest(path, body) {
   const r = await fetch(API + path, {
@@ -172,9 +235,10 @@ function connectSocket() {
 }
 
 function scheduleReconnect() {
-  if (!token || socketCloseIntent || reconnectTimer) return;
+  if (!token || socketCloseIntent || reconnectTimer || reconnectPaused()) return;
   reconnectTimer = setTimeout(async () => {
     reconnectTimer = null;
+    if (reconnectPaused()) return;
     try {
       await connectSocket();
       await checkResumeBattle();

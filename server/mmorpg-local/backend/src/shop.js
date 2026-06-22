@@ -72,7 +72,7 @@ export async function buyShopItem(charId, templateId, quantity) {
     const row = (await c.query(
       `SELECT id, name, icon, type, stackable, base_stats, price, sellable
          FROM item_templates
-        WHERE id = $1 AND id = ANY($2::int[]) FOR SHARE`,
+        WHERE id = $1 AND id = ANY($2::int[])`,
       [tplId, SHOP_ELIXIRS])).rows[0];
     if (!row || row.type !== 4 || row.sellable === false) throw err('not_for_sale', 404);
     const price = Number(row.price) || 0;
