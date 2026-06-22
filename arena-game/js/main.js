@@ -15,7 +15,7 @@ import { Arena } from './arena/Arena.js';
 import { api, ServerBattle } from './net/net.js';
 import { BattleUI } from './arena/BattleUI.js';
 import { DressingRoom } from './arena/DressingRoom.js';
-import { FIGHTERS, LOCATIONS, ITEMS, SLOT_META, SPELLS, SPELL_SLOTS, ELIXIR_SLOTS } from './content.js';
+import { FIGHTERS, LOCATIONS, ITEMS, SLOT_META, SPELLS, SPELL_SLOTS, ELIXIR_SLOTS, beltCapFor } from './content.js';
 
 // ---------------------------------------------------------------------------
 // Утилиты и состояние игрока
@@ -168,6 +168,15 @@ function setPerfModePref(on) {
   applyPerfMode(on);
 }
 
+// --- Автозаполнение пояса эликсиров после боя (по умолчанию выкл) ------------
+const BELT_AUTOFILL_KEY = 'arena.beltAutofill';
+const beltAutofillPref = () => {
+  try { return localStorage.getItem(BELT_AUTOFILL_KEY) === '1'; } catch { return false; }
+};
+function setBeltAutofillPref(on) {
+  try { localStorage.setItem(BELT_AUTOFILL_KEY, on ? '1' : '0'); } catch {}
+}
+
 // Безопасные зоны: device (safeAreaInset: вырез/статус-бар) + контентная
 // (contentSafeAreaInset: место под плавающими кнопками Telegram ✕/⋯ сверху).
 // Кладём суммой в CSS-переменные --tg-inset-* — по ним бокс игры вписывается в
@@ -224,12 +233,14 @@ function confirmExit() {
   const membersStartInput = $('set-members-start');
   const hideSysInput = $('set-hide-sys');
   const optimizeInput = $('set-optimize');
+  const beltAutofillInput = $('set-belt-autofill');
   const open = () => {
     if (fsInput) fsInput.checked = fullscreenPref();
     if (hintsInput) hintsInput.checked = hintsPref();
     if (membersStartInput) membersStartInput.checked = membersOnStartPref();
     if (hideSysInput) hideSysInput.checked = hideSysChatPref();
     if (optimizeInput) optimizeInput.checked = perfModePref();
+    if (beltAutofillInput) beltAutofillInput.checked = beltAutofillPref();
     el.classList.remove('hidden');
   };
   const close = () => el.classList.add('hidden');
@@ -241,6 +252,7 @@ function confirmExit() {
   membersStartInput?.addEventListener('change', () => setMembersOnStartPref(membersStartInput.checked));
   hideSysInput?.addEventListener('change', () => setHideSysChatPref(hideSysInput.checked));
   optimizeInput?.addEventListener('change', () => setPerfModePref(optimizeInput.checked));
+  beltAutofillInput?.addEventListener('change', () => setBeltAutofillPref(beltAutofillInput.checked));
   $('settings-exit')?.addEventListener('click', confirmExit);
 
   // Принудительный сброс кэша: Telegram WebView держит старые index.html/js/css
@@ -607,6 +619,7 @@ function setMode(next) {
     t.classList.toggle('hidden', !battle));
   // 3D-рендер работает только в бою
   if (battle) arena.start(); else arena.stop();
+  if (!battle) hideEffectPreview();   // не оставлять превью эффекта поверх локации (#8)
   closeLocPanel();
   closeBattlesPanel();
   // в бою открываем стартовое окно, если оно задано (настройка «Участники при
@@ -859,8 +872,10 @@ async function initBattle(resumedBattle = null, starter = null, pvpTarget = null
     },
     onInfo: (side) => showFighterInfo(side),
     onMemberInfo: (id) => showMemberInfo(id),
+    onEffectInfo: (eff) => showEffectPreview(eff),   // превью эффекта в окне боя (#8)
   });
   await loadBelt();                // состав пояса с сервера (он его помнит)
+  beltSnapshot = snapshotBelt();   // запомнить состав — для автозаполнения после боя (#2)
   resetElixirBattle();             // эффекты с нуля; пояс уже загружен
   lastTurnShown = 0;
   currentFocusId = battle.focus ? (battle.focus.id ?? null) : null;
@@ -975,7 +990,9 @@ async function initBattle(resumedBattle = null, starter = null, pvpTarget = null
     } else if (d.kind === 'power') {
       const pct = Math.round((d.mult - 1) * 100);
       if (side === 'left') selfBuffPct = pct;
-      ui.popup(pos, `Мощь +${pct}%`, 'crit');
+      // отдельный компактный стиль: текст «Мощь +N%» длиннее цифры урона и в
+      // 'crit' (36px) вылезал за край сцены (#0)
+      ui.popup(pos, `Мощь +${pct}%`, 'buff');
     }
     if (side === 'left') selfBuffTurns = d.buffTurns || 0;
     refreshSelfEffects();
@@ -996,6 +1013,8 @@ async function initBattle(resumedBattle = null, starter = null, pvpTarget = null
       // деньги, опыт и задания начислил сервер — просто обновляем шапку
       api.me().then(applyCharacter).catch(console.error);
     }
+    // долить пояс из рюкзака, если включено автозаполнение (#2)
+    autofillBeltAfterBattle().catch(console.error);
     ui.showEnd(victory, { onLeave: () => leaveBattle(true) });
   });
 
@@ -2758,6 +2777,7 @@ let selfBuffTurns = 0;                 // оставшиеся усиленны�
 let selfBuffPct = 0;                   // прибавка урона «Эликсира мощи», %
 const battleEffects = new Map();       // fighterId -> [{ icon, time, kind, label }]
 let beltLive = false;                  // можно ли использовать пояс прямо сейчас
+let beltSnapshot = null;               // состав пояса на старте боя — для автозаполнения (#2)
 
 const elixirGlyph = (kind) => (kind === 'power' ? '⚡' : '🧪');
 
@@ -2766,6 +2786,54 @@ async function loadBelt() {
   if (!online || !api.belt) return;
   try { elixirBelt = await api.belt(); } catch (e) { console.warn('Пояс эликсиров:', e); }
 }
+
+/** Снимок состава пояса: какая ячейка какой эликсир держала (для восстановления). */
+function snapshotBelt() {
+  return elixirBelt.map((c) => c ? { slot: c.slot, templateId: c.templateId } : null);
+}
+
+/**
+ * Автозаполнение пояса после боя (#2): возвращаем в каждую ячейку тот же эликсир,
+ * что стоял до боя, и доливаем до лимита из рюкзака. Сервер — судья лимитов и
+ * наличия (стоп по not_enough/slot_occupied/belt_full). Адресная вставка по слоту
+ * восстанавливает прежнюю раскладку, даже если ячейка опустела за бой.
+ */
+async function autofillBeltAfterBattle() {
+  if (!beltAutofillPref() || !online || !api.belt || !beltSnapshot) return;
+  try {
+    await loadBelt();   // актуальный остаток после боя
+    for (const snap of beltSnapshot) {
+      if (!snap) continue;
+      for (let n = 0; n < 24; n++) {             // потолок с запасом под мощь ×10
+        try { elixirBelt = await api.beltEquip(snap.templateId, snap.slot); }
+        catch { break; }                          // в рюкзаке пусто / ячейка заполнена
+      }
+    }
+  } catch (e) { console.warn('Автозаполнение пояса:', e); }
+}
+
+/** Превью эффекта по тапу на его значок в окне боя (#8). */
+function showEffectPreview(eff) {
+  if (!eff || !fxPreviewEl || !fxPreviewCardEl) return;
+  const rows = [];
+  if (eff.label) rows.push(['Эффект', eff.label]);
+  rows.push(['Вид', eff.kind === 'debuff' ? 'Ослабление' : 'Усиление']);
+  if (eff.time != null && eff.time !== '') rows.push(['Осталось', eff.time + ' х.']);
+  fxPreviewCardEl.className = 'fx-preview-card ' + (eff.kind === 'debuff' ? 'debuff' : 'buff');
+  fxPreviewCardEl.innerHTML = `
+    <div class="fx-head"><span class="fx-ico">${esc(eff.icon || '✦')}</span>
+      <button type="button" class="fx-close" title="Закрыть">✕</button></div>
+    <div class="fx-rows">${rows.map(([k, v]) =>
+      `<div class="fx-row"><span>${esc(k)}</span><b>${esc(String(v))}</b></div>`).join('')}</div>`;
+  fxPreviewCardEl.querySelector('.fx-close').addEventListener('click', hideEffectPreview);
+  fxPreviewEl.classList.remove('hidden');
+}
+function hideEffectPreview() { fxPreviewEl?.classList.add('hidden'); }
+
+const fxPreviewEl = $('fx-preview');
+const fxPreviewCardEl = $('fx-preview-card');
+// тап вне карточки превью эффекта — закрыть (#8)
+fxPreviewEl?.addEventListener('click', (e) => { if (e.target === fxPreviewEl) hideEffectPreview(); });
 
 const combatBarEl = $('combat-bar');
 const spellSlotsEl = $('spell-slots');
@@ -3111,26 +3179,36 @@ function useElixir(i) {
   ui.log(`<b>${esc(battle.sides.left.name)}</b> выпивает «${esc(cell.name)}»…`);
 }
 
-/** Пояс в гардеробе: пряжка + все ячейки; клик по заполненной — убрать. */
+/** Пояс в гардеробе: пряжка + все ячейки. Клик по заполненной — убрать; клик
+ *  по пустой — выбрать её для адресной вставки эликсира из рюкзака (#4). */
 function renderDressingBelt() {
   if (!dressingBeltEl) return;
+  // выбор живёт только пока ячейка пуста (после заливки сбрасываем)
+  if (selectedBeltSlot != null && elixirBelt[selectedBeltSlot]) selectedBeltSlot = null;
   dressingBeltEl.innerHTML = '<span class="belt-buckle" aria-hidden="true"></span>';
   for (let i = 0; i < ELIXIR_SLOTS; i++) {
     const cell = elixirBelt[i];
+    const cap = cell ? beltCapFor(cell.kind) : 0;
     const slot = document.createElement('button');
     slot.type = 'button';
     slot.className = 'belt-slot elixir round'
-      + (cell ? ` filled kind-${cell.kind === 'power' ? 'power' : 'health'}` : '');
+      + (cell ? ` filled kind-${cell.kind === 'power' ? 'power' : 'health'}` : '')
+      + (!cell && selectedBeltSlot === i ? ' selected' : '');
     slot.title = cell
-      ? `${cell.name}${cell.qty != null ? ' ×' + cell.qty : ''} (клик — убрать из пояса)`
-      : 'Пустая ячейка — добавьте эликсир кнопкой «В пояс»';
+      ? `${cell.name} ×${cell.qty != null ? cell.qty : 1} из ${cap} (клик — убрать из пояса)`
+      : (selectedBeltSlot === i
+          ? `Ячейка ${i + 1} выбрана — нажмите эликсир в рюкзаке`
+          : `Пустая ячейка ${i + 1} — выберите для вставки эликсира`);
     slot.innerHTML = cell
       ? `<span class="bs-ico">${elixirGlyph(cell.kind)}</span>`
         + `<span class="bs-qty">${cell.qty != null ? cell.qty : 1}</span>`
       : FLASK_SVG;
     slot.addEventListener('click', () => {
-      if (!cell) { showToast('Добавьте эликсир из рюкзака кнопкой «В пояс»'); return; }
-      removeElixirFromBelt(i);
+      if (cell) { removeElixirFromBelt(i); return; }
+      selectedBeltSlot = selectedBeltSlot === i ? null : i;
+      renderDressingBelt();
+      renderInventory();   // обновить подпись кнопки «В ячейку N» в превью
+      if (selectedBeltSlot != null) showToast(`Ячейка ${i + 1} выбрана — нажмите эликсир`);
     });
     dressingBeltEl.appendChild(slot);
   }
@@ -3145,17 +3223,19 @@ async function removeElixirFromBelt(slot) {
   renderInventory();
 }
 
-/** Надеть один заряд эликсира (по templateId). Размещение выбирает сервер:
- *  мощь копит в стопку одной ячейки, жизнь занимает новый слот. Нельзя надеть
- *  больше, чем лежит в рюкзаке (сервер вернёт not_enough). */
-async function addElixirToBelt(templateId) {
+/** Надеть один заряд эликсира (по templateId). slot задан (#4) — кладём именно
+ *  в эту ячейку; иначе сервер доливает свою стопку до лимита, иначе занимает
+ *  свободную (#1). Нельзя надеть больше, чем лежит в рюкзаке (сервер — судья). */
+async function addElixirToBelt(templateId, slot = null) {
   if (!online) { showToast('Пояс требует подключения к серверу'); return; }
   if (templateId == null) return;
-  try { elixirBelt = await api.beltEquip(templateId); }
+  try { elixirBelt = await api.beltEquip(templateId, slot); }
   catch (e) {
     const msg = { belt_full: 'Пояс эликсиров заполнен',
       not_enough: 'Больше нет в рюкзаке — нечего надеть',
-      not_owned: 'Этого эликсира нет в рюкзаке' }[e.message];
+      not_owned: 'Этого эликсира нет в рюкзаке',
+      slot_occupied: 'Ячейка занята или заполнена доверху',
+      bad_slot: 'Неверная ячейка пояса' }[e.message];
     showToast(msg || ('Не добавить в пояс: ' + e.message));
   }
   renderDressingBelt();
@@ -3168,8 +3248,27 @@ async function addElixirToBelt(templateId) {
 
 const dressingEl = $('dressing');
 const dressingItemsEl = $('dressing-items');
+const invTabsEl = $('inv-tabs');
+const invGridEl = $('inv-grid');
+const invPreviewEl = $('inv-preview');
 const dressing = new DressingRoom($('dressing-view'));
 const dressingSide = 'left';   // одевать можно только себя
+
+// Рюкзак: категория (вещи/эликсиры/разное), выбранная ячейка-превью и выбранная
+// ячейка пояса (для адресной вставки эликсира — #4).
+let invCategory = 'gear';            // 'gear' | 'elixir' | 'misc'
+let selectedInvId = null;            // id строки рюкзака, открытой в превью
+let selectedBeltSlot = null;         // выбранная ячейка пояса (вставить эликсир сюда)
+
+// вкладки категорий рюкзака
+invTabsEl?.querySelectorAll('.inv-tab').forEach((b) => {
+  b.addEventListener('click', () => {
+    invCategory = b.dataset.cat;
+    selectedInvId = null;            // смена категории закрывает превью
+    selectedSlot = null;             // и снимает подсветку слота куклы
+    renderInventory();
+  });
+});
 
 // Сворачивание Mini App / гашение экрана: явно гасим WebGL-циклы (арена +
 // примерочная), чтобы фоновая вкладка не жгла GPU/батарею. На возврате
@@ -3236,8 +3335,9 @@ function renderDoll() {
           toggleDressingEquip(key);
         } else {                          // пусто — подсветить подходящие вещи
           selectedSlot = selectedSlot === slot ? null : slot;
+          selectedInvId = null;
           renderDressingUI();
-          if (selectedSlot && !dressingItemsEl.querySelector('.inv-item.match')) {
+          if (selectedSlot && !invGridEl.querySelector('.inv-cell.match')) {
             showToast(`Нет вещей в слот «${meta.name}»`);
           }
         }
@@ -3247,97 +3347,135 @@ function renderDoll() {
   }
 }
 
+/** Строки рюкзака. Фейковые демо-вещи больше не подмешиваем (#3): онлайн —
+ *  только серверный рюкзак; оффлайн (демо без сервера) — набор из ITEMS. */
+function invRows() {
+  return online && serverInv.length
+    ? serverInv.map((it) => ({ id: 'srv' + it.id, key: itemKeyFor(it), inst: it }))
+    : Object.keys(ITEMS).map((key) => ({ id: key, key, inst: null }));
+}
+
+/** Разбор строки рюкзака: вещь/эликсир, слот, вид, заряды, категория (#5). */
+function invRowMeta(row) {
+  const { key, inst } = row;
+  const item = ITEMS[key] || { name: inst.name, icon: '📦', slot: slotNameFor(inst.slot) };
+  const slotName = inst ? slotNameFor(inst.slot) : item.slot;
+  const isElixir = inst ? inst.type === 4 : item.type === 'elixir';
+  const ekind = isElixir
+    ? (inst ? elixirKindFromStats(inst.stats) : (item.kind || null)) : null;
+  const beltable = ekind === 'health' || ekind === 'power';
+  const tplId = inst ? inst.templateId : null;
+  const qty = inst ? (inst.quantity || 1) : 1;
+  const equipped = !isElixir && !!slotName && equipState[dressingSide][slotName] === key;
+  // категории рюкзака: вещи (надеваются) · эликсиры · разное
+  const category = isElixir ? 'elixir' : (slotName ? 'gear' : 'misc');
+  return { item, slotName, isElixir, ekind, beltable, tplId, qty, equipped, category };
+}
+
+const INV_EMPTY_TEXT = { gear: 'Нет вещей', elixir: 'Нет эликсиров', misc: 'Здесь пусто' };
+
+/** Рюкзак: сетка квадратиков по выбранной категории + превью (#5, #6, #7). */
 function renderInventory() {
-  dressingItemsEl.innerHTML = '';
-  // онлайн: каждая вещь рюкзака с сервера — отдельная строка (включая
-  // дубликаты и предметы без 3D) + локальные демо-вещи (для примерки 3D) в конце.
-  // Демо-ЭЛИКСИРЫ исключаем: пояс ведёт сервер, у них нет templateId, и кнопка
-  // «В пояс» висела бы вечно неактивной — игрок думал, что эликсиры не надеть (#1).
-  // Оффлайн — весь набор из ITEMS.
-  const demoRows = Object.keys(ITEMS)
-    .filter((k) => ITEMS[k].demo && ITEMS[k].type !== 'elixir')
-    .map((key) => ({ key, inst: null }));
-  const rows = online && serverInv.length
-    ? [...serverInv.map((it) => ({ key: itemKeyFor(it), inst: it })), ...demoRows]
-    : Object.keys(ITEMS).map((key) => ({ key, inst: null }));
-  for (const { key, inst } of rows) {
-    const item = ITEMS[key]
-      || { name: inst.name, icon: '📦', slot: slotNameFor(inst.slot) };
-    const slotName = inst ? slotNameFor(inst.slot) : item.slot;
-    const equipped = !!slotName && equipState[dressingSide][slotName] === key;
-    const row = document.createElement('div');
-    row.className = 'inv-item';
-    // выбран пустой слот куклы: подходящие вещи подсвечиваются, прочие гаснут
-    if (selectedSlot) {
-      row.classList.add(slotName === selectedSlot ? 'match' : 'dim');
-    }
-    const head = document.createElement('div');
-    head.className = 'inv-item-head';
-    const icon = document.createElement('span');
-    icon.className = 'inv-icon';
-    icon.textContent = item.icon || '📦';
-    const name = document.createElement('span');
-    name.className = 'inv-name';
-    name.textContent = item.name
-      + (inst && inst.quantity > 1 ? ` ×${inst.quantity}` : '');
-    head.append(icon, name);
-    // эликсир определяем по серверному типу (item_templates.type === 4),
-    // иначе — по демо-конфигу ITEMS
-    const isElixir = inst ? inst.type === 4 : item.type === 'elixir';
-    // вид эликсира (по base_stats / демо-конфигу): мощь и жизнь идут в пояс,
-    // эликсир побега (escape) в пояс не кладётся — он для выхода из боя
-    const ekind = isElixir
-      ? (inst ? elixirKindFromStats(inst.stats) : (item.kind || null)) : null;
-    const beltable = ekind === 'health' || ekind === 'power';
-    const tplId = inst ? inst.templateId : null;
-    if (isElixir) {                   // бейдж: куда годится эликсир
-      const badge = document.createElement('span');
-      badge.className = 'inv-slot';
-      badge.textContent = beltable ? 'Пояс' : 'Побег';
-      head.appendChild(badge);
-    } else if (slotName) {            // бейдж слота: понятно, куда вещь надевается
-      const badge = document.createElement('span');
-      badge.className = 'inv-slot';
-      badge.textContent = SLOT_META[slotName]?.name || slotName;
-      head.appendChild(badge);
-    }
-    const actions = document.createElement('div');
-    actions.className = 'inv-actions';
-    if (beltable) {                   // эликсир — кнопка «В пояс» (сервер помнит пояс)
-      // надето = сумма зарядов шаблона по всем ячейкам; есть = сколько в рюкзаке.
-      // Нельзя надеть больше, чем есть (#4). Мощь копится в стопку (можно без
-      // свободной ячейки), жизнь занимает новый слот — поэтому ей нужна свободная.
-      const reserved = tplId != null
-        ? elixirBelt.reduce((n, c) => c && c.templateId === tplId ? n + (c.qty || 0) : n, 0)
-        : 0;
-      const owned = tplId != null
-        ? serverInv.reduce((n, it) => it.templateId === tplId ? n + (it.quantity || 0) : n, 0)
-        : 0;
-      const canStack = tplId != null
-        && elixirBelt.some((c) => c && c.templateId === tplId && c.kind === 'power');
-      const noFreeSlot = elixirBelt.every((c) => c !== null);
-      const b = document.createElement('button');
-      b.type = 'button';
-      b.className = 'inv-btn';
-      b.disabled = !online || tplId == null || reserved >= owned
-        || (noFreeSlot && !canStack);
-      b.textContent = reserved ? `В пояс (×${reserved})` : 'В пояс';
-      b.addEventListener('click', () => addElixirToBelt(tplId));
-      actions.appendChild(b);
-    } else if (slotName) { // вещь надевается — кнопка «Надеть/Снять»
-      const b = document.createElement('button');
-      b.type = 'button';
-      b.className = 'inv-btn' + (equipped ? ' equipped' : '');
-      b.disabled = dressingBusy;
-      b.textContent = dressingBusy ? 'Загрузка…' : (equipped ? 'Снять' : 'Надеть');
-      b.addEventListener('click', () => {
-        selectedSlot = null;
-        toggleDressingEquip(key);
-      });
-      actions.appendChild(b);
-    }
-    row.append(head, actions);
-    dressingItemsEl.appendChild(row);
+  if (!invGridEl) return;
+  const rows = invRows().map((r) => ({ ...r, meta: invRowMeta(r) }));
+  // выбран пустой слот куклы → смотрим «Вещи» с подсветкой подходящих
+  const effCat = selectedSlot ? 'gear' : invCategory;
+  invTabsEl?.querySelectorAll('.inv-tab').forEach((b) =>
+    b.classList.toggle('active', b.dataset.cat === effCat));
+
+  const shown = rows.filter((r) => r.meta.category === effCat);
+  if (!shown.some((r) => r.id === selectedInvId)) selectedInvId = null;
+
+  invGridEl.innerHTML = '';
+  if (!shown.length) {
+    const empty = document.createElement('div');
+    empty.className = 'inv-empty';
+    empty.textContent = INV_EMPTY_TEXT[effCat] || 'Пусто';
+    invGridEl.appendChild(empty);
+  }
+  for (const r of shown) {
+    const { item, slotName, qty, equipped } = r.meta;
+    const cell = document.createElement('button');
+    cell.type = 'button';
+    cell.className = 'inv-cell' + (equipped ? ' equipped' : '')
+      + (selectedInvId === r.id ? ' selected' : '');
+    // выбран пустой слот куклы: подходящие подсвечиваем, прочие гасим
+    if (selectedSlot) cell.classList.add(slotName === selectedSlot ? 'match' : 'dim');
+    cell.title = item.name + (qty > 1 ? ` ×${qty}` : '');
+    cell.innerHTML = `<span class="inv-cell-ico">${item.icon || '📦'}</span>`
+      + (qty > 1 ? `<span class="inv-cell-qty">${qty}</span>` : '')
+      + (equipped ? '<span class="inv-cell-on" title="Надето">✓</span>' : '');
+    cell.addEventListener('click', () => {
+      selectedInvId = selectedInvId === r.id ? null : r.id;
+      renderInventory();
+    });
+    invGridEl.appendChild(cell);
+  }
+  renderInvPreview(shown.find((r) => r.id === selectedInvId) || null);
+}
+
+/** Превью выбранного предмета: иконка, инфо, кнопка действия (#7). */
+function renderInvPreview(row) {
+  if (!invPreviewEl) return;
+  if (!row) { invPreviewEl.classList.add('hidden'); invPreviewEl.innerHTML = ''; return; }
+  const { item, slotName, isElixir, ekind, beltable, tplId, qty, equipped } = row.meta;
+  const rows = [];
+  if (isElixir) {
+    rows.push(['Тип', beltable ? 'Боевой эликсир' : 'Эликсир']);
+    rows.push(['Действие', ekind === 'health' ? 'Восстановить здоровье'
+      : ekind === 'power' ? 'Усилить урон'
+      : ekind === 'escape' ? 'Покинуть бой' : '—']);
+    if (beltable) rows.push(['В ячейку', 'до ' + beltCapFor(ekind) + ' шт']);
+  } else if (slotName) {
+    rows.push(['Слот', SLOT_META[slotName]?.name || slotName]);
+  }
+  rows.push(['В рюкзаке', '×' + qty]);
+
+  invPreviewEl.classList.remove('hidden');
+  invPreviewEl.innerHTML = `
+    <div class="ip-head">
+      <span class="ip-ico">${item.icon || '📦'}</span>
+      <span class="ip-name">${esc(item.name)}</span>
+      <button type="button" class="ip-close" title="Закрыть">✕</button>
+    </div>
+    <div class="ip-rows">${rows.map(([k, v]) =>
+      `<div class="ip-row"><span>${esc(k)}</span><b>${esc(String(v))}</b></div>`).join('')}</div>
+    <div class="ip-actions"></div>`;
+  invPreviewEl.querySelector('.ip-close').addEventListener('click', () => {
+    selectedInvId = null; renderInventory();
+  });
+
+  const actions = invPreviewEl.querySelector('.ip-actions');
+  if (beltable) {
+    const reserved = tplId != null
+      ? elixirBelt.reduce((n, c) => c && c.templateId === tplId ? n + (c.qty || 0) : n, 0) : 0;
+    const owned = tplId != null
+      ? serverInv.reduce((n, it) => it.templateId === tplId ? n + (it.quantity || 0) : n, 0) : 0;
+    const cap = beltCapFor(ekind);
+    // куда поместится: выбранная ячейка (пустая/своя ниже лимита) ИЛИ авторазмещение
+    const fitsSelected = selectedBeltSlot != null && (() => {
+      const c = elixirBelt[selectedBeltSlot];
+      return !c || (c.templateId === tplId && (c.qty || 0) < cap);
+    })();
+    const fitsAuto = elixirBelt.some((c) => !c)
+      || elixirBelt.some((c) => c && c.templateId === tplId && (c.qty || 0) < cap);
+    const fits = selectedBeltSlot != null ? fitsSelected : fitsAuto;
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'ip-btn';
+    b.disabled = !online || tplId == null || reserved >= owned || !fits;
+    b.textContent = selectedBeltSlot != null ? `В ячейку ${selectedBeltSlot + 1}`
+      : (reserved ? `В пояс (×${reserved})` : 'В пояс');
+    b.addEventListener('click', () => addElixirToBelt(tplId, selectedBeltSlot));
+    actions.appendChild(b);
+  } else if (slotName && !isElixir) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'ip-btn' + (equipped ? ' equipped' : '');
+    b.disabled = dressingBusy;
+    b.textContent = dressingBusy ? 'Загрузка…' : (equipped ? 'Снять' : 'Надеть');
+    b.addEventListener('click', () => { selectedSlot = null; toggleDressingEquip(row.key); });
+    actions.appendChild(b);
   }
 }
 
@@ -3347,6 +3485,8 @@ async function openDressing() {
   dressing.start();
   dressingBusy = true;
   selectedSlot = null;
+  selectedInvId = null;
+  selectedBeltSlot = null;
   renderDressingUI();
   try {
     // свежий рюкзак и пояс с сервера: выданные/полученные вещи появляются сразу

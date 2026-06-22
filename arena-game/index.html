@@ -328,9 +328,23 @@
           </div>
           <div class="doll-side" id="doll-right"></div>
         </div>
-        <div class="dressing-items" id="dressing-items"></div>
+        <div class="dressing-items" id="dressing-items">
+          <!-- рюкзак: вкладки категорий → сетка квадратиков → превью выбранного -->
+          <div class="inv-tabs" id="inv-tabs" role="tablist">
+            <button type="button" class="inv-tab active" data-cat="gear">Вещи</button>
+            <button type="button" class="inv-tab" data-cat="elixir">Эликсиры</button>
+            <button type="button" class="inv-tab" data-cat="misc">Разное</button>
+          </div>
+          <div class="inv-grid" id="inv-grid"></div>
+          <div class="inv-preview hidden" id="inv-preview"></div>
+        </div>
       </div>
     </div>
+  </div>
+
+  <!-- превью эффекта в окне боя (тап по значку эффекта, #8) -->
+  <div class="fx-preview hidden" id="fx-preview">
+    <div class="fx-preview-card" id="fx-preview-card"></div>
   </div>
 
   <!-- настройки игры (шестерёнка в шапке) -->
@@ -388,6 +402,16 @@
           </span>
           <span class="switch">
             <input type="checkbox" id="set-optimize">
+            <span class="switch-track"><span class="switch-knob"></span></span>
+          </span>
+        </label>
+        <label class="settings-row" for="set-belt-autofill">
+          <span class="settings-row-main">
+            <span class="settings-row-name">Автозаполнение пояса</span>
+            <span class="settings-row-desc">После боя доливать эликсиры в пояс из рюкзака, если есть</span>
+          </span>
+          <span class="switch">
+            <input type="checkbox" id="set-belt-autofill">
             <span class="switch-track"><span class="switch-knob"></span></span>
           </span>
         </label>

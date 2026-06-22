@@ -108,6 +108,7 @@ export class BattleUI {
     this.onStrike = opts.onStrike || (() => {});
     this.onInfo = opts.onInfo || (() => {});         // «инфо» у ника в шапке (side)
     this.onMemberInfo = opts.onMemberInfo || (() => {}); // «инфо» у участника (id)
+    this.onEffectInfo = opts.onEffectInfo || (() => {}); // превью по тапу на значок эффекта (#8)
     this.selfId = opts.selfId ?? null;               // id игрока — не прячем при смерти (#2)
     this.block = null;    // выбранный блок (BLOCKS id или null)
     this.target = null;
@@ -445,7 +446,8 @@ export class BattleUI {
     if (!host) return;
     host.innerHTML = '';
     for (const e of list) {
-      const chip = document.createElement('span');
+      const chip = document.createElement('button');
+      chip.type = 'button';
       chip.className = 'effect-chip ' + (e.kind === 'debuff' ? 'debuff' : 'buff');
       if (e.label) chip.title = e.label;
       const ico = document.createElement('span');
@@ -459,6 +461,7 @@ export class BattleUI {
         t.textContent = e.time;
         chip.appendChild(t);
       }
+      chip.addEventListener('click', () => this.onEffectInfo(e));   // превью эффекта (#8)
       host.appendChild(chip);
     }
   }

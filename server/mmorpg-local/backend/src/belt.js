@@ -10,6 +10,16 @@ import { game } from './db.js';
 export const BELT_SLOTS = 6;
 const err = (msg, status) => Object.assign(new Error(msg), { status });
 
+// Сколько зарядов ОДНОГО эликсира помещается в ОДНУ ячейку пояса (#1).
+// Жизнь — по одному, мощь — стопкой до 10. Шаблон может переопределить через
+// base_stats.belt_max. ДОЛЖНО совпадать с клиентом (content.js ELIXIR_BELT_CAP).
+const BELT_CAP = { health: 1, power: 10 };
+function beltCapFor(kind, baseStats) {
+  const s = baseStats || {};
+  if (s.belt_max != null) return Math.max(1, Number(s.belt_max) || 1);
+  return BELT_CAP[kind] ?? 1;
+}
+
 /**
  * Параметры боевого эликсира из шаблона (base_stats), или null, если это не
  * боевой бафф/хил (напр. Эликсир побега {escape:true} — в пояс не кладётся).
@@ -50,37 +60,63 @@ export async function getBelt(charId) {
 }
 
 /**
- * Надеть один заряд эликсира в пояс (размещение выбирает сервер):
- *  - мощь копится стопкой в одном слоте (quantity += 1);
- *  - жизнь — по 1 на слот: каждый заряд занимает новую свободную ячейку;
+ * Надеть один заряд эликсира в пояс. Один заряд за вызов.
+ *  - вместимость ячейки ограничена (#1): мощь стопкой до beltCapFor, жизнь — по 1;
+ *  - targetSlot задан (#4): кладём ИМЕННО в эту ячейку (пустую — занять; со
+ *    своим эликсиром ниже лимита — долить; иначе slot_occupied);
+ *  - targetSlot не задан: доливаем первую недозаполненную свою ячейку, иначе
+ *    занимаем первую свободную;
  *  - нельзя надеть больше, чем лежит в рюкзаке (SUM(quantity по шаблону) ≤ есть).
  */
-export async function addToBelt(charId, templateId) {
+export async function addToBelt(charId, templateId, targetSlot = null) {
   templateId = Number(templateId);
   const t = (await game.query(
     `SELECT type, base_stats FROM item_templates WHERE id = $1`, [templateId])).rows[0];
   if (!t || t.type !== 4) throw err('not_an_elixir', 400);
   const el = elixirParams(t.base_stats);
   if (!el) throw err('not_an_elixir', 400);
+  const cap = beltCapFor(el.kind, t.base_stats);
 
   const owned = await ownedQty(charId, templateId);
   if (owned <= 0) throw err('not_owned', 400);
-  const rows = (await game.query(
-    `SELECT slot, quantity FROM character_belt
-      WHERE character_id = $1 AND template_id = $2`, [charId, templateId])).rows;
-  const reserved = rows.reduce((n, r) => n + Number(r.quantity), 0);
+  // полный состав пояса (все шаблоны) — для проверки занятости целевой ячейки
+  const all = (await game.query(
+    `SELECT slot, template_id, quantity FROM character_belt WHERE character_id = $1`,
+    [charId])).rows.map((r) => ({ slot: Number(r.slot),
+      templateId: Number(r.template_id), quantity: Number(r.quantity) }));
+  const mine = all.filter((r) => r.templateId === templateId);
+  const reserved = mine.reduce((n, r) => n + r.quantity, 0);
   if (reserved >= owned) throw err('not_enough', 400);          // надето уже всё, что есть
 
-  if (el.kind === 'power' && rows.length) {                      // мощь — копим в стопку
-    await game.query(
-      `UPDATE character_belt SET quantity = quantity + 1
-        WHERE character_id = $1 AND slot = $2`, [charId, rows[0].slot]);
+  // --- явная целевая ячейка (#4) ---
+  if (targetSlot != null) {
+    const slot = Number(targetSlot);
+    if (!Number.isInteger(slot) || slot < 0 || slot >= BELT_SLOTS) throw err('bad_slot', 400);
+    const cur = all.find((r) => r.slot === slot);
+    if (!cur) {
+      await game.query(
+        `INSERT INTO character_belt (character_id, slot, template_id, quantity)
+         VALUES ($1, $2, $3, 1)`, [charId, slot, templateId]);
+    } else if (cur.templateId === templateId && cur.quantity < cap) {
+      await game.query(
+        `UPDATE character_belt SET quantity = quantity + 1
+          WHERE character_id = $1 AND slot = $2`, [charId, slot]);
+    } else {
+      throw err('slot_occupied', 400);
+    }
     return getBelt(charId);
   }
-  // жизнь (или первый заряд мощи) — занимаем первую свободную ячейку
-  const used = new Set((await game.query(
-    `SELECT slot FROM character_belt WHERE character_id = $1`, [charId]))
-    .rows.map((r) => Number(r.slot)));
+
+  // --- авторазмещение: сначала долить свою недозаполненную ячейку ---
+  const stackable = mine.find((r) => r.quantity < cap);
+  if (stackable) {
+    await game.query(
+      `UPDATE character_belt SET quantity = quantity + 1
+        WHERE character_id = $1 AND slot = $2`, [charId, stackable.slot]);
+    return getBelt(charId);
+  }
+  // иначе — первая свободная ячейка
+  const used = new Set(all.map((r) => r.slot));
   let slot = -1;
   for (let i = 0; i < BELT_SLOTS; i++) if (!used.has(i)) { slot = i; break; }
   if (slot === -1) throw err('belt_full', 400);
@@ -101,7 +137,8 @@ export function beltRoutes(app, authed) {
   app.get('/api/belt', authed, async (req, res) =>
     res.json(await getBelt(req.session.character_id)));
   app.post('/api/belt/equip', authed, async (req, res) =>
-    res.json(await addToBelt(req.session.character_id, req.body.templateId)));
+    res.json(await addToBelt(req.session.character_id, req.body.templateId,
+      req.body.slot != null ? req.body.slot : null)));
   app.post('/api/belt/unequip', authed, async (req, res) =>
     res.json(await clearBeltSlot(req.session.character_id, req.body.slot)));
 }

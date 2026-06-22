@@ -95,8 +95,10 @@ export const api = {
   unequip:   (slot) => rest('/api/inventory/unequip', { slot }),
   // пояс эликсиров (сервер помнит состав): массив ячеек ELIXIR_SLOTS
   belt:        () => rest('/api/belt'),
-  // сервер сам выбирает ячейку: мощь копит в стопку, жизнь — в новый слот
-  beltEquip:   (templateId) => rest('/api/belt/equip', { templateId }),
+  // slot задан — кладём в эту ячейку (#4); иначе сервер выбирает сам (долить
+  // свою стопку до лимита, иначе занять свободную)
+  beltEquip:   (templateId, slot = null) =>
+    rest('/api/belt/equip', slot != null ? { templateId, slot } : { templateId }),
   beltUnequip: (slot) => rest('/api/belt/unequip', { slot }),
   chatHistory: () => rest('/api/chat/history'),
   battleInfo: (id) => rest('/api/battles/' + Number(id)),
