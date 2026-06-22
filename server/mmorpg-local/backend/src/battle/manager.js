@@ -843,6 +843,8 @@ export async function escapeBattle(charId) {
        VALUES ($1, $2, $3, 1, 1, $4, 7, 1, $5)`,
       [randomUUID(), it.id, tplId, charId, b.id]);
   });
+  const f = b.engine.fighter(cid(charId));
+  if (f) broadcastElixir(b, f, f, { kind: 'escape' });
   await escapeFighter(b, cid(charId));
 }
 

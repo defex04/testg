@@ -701,6 +701,7 @@ function renderActionGroup(title, buttons) {
 
 function renderLocationActions(loc) {
   shopOpen = false;
+  locBody.classList.remove('shop-open');
   locSceneTitle.textContent = loc.name;
   locActions.innerHTML = '';
   const transitions = loc.actions.filter((a) => a.goto || a.soon);
@@ -751,6 +752,7 @@ async function openShop() {
     return;
   }
   shopOpen = true;
+  locBody.classList.add('shop-open');
   locSceneTitle.textContent = 'Магазин эликсиров';
   locActions.innerHTML = '<div class="shop-loading">Загрузка товаров...</div>';
   try {
@@ -1096,6 +1098,7 @@ async function initBattle(resumedBattle = null, starter = null, pvpTarget = null
     const byName = esc(d.byName || battle.sides.left.name);
     const targetName = d.targetName && d.targetName !== d.byName ? ` для <b>${esc(d.targetName)}</b>` : '';
     if (d.kind === 'health') ui.log(`<b>${byName}</b> восстанавливает ${d.heal} HP${targetName}`);
+    else if (d.kind === 'escape') ui.log(`<b>${byName}</b> использует Эликсир побега`);
     else ui.log(`<b>${byName}</b> усиливает удары${targetName} на +${Math.round((d.mult - 1) * 100)}% (${d.turns} х.)`);
 
     const side = effectPopupSide(d);
@@ -1109,6 +1112,9 @@ async function initBattle(resumedBattle = null, starter = null, pvpTarget = null
       ? arena.worldToScreen(fighter.headPoint()) : { x: side === 'left' ? 70 : 220, y: 90 };
     if (d.kind === 'health' && d.heal > 0) {
       ui.popup(pos, `+${d.heal}`, 'heal');
+    } else if (d.kind === 'escape') {
+      ui.popup(pos, 'Побег', 'escape');
+      if (side === 'right') setOpponentVisible(false);
     } else if (d.kind === 'power') {
       const pct = Math.round((d.mult - 1) * 100);
       if (side === 'left') selfBuffPct = pct;

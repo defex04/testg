@@ -41,6 +41,7 @@ const STATEMENTS = [
   // изменяемый конфиг, а не аудит, поэтому DELETE здесь уместен (очистка ячейки).
   `GRANT SELECT, INSERT, UPDATE, DELETE ON character_belt TO game_rw`,
   `GRANT SELECT ON item_templates TO game_rw`,
+  `GRANT UPDATE (id) ON item_templates TO game_rw`,
   `GRANT SELECT, INSERT, UPDATE ON item_instances TO game_rw`,
   `GRANT INSERT ON item_ledger, item_ledger_default TO game_rw`,
   `GRANT USAGE, SELECT ON SEQUENCE item_ledger_id_seq TO game_rw`,

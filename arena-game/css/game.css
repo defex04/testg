@@ -1425,6 +1425,9 @@ body.loc-castle.in-battle .sprite-main .sm-ico {
   animation: loc-panel-in .18s ease-out;
   will-change: transform, opacity;
 }
+.loc-body.open.shop-open {
+  max-height: min(64vh, 520px);
+}
 
 .battles-list {
   flex: 1;
@@ -1485,6 +1488,10 @@ body.loc-castle.in-battle .sprite-main .sm-ico {
   gap: 14px;
   overflow-y: auto;
   padding-right: 4px;
+}
+.loc-body.open.shop-open .loc-actions {
+  overflow: hidden;
+  padding-right: 0;
 }
 
 .loc-group { display: flex; flex-direction: column; gap: 9px; }
@@ -1558,15 +1565,27 @@ body.loc-castle.in-battle .sprite-main .sm-ico {
 
 .shop-panel {
   width: 100%;
+  flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   gap: 12px;
 }
 
+.shop-back {
+  width: 100%;
+  justify-content: flex-start;
+}
+
 .shop-list {
+  flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   gap: 10px;
+  overflow-y: auto;
+  padding-right: 4px;
+  padding-bottom: 8px;
 }
 
 .shop-loading {
@@ -2573,6 +2592,11 @@ body.hints-off .strike-wheel.hint-attack .sw-sprite.sword:not(.thrust):not(.clan
   font-size: 26px;
   color: #8be28b;
   text-shadow: 0 2px 4px #000, 0 0 12px rgba(120, 230, 120, .65);
+}
+.bui-popup.escape {
+  font-size: 22px;
+  color: #aee8ff;
+  text-shadow: 0 2px 4px #000, 0 0 14px rgba(90, 210, 255, .68);
 }
 @keyframes popup-rise {
   0%   { opacity: 0; margin-top: 0; transform: translate(-50%, -50%) scale(.4); }
