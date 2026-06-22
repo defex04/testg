@@ -28,10 +28,12 @@ INSERT INTO npc_templates (id, name, level, stats, props) VALUES
      '{"injury_chance": 0}');
 INSERT INTO npc_spawns (id, npc_template_id, location_id) VALUES
     (1, 1, 1), (2, 1, 2);
+UPDATE npc_templates SET level = 1 WHERE id = 1;
 
 INSERT INTO game_config (key, value) VALUES
     ('battle.turn_time',     '20'),
-    ('battle.reward.hunt',   '{"currency": "copper", "amount": 50, "exp": 120}'),
+    ('battle.reward.hunt',   '{"currency": "copper", "amount": 50, "exp": 25}'),
+    ('character.leveling',   '{"maxLevel": 15, "thresholds": [0, 200, 500, 1000, 1800, 3200, 5500, 9000, 14000, 21000, 31000, 45000, 64000, 90000, 125000]}'),
     -- вмешательство в бой по умолчанию: в охоту нельзя, в PvP можно;
     -- переопределяется на уровне локации (locations.flags) и конкретного боя
     ('battle.intervention.default', '{"hunt": false, "pvp": true}'),
@@ -42,9 +44,9 @@ INSERT INTO game_config (key, value) VALUES
     ('battle.target.switch_chance', '0.25'),
     ('battle.target.cold_turns',    '2'),
     ('battle.target.cold_weight',   '1.5'),
-    ('character.start',      '{"level": 15, "hp": 2330, "damage": [160, 240],
+    ('character.start',      '{"level": 1, "hp": 2330, "damage": [160, 240],
                                "crit": 0.14, "dodge": 0.07, "height": 1.85,
-                               "xp_max": 2000, "pvp_xp_max": 1000}'),
+                               "xp_max": 200, "pvp_xp_max": 1000}'),
     ('chat.history_limit',   '50');
 
 INSERT INTO name_blacklist (name) VALUES

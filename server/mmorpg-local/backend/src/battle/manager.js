@@ -459,15 +459,29 @@ export function detach(charId) {
 // Конвейер хода (единый sub-turn для всех видов боя)
 // ============================================================
 function startTurnTimer(b) {
+  if (b.timer) { clearInterval(b.timer); b.timer = null; }
   const step = b.step;
-  let left = Math.max(0, Math.ceil((b.turnEndsAt - Date.now()) / 1000));
-  clearInterval(b.timer);
-  b.timer = setInterval(() => {
-    if (b.step !== step) { clearInterval(b.timer); return; }   // sub-turn сменился
-    left -= 1;
+  // Таймер привязан к «стене» (turnEndsAt), а не к «вычесть 1 за тик»: при задержках
+  // событийного цикла (снапшоты, GC, запись в БД) значение не уплывает и тайм-аут
+  // срабатывает ровно по сроку — бой остаётся точным.
+  //
+  // Интервал гасит СВОЙ id (а не b.timer): устаревший тик из прошлого хода больше
+  // не убивает уже созданный таймер следующего — это и был «таймер завис на месте».
+  const id = setInterval(() => {
+    if (b.step !== step || b.engine.phase !== 'choose') {
+      clearInterval(id);
+      if (b.timer === id) b.timer = null;
+      return;
+    }
+    const left = Math.max(0, Math.ceil((b.turnEndsAt - Date.now()) / 1000));
     broadcast(b, () => ({ type: 'timer', timeLeft: left }));
-    if (left <= 0) { clearInterval(b.timer); onTurnTimeout(b); }
+    if (left <= 0) {
+      clearInterval(id);
+      if (b.timer === id) b.timer = null;
+      onTurnTimeout(b);
+    }
   }, 1000);
+  b.timer = id;
 }
 
 function applyAiElixirs(b, af) {
@@ -500,6 +514,14 @@ function onTurnTimeout(b) {
     ? b.engine.aiMove()
     : { attack: null, block: null, pass: true };
   if (af.isAI) applyAiElixirs(b, af);
+  // Игрок, прозевавший ход по тайм-ауту, почти всегда не отвечает и на сетевые
+  // события (лаг/AFK — потому и прозевал). Не ждём от него turnDone после
+  // розыгрыша, иначе ход висит до страховочного advance, а у всех таймер «замер
+  // на 0:00». Зрители ход подтвердят сами, а этот боец уже отыграл.
+  if (!af.isAI && af.charId != null) {
+    const tp = b.players.get(cid(af.charId));
+    if (tp) tp.turnDone = true;
+  }
   if (!b.engine.submit(af.id, move) && af.isAI) {
     b.engine.submit(af.id, { attack: null, block: null, pass: true });
   }
@@ -694,10 +716,13 @@ async function resolveCurrent(b) {
   broadcast(b, (p) => resolveFor(b, p, r));
   // клиент проигрывает анимации и шлёт turnDone; страховка — авто.
   // Если все игроки отключены, ждать некого: заочный бой идёт в полном темпе.
+  // Пропуск/тайм-аут анимировать нечего — там короткий запас (иначе таймер
+  // «висит» на 0:00 до страховки, если прозевавший соперник не шлёт turnDone).
   const anyAttached = attachedList(b).length > 0;
+  const animated = r.strikes.length > 0;
   const step = b.step;
   b.finishTimer = setTimeout(() => { if (b.step === step) advance(b); },
-    anyAttached ? 6000 : 1500);
+    anyAttached && animated ? 6000 : 1500);
 }
 
 export async function finishTurn(charId) {

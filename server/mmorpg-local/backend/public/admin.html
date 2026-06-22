@@ -83,6 +83,43 @@
   .bars .bar b{color:var(--paper);font-weight:400}
   .logline{font-family:var(--mono);font-size:12.5px;padding:3px 0;border-bottom:1px dashed var(--line)}
   .logline .turn{color:var(--brass2)}
+
+  /* ── симулятор боёв: 2D-проигрыватель ── */
+  .winbar{display:flex;height:22px;border:1px solid var(--line);border-radius:4px;overflow:hidden;
+    font:11px var(--mono);margin:4px 0 10px}
+  .winbar i{display:flex;align-items:center;justify-content:center;color:#10141c;white-space:nowrap}
+  .winbar .wb-l{background:linear-gradient(180deg,var(--brass2),var(--brass))}
+  .winbar .wb-d{background:var(--line);color:var(--dim)}
+  .winbar .wb-r{background:linear-gradient(180deg,#7db0e8,#3f7fc4)}
+  .sim-stage{display:grid;grid-template-columns:1fr 1.1fr 1fr;gap:12px;align-items:start}
+  .sim-col{display:flex;flex-direction:column;gap:5px;max-height:430px;overflow:auto}
+  .sim-col h4{margin:0 0 2px;font:600 12px var(--mono);color:var(--dim);letter-spacing:.06em}
+  .sim-fighter{display:grid;grid-template-columns:1fr 64px;gap:6px;align-items:center;
+    padding:3px 6px;border:1px solid var(--line);border-radius:4px;background:var(--ink2);
+    transition:background .15s,border-color .15s}
+  .sim-fighter.right{direction:rtl}
+  .sim-fighter.right .sim-fname,.sim-fighter.right .sim-hp{direction:ltr}
+  .sim-fname{font:12px var(--mono);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .sim-fbar{grid-column:1/-1;height:9px;background:#10141c;border-radius:5px;overflow:hidden}
+  .sim-fbar i{display:block;height:100%;width:100%;background:linear-gradient(90deg,#5fa85a,#8fd089);
+    transition:width .18s linear}
+  .sim-fbar i.low{background:linear-gradient(90deg,#c0533f,#e07a6a)}
+  .sim-hp{font:11px var(--mono);color:var(--dim);text-align:right;font-variant-numeric:tabular-nums}
+  .sim-fighter.hit{border-color:var(--debit);background:rgba(224,122,106,.16)}
+  .sim-fighter.crit{border-color:var(--brass);background:rgba(231,189,110,.2)}
+  .sim-fighter.dodge{border-color:#3f7fc4;background:rgba(63,127,196,.14)}
+  .sim-fighter.dead{opacity:.4;filter:grayscale(.7)}
+  .sim-fighter.dead .sim-fname{text-decoration:line-through}
+  .sim-totals{display:flex;flex-direction:column;gap:10px}
+  .sim-total .sim-fbar{height:16px}
+  .sim-feed{border:1px solid var(--line);border-radius:4px;background:var(--ink2);
+    padding:6px 8px;max-height:430px;overflow:auto;font:12px var(--mono)}
+  .sim-feed .fl{padding:2px 0;border-bottom:1px dashed var(--line)}
+  .sim-feed .fl.crit{color:var(--brass2)} .sim-feed .fl.block{color:#8fb6e6}
+  .sim-feed .fl.dodge{color:var(--dim)} .sim-feed .fl.kill{color:var(--debit)}
+  .sim-feed .fl .tn{color:var(--brass)}
+  #sp-speed{vertical-align:middle}
+  @media (max-width:640px){.sim-stage{grid-template-columns:1fr}}
   @media (max-width:900px){#app{grid-template-columns:64px 1fr}
     .wordmark{font-size:13px;padding:12px 8px}.wordmark small{display:none}
     nav button{padding:8px 10px;font-size:12px}
@@ -497,7 +534,7 @@ function barChart(rows, labelKey, valueKey){
 
 const SECTIONS = [
   ['stats','Общая статистика'],['chars','Персонажи'],['accounts','Аккаунты'],
-  ['battles','Бои'],['battlecfg','Настройки боёв'],
+  ['battles','Бои'],['battlecfg','Настройки боёв'],['simulate','Симуляция боёв'],
   ['ledger','Гроссбух'],['items','Предметы'],['quests','Задания'],
   ['market','Аукцион'],['mail','Почта'],['chat','Чат'],['config','Конфиг'],['audit','Аудит'],
 ];
@@ -946,6 +983,291 @@ window.saveLocFlags = async (id) => {
   } catch (e) { fail(e); }
 };
 
+/* ================= Симуляция боёв ================= */
+let SIM_LAST = null;     // последний ответ /simulate
+let SP = null;           // активный 2D-проигрыватель
+const SIM_ROW_CAP = 40;  // сколько бойцов стороны рисуем построчно (остальные — без DOM)
+const simIsPC = () => matchMedia('(pointer:fine)').matches && innerWidth >= 900;
+
+// Каноничные статы Broken Sun (ключи строго как в server/.../battle/stats.js).
+// [ключ, подпись, дефолт, шаг]. Дефолты — со скрина параметров (без «Водой»).
+const SIM_STATS = [
+  ['power','Мощь',3618],['health','Здоровье',1213],['mana','Мана',94],['rage','Ярость',82],
+  ['initiative','Инициатива',109],['defense','Защита',131],['accuracy','Точность',115],
+  ['dodge','Уклонение',66],['crit','Крит',49],['critPower','Сила Крита %',100],
+  ['critResist','Сопр. Криту',27],['block','Блок',24],['blockDmg','Блок урона %',50],
+  ['counter','Контратака',49],
+];
+const SIM_ELIX = [
+  ['powerUses','Эликсир мощи: зарядов',0],['powerMult','— множитель',1.5,'0.1'],['powerTurns','— ходов',3],
+  ['healUses','Эликсир HP: зарядов',1],['healPct','— лечит % макс.HP',40],['healAtPct','— пить при HP ≤ %',50],
+];
+// Коэффициенты формул (дефолты дублируют DEFAULT_COEF на сервере — держать в синхроне).
+const SIM_COEF = [
+  ['powerToDamage','Урон = Мощь ×',0.10,'0.01'],['damageVar','Разброс урона',0.15,'0.01'],
+  ['defenseK','Защита: K насыщения',400],['levelGrowth','Рост статов / уровень',0.08,'0.01'],
+  ['dodgeScale','Уклонение ×',0.003,'0.0005'],['accScale','Точность ×',0.0018,'0.0002'],
+  ['critScale','Крит ×',0.004,'0.0005'],['critResScale','Сопр. Криту ×',0.003,'0.0005'],
+  ['blockScale','Блок ×',0.012,'0.001'],['counterScale','Контратака ×',0.004,'0.0005'],
+];
+
+R.simulate = async () => {
+  const pc = simIsPC();
+  const fld = (side, grp, [k, label, dv, step]) =>
+    `<div><label>${label}</label><input data-side="${side}" data-grp="${grp}" data-k="${k}"
+      type="number"${step ? ` step="${step}"` : ''} value="${dv}"></div>`;
+  const team = (side, title, name) => `<div class="panel"><h3>${title}</h3>
+    <div class="form">
+      <div class="wide"><label>Название</label>
+        <input data-side="${side}" data-grp="meta" data-k="name" value="${esc(name)}" style="width:100%"></div>
+      ${fld(side,'meta',['count','Бойцов (1–500)',1])}
+      ${fld(side,'meta',['level','Уровень',1])}
+      ${fld(side,'meta',['varPct','Разброс ±(0–1)',0.15,'0.05'])}</div>
+    <h4 style="margin:12px 0 6px;color:var(--dim);font:600 12px var(--mono)">Характеристики</h4>
+    <div class="form">${SIM_STATS.map((s) => fld(side, 'stat', s)).join('')}</div>
+    <h4 style="margin:12px 0 6px;color:var(--dim);font:600 12px var(--mono)">Эликсиры (использует ИИ)</h4>
+    <div class="form">${SIM_ELIX.map((s) => fld(side, 'elix', s)).join('')}</div></div>`;
+  return `
+  <div class="panel"><h3>Что это</h3><p class="muted" style="margin:0">Гоняет настоящий движок боя
+    headless (без таймеров, Redis и БД) с боевой моделью Broken Sun, чтобы <b>замерить нагрузку</b> и
+    проверить <b>баланс статов и формул</b>. Характеристики — как на экране параметров (без «Водой»),
+    дефолтные и растут с уровнем; вещи/прокачка в симуляторе задаются прямо значениями. Эликсиры мощи
+    и здоровья моделируются. До 500×500 в бою; для ≤4 боёв на ПК — 2D-анимация.</p></div>
+  <div class="grid2">${team('left','Команда A (слева)','Альфа')}${team('right','Команда B (справа)','Бета')}</div>
+  <div class="panel"><h3>Прогон</h3>
+    <div class="form">
+      <div><label>Боёв</label><input id="sim-battles" type="number" value="200"></div>
+      <div><label>Лимит ходов (раундов)</label><input id="sim-maxturns" type="number" value="200"></div>
+      <div><label>Шанс смены цели (0–1)</label><input id="sim-switch" type="number" step="0.05" value="0.25"></div>
+    </div>
+    <label style="display:flex;gap:8px;align-items:center;margin-top:12px;${pc ? '' : 'opacity:.5'}">
+      <input id="sim-animate" type="checkbox" style="width:auto" ${pc ? '' : 'disabled'}>
+      Показывать 2D-анимацию (до 4 боёв${pc ? '' : ', только ПК'})</label>
+    ${pc ? '' : '<div class="muted" style="font-size:11px;margin-top:4px">Анимация — только на ПК; на телефоне текстовый результат.</div>'}
+    <div class="toolbar" style="margin-top:12px">
+      <button class="brass" id="sim-run" onclick="runSim()">Запустить</button>
+      <span class="muted">БД и живые бои не затрагиваются.</span></div></div>
+  <details class="panel"><summary style="cursor:pointer;color:var(--brass2);font-family:Georgia,serif;
+    font-variant:small-caps;letter-spacing:.06em">Коэффициенты формул (тонкая настройка баланса)</summary>
+    <div class="form" style="margin-top:10px">${SIM_COEF.map((c) =>
+      `<div><label>${c[1]}</label><input data-coef="${c[0]}" type="number"${
+        c[3] ? ` step="${c[3]}"` : ''} value="${c[2]}"></div>`).join('')}</div>
+    <p class="muted" style="font-size:11px;margin-top:8px">Урон = Мощь×коэф; защита срезает урон с
+      насыщением; уворот/крит — состязание статов; контратака — шанс ответного удара. Меняешь — и сразу
+      видно сдвиг винрейта и статистики.</p></details>
+  <div id="sim-out"></div>`;
+};
+
+function simProfile(side){
+  const g = (grp, k) => document.querySelector(`[data-side="${side}"][data-grp="${grp}"][data-k="${k}"]`);
+  const v = (grp, k) => { const el = g(grp, k); return el ? +el.value : undefined; };
+  const stats = {}; SIM_STATS.forEach(([k]) => stats[k] = v('stat', k));
+  const elixir = {}; SIM_ELIX.forEach(([k]) => elixir[k] = v('elix', k));
+  const nameEl = g('meta', 'name');
+  return { name: nameEl ? nameEl.value : '', count: v('meta', 'count'),
+    level: v('meta', 'level'), varPct: v('meta', 'varPct'), stats, elixir };
+}
+
+window.runSim = async () => {
+  const animate = !!($('#sim-animate') && $('#sim-animate').checked);
+  let battles = +$('#sim-battles').value || 1;
+  if (animate && battles > 4){ battles = 4; $('#sim-battles').value = 4; stamp('Анимация: не больше 4 боёв'); }
+  const left = simProfile('left'), right = simProfile('right');
+  if (!left.count || !right.count) return stamp('Укажите число бойцов в обеих командах', true);
+  const coef = {};
+  document.querySelectorAll('[data-coef]').forEach((el) => { if (el.value !== '') coef[el.dataset.coef] = +el.value; });
+  const body = { battles, maxTurns: +$('#sim-maxturns').value || 200,
+    switchChance: +$('#sim-switch').value, animate, left, right, coef };
+  const btn = $('#sim-run'); btn.disabled = true; const old = btn.textContent; btn.textContent = 'Считаем…';
+  $('#sim-out').innerHTML = '<p class="muted">Симулируем…</p>';
+  if (SP){ SP.destroy(); SP = null; }
+  try {
+    const d = await api('/simulate', body);
+    SIM_LAST = d;
+    $('#sim-out').innerHTML = renderSimResults(d);
+    if (d.timelines && d.timelines.length) initSimPlayer(d.timelines);
+    ok(`${d.params.battles} боёв · ${d.perf.wallMs} мс`);
+  } catch (e){ $('#sim-out').innerHTML = ''; fail(e); }
+  finally { btn.disabled = false; btn.textContent = old; }
+};
+
+function renderSimResults(d){
+  const p = d.perf, b = d.balance, c = d.combat;
+  const nf = (x) => Number(x).toLocaleString('ru-RU');
+  const card = (v, t) => `<div class="card" style="cursor:default;min-width:118px"><b>${v}</b><span>${t}</span></div>`;
+  const total = Math.max(1, b.winsLeft + b.winsRight + b.draws);
+  const w = (x) => Math.round(x / total * 100);
+  const winbar = `<div class="winbar">
+    <i class="wb-l" style="width:${w(b.winsLeft)}%">${b.winsLeft ? 'A ' + b.winRateLeft + '%' : ''}</i>
+    <i class="wb-d" style="width:${w(b.draws)}%">${b.draws ? 'ничьи ' + w(b.draws) + '%' : ''}</i>
+    <i class="wb-r" style="width:${w(b.winsRight)}%">${b.winsRight ? 'B ' + b.winRateRight + '%' : ''}</i></div>`;
+  const cl = c ? c.left : null, cr = c ? c.right : null;
+  const combatPanel = c ? `<div class="panel"><h3>Боевая статистика</h3>
+    ${table([{h:'Показатель',v:r=>r[0]},{h:'Команда A',v:r=>r[1]},{h:'Команда B',v:r=>r[2]}],[
+      ['Ударов', nf(cl.attacks), nf(cr.attacks)],
+      ['Криты (доля попаданий)', `${nf(cl.crits)} (${cl.critRate}%)`, `${nf(cr.crits)} (${cr.critRate}%)`],
+      ['Увороты против (доля атак)', `${nf(cl.dodgedAgainst)} (${cl.dodgeRate}%)`, `${nf(cr.dodgedAgainst)} (${cr.dodgeRate}%)`],
+      ['Блоки (доля попаданий)', `${nf(cl.blocked)} (${cl.blockRate}%)`, `${nf(cr.blocked)} (${cr.blockRate}%)`],
+      ['Контратаки (доля атак)', `${nf(cl.counters)} (${cl.counterRate}%)`, `${nf(cr.counters)} (${cr.counterRate}%)`],
+      ['Ср. урон / попадание', nf(cl.avgDamagePerHit), nf(cr.avgDamagePerHit)],
+      ['Убийств / бой', cl.avgKillsPerBattle, cr.avgKillsPerBattle],
+      ['Эликсир мощи (раз)', nf(cl.elixPower), nf(cr.elixPower)],
+      ['Эликсир HP (раз / суммарно)', `${nf(cl.elixHeal)} / ${nf(cl.elixHealAmt)}`, `${nf(cr.elixHeal)} / ${nf(cr.elixHealAmt)}`],
+    ])}</div>` : '';
+  return `
+  ${d.partial ? '<div class="panel"><span class="debit">Прервано по лимиту времени (25 с) — результат частичный.</span></div>' : ''}
+  <div class="panel"><h3>Нагрузка</h3><div class="cards">
+    ${card(p.wallMs + ' мс','Время (wall)')}${card(p.cpuMs + ' мс','CPU')}
+    ${card(p.perBattleMs + ' мс','На бой')}${card(nf(p.battlesPerSec),'Боёв/с')}
+    ${card(nf(p.strikesPerSec),'Ударов/с')}${card(nf(b.totalStrikes),'Ударов всего')}
+    ${card(p.heapUsedDeltaMb + ' МБ','Heap Δ')}${card(p.rssMb + ' МБ','RSS')}
+  </div></div>
+  <div class="panel"><h3>Баланс · ${d.params.battles} боёв</h3>
+    ${winbar}
+    ${table([{h:'Метрика',v:r=>r[0]},{h:'Команда A',v:r=>r[1]},{h:'Команда B',v:r=>r[2]}],[
+      ['Победы',`${b.winsLeft} (${b.winRateLeft}%)`,`${b.winsRight} (${b.winRateRight}%)`],
+      ['Средний урон / бой',nf(b.avgDmgLeft),nf(b.avgDmgRight)],
+    ])}
+    <div class="muted" style="margin-top:8px">Ничьи/таймауты: ${b.draws} · средняя длина: ${b.avgTurns} ходов
+      (${b.avgSubTurns} ударов/бой) · по таймауту: ${b.timedOut}</div>
+  </div>
+  ${combatPanel}`;
+}
+
+/* ── 2D-проигрыватель записанных боёв (rows-режим, до 40 бойцов/сторону) ── */
+const SIM_ZONE = { high:'голову', mid:'корпус', low:'ноги' };
+function initSimPlayer(timelines){
+  if (SP){ SP.destroy(); SP = null; }
+  const host = document.createElement('div');
+  host.className = 'panel';
+  const opts = timelines.map((tl, i) =>
+    `<option value="${i}">Бой ${tl.battle} · ${tl.winner ? 'победа ' + (tl.winner === 'left' ? 'A' : 'B') : 'ничья'} · ${tl.events.length} ударов</option>`).join('');
+  host.innerHTML = `<h3>2D-анимация боя</h3>
+    <div class="toolbar">
+      <select id="sp-battle">${opts}</select>
+      <button id="sp-play" class="brass">▶ Старт</button>
+      <button id="sp-restart">⟲ Заново</button>
+      <label style="display:flex;gap:6px;align-items:center">Скорость
+        <input id="sp-speed" type="range" min="60" max="900" step="20" value="380"></label>
+      <span id="sp-progress" class="muted"></span></div>
+    <div class="sim-stage">
+      <div class="sim-col" id="sp-left"></div>
+      <div class="sim-feed" id="sp-feed"></div>
+      <div class="sim-col" id="sp-right"></div></div>`;
+  $('#sim-out').appendChild(host);
+
+  const S = { timelines, idx:0, ev:0, lastTurn:0, timer:null, speed:380, playing:false, fmap:{}, tl:null };
+  const feed = host.querySelector('#sp-feed');
+  const progEl = host.querySelector('#sp-progress');
+  const playBtn = host.querySelector('#sp-play');
+
+  const updateBar = (f) => {
+    if (!f.barEl) return;
+    const pct = f.maxHp ? Math.max(0, f.hp / f.maxHp * 100) : 0;
+    f.barEl.style.width = pct + '%';
+    f.barEl.classList.toggle('low', pct < 25);
+    if (f.valEl) f.valEl.textContent = Math.round(f.hp);
+  };
+  const flash = (f, cls) => {
+    if (!f.rowEl) return;
+    f.rowEl.classList.remove('hit','crit','dodge'); void f.rowEl.offsetWidth;
+    f.rowEl.classList.add(cls);
+    setTimeout(() => f.rowEl && f.rowEl.classList.remove(cls), 200);
+  };
+  const appendFeed = (html) => {
+    feed.insertAdjacentHTML('beforeend', html);
+    while (feed.children.length > 240) feed.firstChild.remove();
+    feed.scrollTop = feed.scrollHeight;
+  };
+
+  const renderCol = (host2, list, side) => {
+    const shown = list.slice(0, SIM_ROW_CAP);
+    host2.innerHTML = `<h4>${side === 'left' ? 'Команда A' : 'Команда B'} · ${list.length}</h4>` +
+      shown.map((f) => `<div class="sim-fighter ${side}" data-fid="${esc(f.id)}">
+        <span class="sim-fname">${esc(f.name)}</span>
+        <span class="sim-hp" data-hp>${Math.round(f.maxHp)}</span>
+        <div class="sim-fbar"><i style="width:100%"></i></div></div>`).join('') +
+      (list.length > shown.length ? `<div class="muted" style="font-size:11px">…ещё ${list.length - shown.length} (без полос)</div>` : '');
+    shown.forEach((f) => {
+      const st = S.fmap[f.id];
+      st.rowEl = host2.querySelector(`[data-fid="${CSS.escape(String(f.id))}"]`);
+      st.barEl = st.rowEl ? st.rowEl.querySelector('.sim-fbar i') : null;
+      st.valEl = st.rowEl ? st.rowEl.querySelector('[data-hp]') : null;
+    });
+  };
+
+  const load = (idx) => {
+    pause();
+    S.idx = idx; S.ev = 0; S.lastTurn = 0;
+    const tl = S.tl = S.timelines[idx];
+    S.fmap = {};
+    for (const side of ['left','right'])
+      for (const f of tl.fighters[side])
+        S.fmap[f.id] = { id:f.id, name:f.name, side, maxHp:f.maxHp, hp:f.maxHp, alive:true };
+    renderCol(host.querySelector('#sp-left'), tl.fighters.left, 'left');
+    renderCol(host.querySelector('#sp-right'), tl.fighters.right, 'right');
+    feed.innerHTML = '';
+    if (tl.truncated) appendFeed('<div class="fl muted">запись усечена — показаны первые удары</div>');
+    progress();
+  };
+
+  const progress = () => {
+    const n = S.tl ? S.tl.events.length : 0;
+    progEl.textContent = `удар ${S.ev}/${n}`;
+  };
+
+  const step = () => {
+    const tl = S.tl;
+    if (S.ev >= tl.events.length){ pause(); endLine(); return; }
+    const e = tl.events[S.ev++];
+    if (e.t !== S.lastTurn){ S.lastTurn = e.t;
+      appendFeed(`<div class="fl"><span class="tn">— ход ${e.t} —</span></div>`); }
+    const d = S.fmap[e.d], a = S.fmap[e.a];
+    const an = a ? a.name : e.a, dn = d ? d.name : e.d;
+    const z = SIM_ZONE[e.zone] || e.zone;
+    let cls = '', txt;
+    if (e.dodged){ cls = 'dodge'; txt = `${dn} уклоняется от ${an}`; if (d) flash(d, 'dodge'); }
+    else {
+      if (d){ d.hp = e.hp; updateBar(d); flash(d, e.crit ? 'crit' : 'hit'); }
+      if (e.crit){ cls = 'crit'; txt = `${an} КРИТ по ${dn} в ${z} −${e.dmg}`; }
+      else if (e.blocked){ cls = 'block'; txt = `${dn} блокирует ${an} в ${z} −${e.dmg}`; }
+      else txt = `${an} бьёт ${dn} в ${z} −${e.dmg}`;
+    }
+    if (e.killed && d){ d.alive = false; if (d.rowEl) d.rowEl.classList.add('dead'); }
+    if (e.killed){ cls = 'kill'; txt += ' ✖ повержен'; }
+    appendFeed(`<div class="fl ${cls}">${e.counter ? '↩ ' : ''}${esc(txt)}</div>`);
+    progress();
+  };
+
+  const endLine = () => {
+    const win = S.tl.winner;
+    appendFeed(`<div class="fl kill">— бой окончен: ${win ? 'победа ' + (win === 'left' ? 'A' : 'B') : 'ничья'} —</div>`);
+    playBtn.textContent = '▶ Старт';
+  };
+
+  const play = () => {
+    if (S.playing) return;
+    if (S.ev >= S.tl.events.length) load(S.idx);   // с конца — начать заново
+    S.playing = true; playBtn.textContent = '❚❚ Пауза';
+    S.timer = setInterval(step, S.speed);
+  };
+  function pause(){
+    S.playing = false; if (S.timer){ clearInterval(S.timer); S.timer = null; }
+    if (playBtn) playBtn.textContent = '▶ Старт';
+  }
+
+  host.querySelector('#sp-play').onclick = () => (S.playing ? pause() : play());
+  host.querySelector('#sp-restart').onclick = () => { load(S.idx); };
+  host.querySelector('#sp-battle').onchange = (e) => load(+e.target.value);
+  host.querySelector('#sp-speed').oninput = (e) => {
+    S.speed = +e.target.value;
+    if (S.playing){ clearInterval(S.timer); S.timer = setInterval(step, S.speed); }
+  };
+
+  SP = { destroy(){ pause(); host.remove(); } };
+  load(0);
+}
+
 /* ================= Гроссбух ================= */
 R.ledger = async (mode = 'currency') => {
   const rows = await api(mode === 'currency' ? '/ledger' : '/item-ledger');
@@ -1236,6 +1558,11 @@ const CFG_FORMS = {
     render: (v) => `<div><label>Меди</label><input data-k="0" type="number" value="${v.amount}"></div>
       <div><label>Опыта</label><input data-k="1" type="number" value="${v.exp}"></div>`,
     collect: (g) => ({ currency: 'copper', amount: +g(0), exp: +g(1) }) },
+  'character.leveling': { title: 'Шкала уровней',
+    render: (v) => `<div><label>Макс. уровень</label><input data-k="0" type="number" value="${v.maxLevel ?? 15}"></div>
+      <div><label>Пороги опыта</label><textarea data-k="1" rows="3">${(v.thresholds || []).join(', ')}</textarea></div>`,
+    collect: (g) => ({ maxLevel: +g(0), thresholds: g(1).split(',')
+      .map((x) => +x.trim()).filter((x) => Number.isFinite(x)) }) },
   'battle.escape_elixir': { title: 'ID шаблона Эликсира побега',
     render: (v) => `<input data-k="0" type="number" value="${v}">`,
     collect: (g) => +g(0) },
@@ -1298,6 +1625,7 @@ R.audit = async () => table([
 window.show = async (name, arg) => {
   current = name;
   disposePreview();   // уходим со страницы предмета — гасим 3D-цикл превью
+  if (SP){ SP.destroy(); SP = null; }   // и таймер 2D-проигрывателя симуляции
   document.querySelectorAll('#nav button').forEach((b) =>
     b.classList.toggle('active', b.dataset.s === name));
   $('#hdr-title').textContent = SECTIONS.find(([k]) => k === name)[1];

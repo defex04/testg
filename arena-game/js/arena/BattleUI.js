@@ -641,8 +641,9 @@ export class BattleUI {
     this._appendLog(sep);
   }
 
-  setTimer(sec) {
-    const s = Math.max(0, sec);
+  /** Отрисовать значение таймера (текст + кольцо), без управления отсчётом. */
+  _renderTimer(sec) {
+    const s = Math.max(0, Math.round(sec));
     this.refs.timer.textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
     this.refs.timer.classList.toggle('urgent', s <= 5);
     // кольцо-таймер на колесе: за «полный» ход берём наибольшее виденное время
@@ -652,6 +653,46 @@ export class BattleUI {
       this._timerRing.style.strokeDashoffset = (this._timerC * (1 - frac)).toFixed(1);
       this._timerRing.classList.toggle('low', s <= 5);
     }
+  }
+
+  setTimer(sec) {
+    this._timeLeft = Math.max(0, Math.round(sec));
+    this._renderTimer(this._timeLeft);
+  }
+
+  /**
+   * Запустить локальный отсчёт хода: дисплей тикает САМ раз в секунду и не зависит
+   * от каждого серверного пакета `timer`. Поэтому таймер не «зависает», если пакет
+   * потеряли/задержали — серверные события лишь ресинкают значение (syncCountdown).
+   * Сервер остаётся авторитетом тайм-аута; клиент только отсчитывает для глаз.
+   */
+  startCountdown(sec) {
+    this._turnMax = 0;                 // новый ход → пересчитать «полный» масштаб кольца
+    this.setTimer(sec);
+    this._stopTick();
+    this._lastTick = Date.now();
+    this._tickId = setInterval(() => {
+      // считаем по реальному времени, а не «−1 за тик»: не уплывёт при подвисаниях
+      const elapsed = Math.round((Date.now() - this._lastTick) / 1000);
+      if (elapsed < 1) return;
+      this._lastTick += elapsed * 1000;
+      this._timeLeft = Math.max(0, this._timeLeft - elapsed);
+      this._renderTimer(this._timeLeft);
+      if (this._timeLeft <= 0) this._stopTick();   // дальше ждём ход с сервера
+    }, 250);
+  }
+
+  /** Ресинк дисплея под серверное значение — только пока идёт активный отсчёт. */
+  syncCountdown(sec) {
+    if (this._tickId == null) return;  // вне хода серверный «хвост» не показываем
+    this._timeLeft = Math.max(0, Math.round(sec));
+    this._lastTick = Date.now();
+    this._renderTimer(this._timeLeft);
+  }
+
+  /** Остановить отсчёт (розыгрыш/конец боя) — дисплей замирает на последнем значении. */
+  _stopTick() {
+    if (this._tickId != null) { clearInterval(this._tickId); this._tickId = null; }
   }
 
   /** Поставить колесо ровно между бойцами и задать его диаметр (px). */
@@ -676,6 +717,7 @@ export class BattleUI {
    * Баннер ожидания тут не нужен (мы не «без соперника», просто идёт ход).
    */
   hideControls() {
+    this._stopTick();          // ход отдан — отсчёт замирает до следующего turnStart
     this._setLocked(true, null);
     this._hideWheel();
     this._toggleWait(false);
@@ -717,6 +759,7 @@ export class BattleUI {
 
   /** Розыгрыш ударов: колесо скрыто, но баннер убран — видна анимация боя. */
   showResolving() {
+    this._stopTick();          // во время розыгрыша таймер хода не тикает
     this._setLocked(true, null);
     this._hideWheel();
     this._toggleWait(false);
@@ -778,6 +821,7 @@ export class BattleUI {
   }
 
   showEnd(victory, handlers = {}) {
+    this._stopTick();
     this.refs.endImg.src = IMG(victory ? 'win' : 'lose');
     this.refs.endImg.alt = victory ? 'Победа' : 'Поражение';
     this.refs.end.classList.remove('hidden');
@@ -788,6 +832,8 @@ export class BattleUI {
   }
 
   destroy() {
+    this._stopTick();
+    clearTimeout(this._placeT);
     this.block = null;
     this.headEl.innerHTML = '';
     this.wheel.remove();

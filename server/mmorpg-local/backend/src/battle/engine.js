@@ -24,8 +24,13 @@ export class Engine {
    * sides: { left: [def...], right: [def...] }
    * def: { id?, name, level, hp, damage:[min,max], crit?, dodge?, initiative?, isAI?, charId? }
    */
-  constructor(sides, { turnTime = 20, target = {} } = {}) {
+  constructor(sides, { turnTime = 20, target = {}, model = null } = {}) {
     this.turnTime = turnTime;
+    // Боевая модель статов (Broken Sun) — опционально. Если задана и у бойцов есть
+    // блок stats, удар считается по производным формулам (Мощь/Защита/Точность/…)
+    // и включается контратака. Без модели — прежняя логика (зоны/блок ×0.12/крит ×1.8),
+    // поэтому ЖИВОЙ бой не меняется. Модель использует симулятор.
+    this.model = model;
     // выбор цели: соперник «липкий» (держится несколько ходов), меняется
     // принудительно (умер), с вероятностью switchChance или если боец «холодный»
     // (давно не дрался). Новый соперник выбирается взвешенно, с приоритетом
@@ -59,6 +64,7 @@ export class Engine {
       charId: def.charId ?? null,
       isAI: !!def.isAI,
       maxHp: hp, hp,
+      stats: def.stats || null,          // блок статов Broken Sun (для модельного боя)
       damage: def.damage,
       crit: def.crit ?? 0.1,
       dodge: def.dodge ?? 0.06,
@@ -290,31 +296,52 @@ export class Engine {
     return true;
   }
 
-  _strike(attacker, defender, zone) {
+  _strike(attacker, defender, zone, isCounter = false) {
     // «холод» цели = давно ли по бойцу БИЛИ: отмечаем лишь того, по кому ударили.
     // Боец, который сам атакует, но по нему не попадают, остаётся «холодным» —
     // его и выберут целью; иначе в 1×N одиночка молотит всегда одного (ТЗ #3).
     defender.lastTargetedTurn = this.turn;
-    const blocked = defender.block === zone;
-    const dodged = !blocked && Math.random() < defender.dodge;
-    const crit = !dodged && Math.random() < attacker.crit;
-    let damage = 0;
-    if (!dodged) {
-      damage = rnd(attacker.damage[0], attacker.damage[1]);
-      if (crit && blocked) damage *= 0.85;
-      else if (crit) damage *= 1.8;
-      else if (blocked) damage *= 0.12;
-      // «Эликсир мощи»: усиливает удары N раз; заряд тратится на удар
-      if (attacker.buffTurns > 0) { damage *= attacker.buffMult; attacker.buffTurns -= 1; }
-      damage = Math.max(1, Math.round(damage));
-      damage = Math.min(damage, Math.max(0, Math.round(defender.hp)));
-      defender.hp = Math.max(0, defender.hp - damage);
-      if (defender.hp <= 0) defender.alive = false;
+    const m = this.model;
+    let blocked, dodged, crit, damage = 0;
+    if (m && attacker.stats && defender.stats) {
+      // модельный бой: исходы из производных статов (блок — по шансу, не по зоне)
+      const A = attacker.stats, D = defender.stats;
+      dodged = Math.random() < m.dodgeChance(A, D);
+      blocked = !dodged && Math.random() < m.blockChance(A, D);
+      crit = !dodged && Math.random() < m.critChance(A, D);
+      if (!dodged) {
+        let dmg = m.baseDamage(A) * m.damageVariance();
+        if (crit) dmg *= m.critMult(A);
+        dmg *= (1 - m.defenseMitigation(D));
+        if (blocked) dmg *= (1 - m.blockMitigation(D));
+        if (attacker.buffTurns > 0) { dmg *= attacker.buffMult; attacker.buffTurns -= 1; }
+        damage = Math.max(1, Math.round(dmg));
+        damage = Math.min(damage, Math.max(0, Math.round(defender.hp)));
+        defender.hp = Math.max(0, defender.hp - damage);
+        if (defender.hp <= 0) defender.alive = false;
+      }
+    } else {
+      // прежняя логика (живой бой): зональный блок ×0.12, крит ×1.8
+      blocked = defender.block === zone;
+      dodged = !blocked && Math.random() < defender.dodge;
+      crit = !dodged && Math.random() < attacker.crit;
+      if (!dodged) {
+        damage = rnd(attacker.damage[0], attacker.damage[1]);
+        if (crit && blocked) damage *= 0.85;
+        else if (crit) damage *= 1.8;
+        else if (blocked) damage *= 0.12;
+        // «Эликсир мощи»: усиливает удары N раз; заряд тратится на удар
+        if (attacker.buffTurns > 0) { damage *= attacker.buffMult; attacker.buffTurns -= 1; }
+        damage = Math.max(1, Math.round(damage));
+        damage = Math.min(damage, Math.max(0, Math.round(defender.hp)));
+        defender.hp = Math.max(0, defender.hp - damage);
+        if (defender.hp <= 0) defender.alive = false;
+      }
     }
     return {
       attackerId: attacker.id, defenderId: defender.id,
       attackerSide: attacker.side, defenderSide: defender.side,
-      zone, blocked, dodged, crit, damage,
+      zone, blocked, dodged, crit, damage, counter: isCounter,
       defenderHp: defender.hp, killed: !defender.alive,
     };
   }
@@ -331,7 +358,17 @@ export class Engine {
       passed.push(actor.id);
     } else {
       const target = this.fighter(p.targetId);
-      if (actor.alive && target && target.alive) strikes.push(this._strike(actor, target, p.attack));
+      if (actor.alive && target && target.alive) {
+        const s = this._strike(actor, target, p.attack);
+        strikes.push(s);
+        // контратака (только модельный бой): защитник бьёт в ответ по атакующему,
+        // если выжил и удар попал; ответный удар сам контратаку не вызывает
+        if (this.model && !s.dodged && target.alive && actor.alive
+            && target.stats && actor.stats
+            && Math.random() < this.model.counterChance(target.stats, actor.stats)) {
+          strikes.push(this._strike(target, actor, ZONES[(Math.random() * 3) | 0], true));
+        }
+      }
     }
     return { turn: this.turn, strikes, passed };
   }

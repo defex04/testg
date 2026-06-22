@@ -1,6 +1,58 @@
 import { game, tx, gameConfig, redis } from './db.js';
 import { wallet } from './economy.js';
 
+const DEFAULT_MAX_LEVEL = 15;
+export const DEFAULT_LEVEL_THRESHOLDS = Object.freeze([
+  0, 200, 500, 1000, 1800, 3200, 5500, 9000,
+  14000, 21000, 31000, 45000, 64000, 90000, 125000,
+]);
+
+export function normalizeLeveling(raw = {}) {
+  const max = Math.trunc(Number(raw?.maxLevel ?? raw?.max_level ?? DEFAULT_MAX_LEVEL));
+  const maxLevel = Math.max(1, Math.min(100, max || DEFAULT_MAX_LEVEL));
+  const source = Array.isArray(raw?.thresholds) ? raw.thresholds : DEFAULT_LEVEL_THRESHOLDS;
+  const thresholds = [];
+  for (let i = 0; i < maxLevel; i++) {
+    const fallback = DEFAULT_LEVEL_THRESHOLDS[i]
+      ?? ((thresholds[i - 1] ?? 0) + 1);
+    const n = Math.trunc(Number(source[i]));
+    if (i === 0) thresholds.push(0);
+    else thresholds.push(Math.max(Number.isFinite(n) ? n : fallback, thresholds[i - 1] + 1));
+  }
+  return { maxLevel, thresholds };
+}
+
+export async function levelingConfig() {
+  return normalizeLeveling(await gameConfig('character.leveling'));
+}
+
+export function levelForExp(exp, leveling = normalizeLeveling()) {
+  const cfg = normalizeLeveling(leveling);
+  const total = Math.max(0, Math.trunc(Number(exp) || 0));
+  let level = 1;
+  for (let i = 0; i < cfg.thresholds.length; i++) {
+    if (total >= cfg.thresholds[i]) level = i + 1;
+    else break;
+  }
+  return Math.min(cfg.maxLevel, level);
+}
+
+export function levelProgress(exp, level, leveling = normalizeLeveling()) {
+  const cfg = normalizeLeveling(leveling);
+  const total = Math.max(0, Math.trunc(Number(exp) || 0));
+  const fallbackLevel = levelForExp(total, cfg);
+  const safeLevel = Math.max(1,
+    Math.min(cfg.maxLevel, Math.trunc(Number(level) || fallbackLevel)));
+  const currentThreshold = cfg.thresholds[safeLevel - 1] ?? 0;
+  const nextThreshold = safeLevel >= cfg.maxLevel ? null : cfg.thresholds[safeLevel];
+  if (nextThreshold == null) {
+    return { xp: 0, xpMax: 0, currentThreshold, nextThreshold, maxed: true };
+  }
+  const xpMax = Math.max(1, nextThreshold - currentThreshold);
+  const xp = Math.max(0, Math.min(xpMax, total - currentThreshold));
+  return { xp, xpMax, currentThreshold, nextThreshold, maxed: false };
+}
+
 const START_LOCATION = 1; // Деревня
 
 export async function ensureCharacter(accountId, wantedName) {
@@ -40,8 +92,16 @@ export async function getCharacter(id) {
   if (!rows[0]) return null;
   const ch = rows[0];
   const start = await gameConfig('character.start');
+  const leveling = await levelingConfig();
+  const progress = levelProgress(ch.exp, ch.level, leveling);
   ch.wallet = await wallet(game, ch.id);
-  ch.xp = Number(ch.exp); ch.xpMax = start.xp_max;
+  ch.exp = Number(ch.exp);
+  ch.maxLevel = leveling.maxLevel;
+  ch.xpTotal = ch.exp;
+  ch.xp = progress.xp; ch.xpMax = progress.xpMax;
+  ch.xpLevelStart = progress.currentThreshold;
+  ch.xpNextTotal = progress.nextThreshold;
+  ch.xpMaxed = progress.maxed;
   ch.pvpXp = ch.wallet.valor || 0; ch.pvpXpMax = start.pvp_xp_max;
   ch.combat = await combatProfileFor(ch.id, start);
   return ch;
@@ -92,8 +152,21 @@ export async function combatProfileFor(charId, start) {
 }
 
 export async function addExp(client, charId, amount) {
+  const gain = Math.max(0, Math.trunc(Number(amount) || 0));
+  const leveling = await levelingConfig();
+  const capExp = leveling.thresholds[leveling.maxLevel - 1] ?? 0;
+  const row = (await client.query(
+    `SELECT level, exp FROM characters WHERE id = $1 FOR UPDATE`, [charId])).rows[0];
+  if (!row || gain <= 0) {
+    return { gained: 0, level: row ? Number(row.level) : null, leveledUp: false };
+  }
+  const oldLevel = Math.max(1, Math.min(leveling.maxLevel, Number(row.level) || 1));
+  const oldExp = Math.max(0, Number(row.exp) || 0);
+  const exp = Math.min(capExp, oldExp + gain);
+  const level = levelForExp(exp, leveling);
   await client.query(
-    `UPDATE characters SET exp = exp + $2 WHERE id = $1`, [charId, amount]);
+    `UPDATE characters SET exp = $2, level = $3 WHERE id = $1`, [charId, exp, level]);
+  return { gained: Math.max(0, exp - oldExp), exp, level, oldLevel, leveledUp: level > oldLevel };
 }
 
 /** Публичная информация об игроке (для карточки «Информация» из чата/почты). */

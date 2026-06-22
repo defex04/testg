@@ -24,7 +24,7 @@ curl http://localhost:8080/api/health
 curl -X POST http://localhost:8080/api/auth/dev -H "Content-Type: application/json" -d "{\"name\":\"ИгрокА\"}"
 ```
 
-Второй вызов вернёт токен и персонажа: создан аккаунт, персонаж 15 уровня
+Второй вызов вернёт токен и персонажа: создан аккаунт, персонаж 1 уровня
 в Деревне со стартовым бронзовым доспехом (всё через ledger'ы).
 
 ## Сервер на Azure (для GitHub Pages)
@@ -60,7 +60,7 @@ ssh -i C:\Users\andre\Downloads\mygame_key.pem azureuser@4.231.90.10 "chmod -R a
 | LOCATIONS: деревня/каньон/лощина, переходы | `GET /api/locations`, `POST /api/locations/move` (валидация по `location_links`) |
 | Список игроков в локации (был заглушкой) | `GET /api/locations/players` — живой, из Redis `loc:{id}:players` |
 | «Охота» → BattleSystem | WS: `{type:'hunt'}` → события `turnStart/timer/resolve/battleEnd`; ход `{type:'move',attack,block}`; те же зоны, блок ×0.12, крит ×1.8, крит+блок ×0.85, пропуск по таймауту |
-| Награда за победу (+50 меди, +120 опыта) | из `game_config('battle.reward.hunt')`, начисление через `currency_ledger` |
+| Награда за победу (+50 меди, +25 опыта) | из `game_config('battle.reward.hunt')`, начисление через `currency_ledger` |
 | ITEMS / примерочная | `GET /api/inventory`, `POST equip/unequip` — `item_instances` + `item_ledger`, проверка травм на слот |
 | Чат (был заглушкой) | WS `{type:'chat',text}` + `GET /api/chat/history` — Redis pub/sub + `chat_messages` |
 | Telegram WebApp | `POST /api/auth/telegram` (подпись initData + replay-защита); `POST /api/auth/dev` для браузера |

@@ -4,6 +4,7 @@ import fs from 'fs';
 import { game, auth, redis, tx, adminPg, clearConfigCache } from './db.js';
 import { addCurrency, wallet, CUR } from './economy.js';
 import { adminAbort, adminSetIntervention } from './battle/manager.js';
+import { runSimulation } from './battle/sim.js';
 import { cfg, isTelegramAdmin } from './config.js';
 import { verifyInitData } from './auth.js';
 
@@ -422,6 +423,16 @@ export function adminRoutes(app) {
     if (!done) throw bad(400, 'battle_not_active');
     await audit('battle.abort', 4, id, null);
     res.json({ ok: true });
+  });
+
+  // ================= симуляция боёв (нагрузка + баланс) =================
+  // Гоняет настоящий движок headless (без таймеров/Redis/БД). Бойцы синтетические
+  // по профилям команд; до 4 боёв можно записать таймлайн для «анимации» на клиенте.
+  app.post('/admin/api/simulate', guard, async (req, res) => {
+    const out = await runSimulation(req.body || {});
+    await audit('battle.simulate', null, null, {
+      params: out.params, perf: out.perf, balance: out.balance });
+    res.json(out);
   });
 
   // ================= гроссбухи =================

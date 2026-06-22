@@ -45,6 +45,37 @@ const STATEMENTS = [
   `INSERT INTO game_config (key, value)
    VALUES ('battle.intervention.default', '{"hunt": false, "pvp": true}')
    ON CONFLICT (key) DO NOTHING`,
+  `INSERT INTO game_config (key, value)
+   VALUES ('character.leveling',
+           '{"maxLevel": 15, "thresholds": [0, 200, 500, 1000, 1800, 3200, 5500, 9000, 14000, 21000, 31000, 45000, 64000, 90000, 125000]}')
+   ON CONFLICT (key) DO NOTHING`,
+  `INSERT INTO game_config (key, value)
+   VALUES ('battle.reward.hunt', '{"currency": "copper", "amount": 50, "exp": 25}')
+   ON CONFLICT (key) DO NOTHING`,
+  `INSERT INTO game_config (key, value)
+   VALUES ('character.start', '{"level": 1, "hp": 2330, "damage": [160, 240],
+                                "crit": 0.14, "dodge": 0.07, "height": 1.85,
+                                "xp_max": 200, "pvp_xp_max": 1000}')
+   ON CONFLICT (key) DO NOTHING`,
+  `DO $$
+   BEGIN
+     IF NOT EXISTS (SELECT 1 FROM game_config WHERE key = 'migration.level_system_v1_reset_done') THEN
+       UPDATE game_config SET value = value || '{"exp": 25}'::jsonb,
+              version = version + 1, updated_at = now()
+        WHERE key = 'battle.reward.hunt';
+       UPDATE game_config SET value = value || '{"level": 1, "xp_max": 200}'::jsonb,
+              version = version + 1, updated_at = now()
+        WHERE key = 'character.start';
+       UPDATE game_config SET value =
+              '{"maxLevel": 15, "thresholds": [0, 200, 500, 1000, 1800, 3200, 5500, 9000, 14000, 21000, 31000, 45000, 64000, 90000, 125000]}'::jsonb,
+              version = version + 1, updated_at = now()
+        WHERE key = 'character.leveling';
+       UPDATE npc_templates SET level = 1 WHERE id = 1;
+       UPDATE characters SET level = 1, exp = 0;
+       INSERT INTO game_config (key, value)
+       VALUES ('migration.level_system_v1_reset_done', 'true'::jsonb);
+     END IF;
+   END $$`,
   // Бронзовый доспех из сида был без статов — дозаполняем один раз
   // (если админ уже задал свои base_stats, не трогаем)
   `UPDATE item_templates

@@ -28,10 +28,11 @@ const esc = (v) => String(v ?? '').replace(/[&<>"]/g,
 
 const PLAYER = {
   name: 'ИгрокА',
-  level: 15,
+  level: 1,
+  maxLevel: 15,
   // кошелёк: медь / серебро / золото / бриллианты
   wallet: { copper: 0, silver: 0, gold: 0, diamond: 0 },
-  xp: 1240,    xpMax: 2000,    // опыт до следующего уровня
+  xp: 0,       xpMax: 200,     // опыт до следующего уровня
   pvpXp: 360,  pvpXpMax: 1000, // опыт PvP
 };
 
@@ -60,6 +61,7 @@ function applyCharacter(ch) {
   PLAYER.id = ch.id;
   PLAYER.name = ch.name;
   PLAYER.level = ch.level;
+  PLAYER.maxLevel = ch.maxLevel || PLAYER.maxLevel;
   PLAYER.wallet = { copper: 0, silver: 0, gold: 0, diamond: 0, ...ch.wallet };
   delete PLAYER.wallet.valor;    // доблесть показывается шкалой PvP, не монетой
   PLAYER.xp = ch.xp; PLAYER.xpMax = ch.xpMax;
@@ -82,8 +84,11 @@ function renderMoney() {
 }
 
 function renderXP() {
-  $('pp-xp-fill').style.width = Math.min(100, (PLAYER.xp / PLAYER.xpMax) * 100) + '%';
-  $('pp-xp-text').textContent = `${PLAYER.xp} / ${PLAYER.xpMax}`;
+  const xpMaxed = PLAYER.level >= PLAYER.maxLevel || PLAYER.xpMax <= 0;
+  $('pp-xp-fill').style.width = xpMaxed
+    ? '100%'
+    : Math.min(100, (PLAYER.xp / PLAYER.xpMax) * 100) + '%';
+  $('pp-xp-text').textContent = xpMaxed ? 'MAX' : `${PLAYER.xp} / ${PLAYER.xpMax}`;
   $('pp-pvp-fill').style.width = Math.min(100, (PLAYER.pvpXp / PLAYER.pvpXpMax) * 100) + '%';
   $('pp-pvp-text').textContent = `${PLAYER.pvpXp} / ${PLAYER.pvpXpMax}`;
 }
@@ -743,6 +748,17 @@ let totalDamage = 0;     // суммарный урон игрока за тек
 let lastTurnShown = 0;   // чтобы не дублировать «ход N» на sub-turn'ах раунда
 let currentFocusId = null;   // id сфокусированного соперника — чтобы не пересобирать шапку зря
 
+// Очередь боевых событий: turnStart/resolve/elixir/battleEnd обрабатываются строго
+// по одному, со ВЗАИМНЫМ ожиданием. Розыгрыш удара асинхронный (играет анимацию
+// через await), а сервер/replay могут выпустить несколько событий подряд — без
+// очереди их обработчики шли бы параллельно и анимации накладывались. Цепочка
+// гарантирует: следующее событие стартует только когда предыдущее доиграло.
+let battleOpChain = Promise.resolve();
+function battleSerial(fn) {
+  battleOpChain = battleOpChain.then(fn).catch((err) => console.error('Боевое событие:', err));
+  return battleOpChain;
+}
+
 const BATTLE_ERRORS = {
   target_offline: 'игрок не в сети',
   target_busy: 'игрок уже в бою',
@@ -898,10 +914,13 @@ async function initBattle(resumedBattle = null, starter = null, pvpTarget = null
   layoutWheel();
   requestAnimationFrame(layoutWheel);
 
-  battle.addEventListener('turnStart', (e) => {
+  // новый бой — чистая очередь событий (хвосты прошлого боя не тянем)
+  battleOpChain = Promise.resolve();
+
+  battle.addEventListener('turnStart', (e) => battleSerial(() => {
     const d = e.detail;
     if (d.turn !== lastTurnShown) { ui.setTurn(d.turn); lastTurnShown = d.turn; }
-    ui.setTimer(d.timeLeft);
+    ui.startCountdown(d.timeLeft);   // локальный отсчёт — дисплей не «зависнет» без пакетов
     if (d.roster) applyBattleRoster(d.roster);
     updateBattleInfo();
     if (d.canAct) {                // мой ход
@@ -918,16 +937,18 @@ async function initBattle(resumedBattle = null, starter = null, pvpTarget = null
       ui.showWaitTimer();
       setBeltLive(false);
     }
-  });
+  }));
 
-  battle.addEventListener('timer', (e) => ui.setTimer(e.detail.timeLeft));
+  // timer — лёгкий ресинк дисплея, идёт МИМО очереди (иначе отсчёт лагал бы за
+  // анимацией розыгрыша); сам отсчёт ведёт клиент, сервер только сверяет значение
+  battle.addEventListener('timer', (e) => ui.syncCountdown(e.detail.timeLeft));
 
-  battle.addEventListener('rosterUpdate', (e) => {
+  battle.addEventListener('rosterUpdate', (e) => battleSerial(() => {
     if (e.detail.roster) applyBattleRoster(e.detail.roster);
     updateBattleInfo();
-  });
+  }));
 
-  battle.addEventListener('resolve', async (e) => {
+  battle.addEventListener('resolve', (e) => battleSerial(async () => {
     const d = e.detail;
     setBeltLive(false);            // ход разыгрывается — пояс блокируется
     ui.showResolving();            // колесо скрыто, баннер убран — видна анимация
@@ -956,11 +977,11 @@ async function initBattle(resumedBattle = null, starter = null, pvpTarget = null
       }
       battle.finishTurn();
     }
-  });
+  }));
 
   // Эликсир применил и СПИСАЛ сервер: обновляем ростер, остаток ячейки у пьющего,
   // и (если эффект пришёлся на меня) — HP/всплывашку/чип эффекта.
-  battle.addEventListener('elixir', (e) => {
+  battle.addEventListener('elixir', (e) => battleSerial(() => {
     const d = e.detail;
     if (d.roster) applyBattleRoster(d.roster);
     updateBattleInfo();
@@ -997,9 +1018,10 @@ async function initBattle(resumedBattle = null, starter = null, pvpTarget = null
     if (side === 'left') selfBuffTurns = d.buffTurns || 0;
     refreshSelfEffects();
     renderCombatBar();         // мощь активна → её слот уходит на «перезарядку» (#3)
-  });
+  }));
 
-  battle.addEventListener('battleEnd', (e) => {
+  // battleEnd — через очередь: показ итога дожидается последней анимации удара/смерти
+  battle.addEventListener('battleEnd', (e) => battleSerial(() => {
     ui.hideControls();
     setBeltLive(false);
     if (e.detail.aborted) {
@@ -1016,7 +1038,7 @@ async function initBattle(resumedBattle = null, starter = null, pvpTarget = null
     // долить пояс из рюкзака, если включено автозаполнение (#2)
     autofillBeltAfterBattle().catch(console.error);
     ui.showEnd(victory, { onLeave: () => leaveBattle(true) });
-  });
+  }));
 
   battle.addEventListener('serverError', (e) => {
     const code = e.detail.error;
