@@ -93,6 +93,8 @@ export const api = {
   inventory: () => rest('/api/inventory'),
   equip:     (itemId) => rest('/api/inventory/equip', { itemId }),
   unequip:   (slot) => rest('/api/inventory/unequip', { slot }),
+  shop:      () => rest('/api/shop'),
+  shopBuy:   (templateId, quantity = 1) => rest('/api/shop/buy', { templateId, quantity }),
   // пояс эликсиров (сервер помнит состав): массив ячеек ELIXIR_SLOTS
   belt:        () => rest('/api/belt'),
   // slot задан — кладём в эту ячейку (#4); иначе сервер выбирает сам (долить

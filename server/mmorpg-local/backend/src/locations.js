@@ -12,6 +12,11 @@ export async function leavePresence(ch) {
   await redis.hDel(key(ch.location_id), String(ch.id));
 }
 
+export async function clearAllPresence() {
+  const keys = await redis.keys('loc:*:players');
+  await Promise.all(keys.map((k) => redis.del(k)));
+}
+
 export async function playersIn(locId) {
   const all = await redis.hGetAll(key(locId));
   return Object.values(all).map((s) => JSON.parse(s));

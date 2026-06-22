@@ -5,11 +5,12 @@ import { cfg } from './config.js';
 import { authRoutes } from './auth.js';
 import { ensureCharacter, characterRoutes } from './characters.js';
 import { sessionByToken } from './auth.js';
-import { locationRoutes } from './locations.js';
+import { clearAllPresence, locationRoutes } from './locations.js';
 import { inventoryRoutes, grantStarterItems } from './inventory.js';
 import { beltRoutes } from './belt.js';
 import { chatRoutes } from './chat.js';
 import { mailRoutes } from './mail.js';
+import { shopRoutes } from './shop.js';
 import { createHub } from './ws.js';
 import { adminRoutes } from './admin.js';
 import { runMigrations } from './migrate.js';
@@ -63,6 +64,7 @@ beltRoutes(app, authed);
 battleRoutes(app, authed);
 chatRoutes(app, authed);
 mailRoutes(app, authed, hub);
+shopRoutes(app, authed);
 adminRoutes(app);
 const pub = fileURLToPath(new URL('../public', import.meta.url));
 app.get('/admin', (req, res) => res.sendFile(pub + '/admin.html'));
@@ -78,6 +80,7 @@ app.use((err, req, res, next) => {
 });
 
 await connectAll();
+await clearAllPresence();
 await runMigrations();
 await battleBoot();
 server.listen(cfg.port, () =>

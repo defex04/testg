@@ -6,6 +6,12 @@
       "runtimeExecutable": "python",
       "runtimeArgs": ["C:/Users/andre/Downloads/new/arena-game/serve.py"],
       "autoPort": true
+    },
+    {
+      "name": "mmo-admin",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["C:/Users/andre/Downloads/new/.claude/serve-admin.py"],
+      "autoPort": true
     }
   ]
 }

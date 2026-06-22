@@ -398,7 +398,7 @@ CREATE TABLE item_ledger (
     to_owner_id     BIGINT,
     reason          SMALLINT NOT NULL,  -- 1 drop, 2 quest, 3 trade, 4 auction,
                                         -- 5 mail, 6 craft, 7 destroy, 8 repair,
-                                        -- 9 injury, 10 battle_loot, 11 admin
+                                        -- 9 injury, 10 battle_loot, 11 admin, 12 shop
     ref_type        SMALLINT,
     ref_id          BIGINT,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),

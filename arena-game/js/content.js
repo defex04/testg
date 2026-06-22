@@ -56,6 +56,7 @@ export const LOCATIONS = {
     image: 'assets/backgrounds/prigorod.webp',
     actions: [
       { label: 'Охота на разбойника', hunt: true },
+      { label: 'Магазин эликсиров', shop: true },
       { label: 'Испить живой воды' },
       { label: 'Подняться в замок', soon: true },
       { label: 'Поселение Зеленое', goto: 'derevna' },

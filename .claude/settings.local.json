@@ -24,7 +24,16 @@
       "Bash(mkdir -p .orig_bak)",
       "Bash(cp wait.PNG win.PNG lose.PNG .orig_bak/)",
       "Read(//c/c/Users/andre/Downloads/new/arena-game/assets/fight/**)",
-      "Bash(git --no-pager diff server/mmorpg-local/backend/src/battle/manager.js)"
+      "Bash(git --no-pager diff server/mmorpg-local/backend/src/battle/manager.js)",
+      "PowerShell(node --check server/mmorpg-local/backend/src/battle/manager.js)",
+      "PowerShell(node --check arena-game/js/arena/BattleUI.js)",
+      "PowerShell(node --check arena-game/js/main.js)",
+      "PowerShell(if \\($?\\) { \"manager OK\" })",
+      "PowerShell(if \\($?\\) { \"BattleUI OK\" })",
+      "PowerShell(if \\($?\\) { \"main OK\" })",
+      "PowerShell($paths = @\\(\"$env:ProgramFiles\\\\nodejs\\\\node.exe\",\"${env:ProgramFiles\\(x86\\)}\\\\nodejs\\\\node.exe\",\"$env:LOCALAPPDATA\\\\Programs\\\\nodejs\\\\node.exe\",\"$env:APPDATA\\\\npm\\\\node.exe\"\\); $found = $paths | Where-Object { Test-Path $_ }; if \\($found\\) { $found } else { Get-Command node,nodejs,nvm -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source; \"searching...\"; Get-ChildItem -Path C:\\\\ -Filter node.exe -Recurse -ErrorAction SilentlyContinue -Depth 4 | Select-Object -First 5 -ExpandProperty FullName })",
+      "PowerShell($d = Get-Command docker -ErrorAction SilentlyContinue; if \\($d\\) { \"docker: $\\($d.Source\\)\"; docker ps --format \"{{.Names}} {{.Image}}\" 2>$null } else { \"no docker\" })",
+      "Bash(command -v python python3 py)"
     ]
   }
 }

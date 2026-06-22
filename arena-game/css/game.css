@@ -1546,9 +1546,131 @@ body.loc-castle.in-battle .sprite-main .sm-ico {
 .loc-chip:hover .lc-ico { transform: translateX(3px); }
 .loc-btn .lc-ico { color: #b9d48d; }
 .loc-btn.hunt .lc-ico { color: #ffb077; }
+.loc-btn.shop .lc-ico { color: #f3c86b; }
 .loc-btn.hunt:hover {
   border-color: rgba(255, 176, 119, .6);
   box-shadow: 0 0 13px rgba(255, 154, 61, .22), 0 3px 9px rgba(0, 0, 0, .35);
+}
+.loc-btn.shop:hover {
+  border-color: rgba(243, 200, 107, .68);
+  box-shadow: 0 0 13px rgba(243, 200, 107, .2), 0 3px 9px rgba(0, 0, 0, .35);
+}
+
+.shop-panel {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.shop-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.shop-loading {
+  padding: 14px;
+  color: #d8cca5;
+  text-align: center;
+  font-family: var(--font-display);
+  border: 1px solid rgba(138, 111, 60, .28);
+  border-radius: 8px;
+  background: rgba(12, 16, 8, .45);
+}
+
+.shop-item {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid rgba(138, 111, 60, .38);
+  border-radius: 8px;
+  background: linear-gradient(180deg, rgba(32, 39, 19, .88), rgba(15, 20, 9, .88));
+  box-shadow: inset 0 1px 0 rgba(244, 205, 111, .08), 0 4px 12px rgba(0, 0, 0, .28);
+}
+
+.shop-ico {
+  width: 38px;
+  height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  font-size: 22px;
+  background: radial-gradient(circle at 35% 25%, rgba(255, 238, 170, .22), rgba(70, 58, 20, .14) 55%, rgba(0, 0, 0, .2));
+  border: 1px solid rgba(244, 205, 111, .25);
+}
+
+.shop-info {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.shop-name {
+  color: #f2e7bf;
+  font-family: var(--font-display);
+  font-size: 14px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.shop-desc {
+  color: #bfb28a;
+  font-size: 12px;
+  line-height: 1.25;
+}
+
+.shop-price {
+  color: var(--gold-bright);
+  font-size: 12px;
+}
+
+.shop-buy-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.shop-qty {
+  width: 54px;
+  height: 32px;
+  padding: 0 6px;
+  color: #f2e7bf;
+  text-align: center;
+  background: rgba(8, 11, 6, .72);
+  border: 1px solid rgba(138, 111, 60, .5);
+  border-radius: 7px;
+}
+
+.shop-buy {
+  height: 32px;
+  padding: 0 12px;
+  color: #30240c;
+  font-family: var(--font-display);
+  font-size: 12px;
+  border: 1px solid #6e5019;
+  border-radius: 7px;
+  background: linear-gradient(180deg, #f5d581, #bf842d);
+  box-shadow: inset 0 1px 0 rgba(255, 245, 205, .4);
+  cursor: pointer;
+}
+.shop-buy:disabled { opacity: .58; cursor: default; }
+
+@media (max-width: 520px) {
+  .shop-item {
+    grid-template-columns: 38px minmax(0, 1fr);
+    align-items: start;
+  }
+  .shop-buy-row {
+    grid-column: 1 / -1;
+    justify-content: flex-end;
+  }
+  .shop-desc { font-size: 11px; }
 }
 
 /* жители — медальон-инициал слева */

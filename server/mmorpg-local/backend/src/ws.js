@@ -91,10 +91,12 @@ export function createHub(server) {
               throw new Error('cannot_attack_self');
             }
             const target = byChar.get(targetId);
-            if (!target) throw new Error('target_offline');
             const me = await getCharacter(ch.id);
             const targetCh = await getCharacter(targetId);
-            if (!targetCh) throw new Error('target_offline');
+            if (!target || target.ws.readyState !== 1 || !targetCh) {
+              if (target && targetCh) await forgetPresence(targetCh, target);
+              throw new Error('target_offline');
+            }
             await battle.startDuel(me, targetCh, send, target.send);
             break;
           }
@@ -145,6 +147,8 @@ export function createHub(server) {
           conn.offlineTimer = setTimeout(() => {
             forgetPresence(ch, conn).catch(() => {});
           }, PRESENCE_GRACE_MS);
+        } else {
+          await forgetPresence(ch, conn);
         }
       }
     });

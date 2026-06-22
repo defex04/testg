@@ -394,6 +394,7 @@ applyPerfMode(perfModePref());
 
 // --- состояние UI локации ---
 let locPanelOpen = false;                 // всплывающая панель «Локация»
+let shopOpen = false;
 let battlesPanelOpen = false;             // панель «Текущие бои»
 let battlesTimer = null;
 let castleDockPane = null;                // 'members'|'battlelog'|'players'|'chat'|null
@@ -437,6 +438,7 @@ function closeLocPanel() {
   if (!locPanelOpen) return;
   locPanelOpen = false;
   locBody.classList.remove('open');
+  if (shopOpen) renderLocationActions(LOCATIONS[currentLoc]);
   updateCastleMainMenu();
 }
 
@@ -671,6 +673,7 @@ async function gotoLocation(key) {
 const ICON_GO = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h13M13.5 6.5 19 12l-5.5 5.5"/></svg>`;
 const ICON_HUNT = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 4.5 15.5 15.5M19.5 4.5 8.5 15.5"/><path d="M14 17.2 17.2 14M10 17.2 6.8 14"/><path d="M16.2 16.2 19 19M7.8 16.2 5 19"/></svg>`;
 const ICON_ACT = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><path d="M12 4l1.8 5.4L19 12l-5.2 2.6L12 20l-1.8-5.4L5 12l5.2-2.6L12 4Z"/></svg>`;
+const ICON_SHOP = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 10h14l-1 10H6L5 10Z"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/><path d="M9 14h6"/></svg>`;
 
 function makeButton(className, html, onClick) {
   const b = document.createElement('button');
@@ -697,6 +700,8 @@ function renderActionGroup(title, buttons) {
 }
 
 function renderLocationActions(loc) {
+  shopOpen = false;
+  locSceneTitle.textContent = loc.name;
   locActions.innerHTML = '';
   const transitions = loc.actions.filter((a) => a.goto || a.soon);
   const acts = loc.actions.filter((a) => !a.goto && !a.soon);
@@ -710,10 +715,11 @@ function renderLocationActions(loc) {
       })));
 
   renderActionGroup('Действия', acts.map((a) =>
-    makeButton('loc-btn' + (a.hunt ? ' hunt' : ''),
-      `<span class="lc-ico">${a.hunt ? ICON_HUNT : ICON_ACT}</span><span>${esc(a.label)}</span>`,
+    makeButton('loc-btn' + (a.hunt ? ' hunt' : '') + (a.shop ? ' shop' : ''),
+      `<span class="lc-ico">${a.shop ? ICON_SHOP : (a.hunt ? ICON_HUNT : ICON_ACT)}</span><span>${esc(a.label)}</span>`,
       () => {
         if (a.hunt) startBattle();
+        else if (a.shop) openShop();
         else showToast(`«${a.label}» — заглушка: модуль действий подключается отдельно`);
       })));
 
@@ -721,6 +727,101 @@ function renderLocationActions(loc) {
     makeButton('npc-chip',
       `<span class="npc-ava">${esc(n.name.trim()[0])}</span><span>${esc(n.name)}</span>`,
       () => showToast(`Диалог с «${n.name}» — заглушка: модуль NPC подключается отдельно`))));
+}
+
+const SHOP_ERRORS = {
+  shop_unavailable: 'Магазин доступен только в Городе Надежды',
+  insufficient_funds: 'Не хватает меди',
+  not_for_sale: 'Этот товар сейчас не продается',
+  not_found: 'Товар не найден',
+};
+const SHOP_EMOJI = { health: '🧪', power: '⚡', escape: '🏃', elixir: '⚗️' };
+
+function shopErrorText(e) {
+  return SHOP_ERRORS[e?.message] || ('Магазин: ' + (e?.message || 'ошибка'));
+}
+
+function shopIcon(kind) {
+  return SHOP_EMOJI[kind] || SHOP_EMOJI.elixir;
+}
+
+async function openShop() {
+  if (!online) {
+    showToast('Магазин доступен только онлайн');
+    return;
+  }
+  shopOpen = true;
+  locSceneTitle.textContent = 'Магазин эликсиров';
+  locActions.innerHTML = '<div class="shop-loading">Загрузка товаров...</div>';
+  try {
+    const data = await api.shop();
+    renderShop(data.items || []);
+  } catch (e) {
+    showToast(shopErrorText(e));
+    renderLocationActions(LOCATIONS[currentLoc]);
+  }
+}
+
+function renderShop(items) {
+  locActions.innerHTML = '';
+  const panel = document.createElement('div');
+  panel.className = 'shop-panel';
+  panel.appendChild(makeButton('loc-chip shop-back',
+    `<span class="lc-ico">${ICON_GO}</span><span>Назад</span>`,
+    () => renderLocationActions(LOCATIONS[currentLoc])));
+
+  const list = document.createElement('div');
+  list.className = 'shop-list';
+  if (!items.length) {
+    const empty = document.createElement('div');
+    empty.className = 'shop-loading';
+    empty.textContent = 'Товары пока закончились';
+    list.appendChild(empty);
+  }
+
+  for (const it of items) {
+    const row = document.createElement('div');
+    row.className = 'shop-item';
+    row.innerHTML = `
+      <div class="shop-ico">${esc(shopIcon(it.kind))}</div>
+      <div class="shop-info">
+        <div class="shop-name">${esc(it.name)}</div>
+        <div class="shop-desc">${esc(it.description || '')}</div>
+        <div class="shop-price">${Number(it.price) || 0} меди</div>
+      </div>
+      <div class="shop-buy-row">
+        <input class="shop-qty" type="number" min="1" max="99" value="1" inputmode="numeric" aria-label="Количество">
+        <button class="shop-buy" type="button">Купить</button>
+      </div>`;
+    const qty = row.querySelector('.shop-qty');
+    const btn = row.querySelector('.shop-buy');
+    btn.addEventListener('click', () => buyShopItem(it, qty, btn));
+    list.appendChild(row);
+  }
+
+  panel.appendChild(list);
+  locActions.appendChild(panel);
+}
+
+async function buyShopItem(it, qtyEl, btn) {
+  const qty = Math.max(1, Math.min(99, Math.trunc(Number(qtyEl.value) || 1)));
+  qtyEl.value = qty;
+  const oldText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '...';
+  try {
+    const res = await api.shopBuy(it.templateId, qty);
+    PLAYER.wallet = { copper: 0, silver: 0, gold: 0, diamond: 0, ...res.wallet };
+    delete PLAYER.wallet.valor;
+    renderMoney();
+    registerServerItems(res.inventory || await api.inventory());
+    showToast(`Куплено: ${it.name} x${res.bought?.quantity || qty}`);
+  } catch (e) {
+    showToast(shopErrorText(e));
+  } finally {
+    btn.disabled = false;
+    btn.textContent = oldText;
+  }
 }
 
 function setLocation(key, { quiet = false } = {}) {
