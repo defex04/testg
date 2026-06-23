@@ -1721,10 +1721,15 @@ body.loc-castle.in-battle .sprite-main .sm-ico {
 
 /* вкладки-категории (ТЗ #3, #5) — переносятся на новую строку, видны все сразу */
 .shop-tabs {
-  display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  margin-bottom: 8px;
 }
 .shop-tab {
-  flex: 1 1 auto; padding: 6px 8px; color: #cdbf94; text-align: center;
+  width: 100%;
+  min-width: 0;
+  padding: 6px 8px; color: #cdbf94; text-align: center;
   font-family: var(--font-display); font-size: 12.5px; white-space: nowrap; cursor: pointer;
   background: linear-gradient(180deg, rgba(40, 48, 24, .7), rgba(18, 24, 11, .7));
   border: 1px solid rgba(138, 111, 60, .42); border-radius: 8px;
@@ -3991,6 +3996,9 @@ button.belt-slot { padding: 0; font: inherit; color: inherit; -webkit-tap-highli
     width: calc(100% - 12px);
     bottom: calc(min(18vw, 58px) + 20px);
     max-height: 42vh;
+  }
+  body.loc-castle .loc-body.open.shop-open {
+    max-height: min(64vh, 560px);
   }
   body.loc-castle .bottom-dock.dock-open .dock-body {
     padding: 8px 10px 6px;
