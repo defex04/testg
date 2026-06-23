@@ -78,6 +78,12 @@ export class Engine {
       lastTargetedTurn: 0,               // раунд, когда по бойцу БИЛИ — для «холода» цели
       buffMult: 1,                       // множитель урона от «Эликсира мощи»
       buffTurns: 0,                      // на сколько своих ударов он действует
+      critBuffAdd: 0,                    // прибавка к шансу крита («Эликсир крови»)
+      critBuffTurns: 0,                  // на сколько своих ходов она действует
+      mp: Number(def.mp ?? 0),           // мана (для «Эликсира маны»; на бой пока не влияет)
+      maxMp: Number(def.maxMp ?? 0),
+      effects: [],                       // эффекты по времени: HoT/DoT/мана (см. addOverTime)
+      cooldowns: {},                     // тайм-ауты свитков по виду (wall-clock ms)
       aiHealUses: Number(def.aiHealUses ?? 0),
       aiPowerUses: Number(def.aiPowerUses ?? 0),
       aiHealAmount: Number(def.aiHealAmount ?? 0),
@@ -308,7 +314,8 @@ export class Engine {
       const A = attacker.stats, D = defender.stats;
       dodged = Math.random() < m.dodgeChance(A, D);
       blocked = !dodged && Math.random() < m.blockChance(A, D);
-      crit = !dodged && Math.random() < m.critChance(A, D);
+      const critBonus = attacker.critBuffTurns > 0 ? attacker.critBuffAdd : 0;
+      crit = !dodged && Math.random() < m.critChance(A, D) + critBonus;
       if (!dodged) {
         let dmg = m.baseDamage(A) * m.damageVariance();
         if (crit) dmg *= m.critMult(A);
@@ -324,7 +331,8 @@ export class Engine {
       // прежняя логика (живой бой): зональный блок ×0.12, крит ×1.8
       blocked = defender.block === zone;
       dodged = !blocked && Math.random() < defender.dodge;
-      crit = !dodged && Math.random() < attacker.crit;
+      const critBonus = attacker.critBuffTurns > 0 ? attacker.critBuffAdd : 0;
+      crit = !dodged && Math.random() < attacker.crit + critBonus;
       if (!dodged) {
         damage = rnd(attacker.damage[0], attacker.damage[1]);
         if (crit && blocked) damage *= 0.85;
@@ -338,6 +346,9 @@ export class Engine {
         if (defender.hp <= 0) defender.alive = false;
       }
     }
+    // «Эликсир крови»: прибавка к криту действует на ХОД бойца — гасим её на его
+    // ударе (но не на контратаке, иначе сгорела бы до его настоящего хода).
+    if (!isCounter && attacker.critBuffTurns > 0) attacker.critBuffTurns -= 1;
     return {
       attackerId: attacker.id, defenderId: defender.id,
       attackerSide: attacker.side, defenderSide: defender.side,
@@ -389,6 +400,82 @@ export class Engine {
     f.buffMult = mult;
     f.buffTurns = Math.max(0, Math.round(turns));
     return true;
+  }
+
+  /** Прибавка к шансу крита («Эликсир крови») на N своих ходов. */
+  addCritBuff(id, add, turns) {
+    const f = this.fighter(id);
+    if (!f || !f.alive) return false;
+    f.critBuffAdd = Math.max(0, Number(add) || 0);
+    f.critBuffTurns = Math.max(0, Math.round(turns));
+    return true;
+  }
+
+  /**
+   * Эффект по времени (HoT/DoT/мана): total — суммарная величина (HP/MP),
+   * растянутая на durationMs реального времени. kind: 'health' | 'heal_scroll'
+   * (лечение), 'poison' (урон), 'mana' (восстановление MP).
+   * stack=false → эффект того же вида ЗАМЕНЯЕТСЯ (эликсиры: рефреш, без стопок);
+   * stack=true  → ДОБАВЛЯЕТСЯ к идущим (свитки яда/исцеления копятся от нескольких
+   * источников на одну цель). См. tickEffects.
+   */
+  addOverTime(id, kind, total, durationMs, srcId = null, stack = false) {
+    const f = this.fighter(id);
+    if (!f || !f.alive) return false;
+    if (!stack) f.effects = f.effects.filter((e) => e.kind !== kind);
+    f.effects.push({ kind, total: Math.max(0, Number(total) || 0),
+      applied: 0, durationMs: Math.max(1, Number(durationMs) || 1),
+      elapsedMs: 0, srcId });
+    return true;
+  }
+
+  /**
+   * Тик эффектов по времени: dtMs — прошедшее реальное время. Применяет дробную
+   * долю каждого эффекта (по доле прошедшего времени), снимает доигравшие.
+   * Возвращает { changed: [бойцы с изменением], deaths: [id умерших от яда] }.
+   */
+  tickEffects(dtMs) {
+    const dt = Math.max(0, Number(dtMs) || 0);
+    const changed = [], deaths = [];
+    if (!dt) return { changed, deaths };
+    for (const f of this.fighters.values()) {
+      if (!f.alive || !f.effects.length) continue;
+      let touched = false;
+      for (const e of f.effects) {
+        const step = Math.min(dt, e.durationMs - e.elapsedMs);
+        if (step <= 0) continue;
+        e.elapsedMs += step;
+        const target = e.total * (e.elapsedMs / e.durationMs);
+        const delta = target - e.applied;     // сколько применить в этом тике
+        e.applied = target;
+        if (delta === 0) continue;
+        touched = true;
+        if (e.kind === 'mana') {
+          f.mp = Math.max(0, Math.min(f.maxMp, f.mp + delta));
+        } else if (e.kind === 'poison') {
+          f.hp = Math.max(0, f.hp - delta);
+          if (f.hp <= 0) f.alive = false;
+        } else {                               // health / heal_scroll — лечение
+          f.hp = Math.min(f.maxHp, f.hp + delta);
+        }
+      }
+      f.effects = f.effects.filter((e) => e.elapsedMs < e.durationMs - 0.5);
+      if (touched) { changed.push(f); if (!f.alive) deaths.push(f.id); }
+    }
+    return { changed, deaths };
+  }
+
+  /** Снять эффекты указанных видов («Свиток очищения»). Возвращает снятые виды. */
+  cleanse(id, kinds) {
+    const f = this.fighter(id);
+    if (!f) return [];
+    const set = new Set(kinds || []);
+    const removed = [];
+    f.effects = f.effects.filter((e) => {
+      if (set.has(e.kind)) { removed.push(e.kind); return false; }
+      return true;
+    });
+    return removed;
   }
 
   finished() { return !this.aliveOf('left').length || !this.aliveOf('right').length; }

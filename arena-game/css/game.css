@@ -1684,6 +1684,52 @@ body.loc-castle.in-battle .sprite-main .sm-ico {
 }
 .shop-buy:disabled { opacity: .58; cursor: default; }
 
+/* бейдж требуемого уровня в строке цены; lock — недоступно по уровню */
+.shop-lvl {
+  margin-left: 6px;
+  padding: 0 6px;
+  font: 700 11px var(--font-display);
+  color: #d8c89a;
+  background: rgba(8, 11, 6, .6);
+  border: 1px solid rgba(138, 111, 60, .5);
+  border-radius: 6px;
+}
+.shop-lvl.lock { color: #ff9a4d; border-color: rgba(255, 154, 77, .6); }
+.shop-item.locked { opacity: .82; }
+.shop-item.locked .shop-ico { filter: grayscale(.55) brightness(.82); }
+
+/* --- Уровни качества расходников: цвет рамки/фона по quality (1..5) --- */
+/* серый · зелёный · синий · фиолетовый · оранжевый (классическая MMO-схема) */
+.q1 { --qc: 154, 160, 166; }
+.q2 { --qc: 111, 207, 111; }
+.q3 { --qc: 90, 169, 255; }
+.q4 { --qc: 181, 122, 255; }
+.q5 { --qc: 255, 154, 77; }
+
+.inv-cell.q1, .inv-cell.q2, .inv-cell.q3, .inv-cell.q4, .inv-cell.q5 {
+  border-color: rgba(var(--qc), .7);
+  background: radial-gradient(120% 120% at 50% 14%, rgba(var(--qc), .24), transparent 72%),
+              linear-gradient(180deg, #1b2210, #12170a);
+  box-shadow: inset 0 1px 0 rgba(255, 240, 200, .05), 0 0 10px rgba(var(--qc), .18);
+}
+.shop-ico.q1, .shop-ico.q2, .shop-ico.q3, .shop-ico.q4, .shop-ico.q5 {
+  border-color: rgba(var(--qc), .65);
+  box-shadow: 0 0 9px rgba(var(--qc), .28), inset 0 1px 0 rgba(255, 240, 200, .08);
+}
+.ip-ico.q1, .ip-ico.q2, .ip-ico.q3, .ip-ico.q4, .ip-ico.q5 {
+  filter: drop-shadow(0 0 5px rgba(var(--qc), .55));
+}
+/* боевой пояс и пояс примерочной: рамка/свечение ячейки = качество (перебивает kind-*) */
+.combat-slot.elixir.filled.q1, .combat-slot.elixir.filled.q2,
+.combat-slot.elixir.filled.q3, .combat-slot.elixir.filled.q4,
+.combat-slot.elixir.filled.q5,
+.belt-slot.elixir.filled.q1, .belt-slot.elixir.filled.q2,
+.belt-slot.elixir.filled.q3, .belt-slot.elixir.filled.q4,
+.belt-slot.elixir.filled.q5 {
+  border-color: rgba(var(--qc), .72);
+  box-shadow: 0 0 10px rgba(var(--qc), .26), inset 0 1px 0 rgba(244, 205, 111, .07);
+}
+
 @media (max-width: 520px) {
   .shop-item {
     grid-template-columns: 38px minmax(0, 1fr);

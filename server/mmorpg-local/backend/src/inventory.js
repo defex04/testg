@@ -8,14 +8,14 @@ export async function getInventory(charId) {
   const { rows } = await game.query(
     `SELECT i.id, i.template_id, i.owner_type, i.slot, i.quantity, i.enchant_level,
             t.name, t.icon, t.slot AS equip_slot, t.type, t.base_stats,
-            t.price, t.tradable
+            t.price, t.tradable, t.quality
        FROM item_instances i JOIN item_templates t ON t.id = i.template_id
       WHERE i.owner_id = $1 AND i.owner_type IN (1, 2) AND i.status = 1
       ORDER BY i.id`, [charId]);
   return rows.map(r => ({
     id: r.id, templateId: r.template_id, name: r.name, icon: r.icon,
     type: r.type, slot: r.equip_slot, quantity: r.quantity,
-    enchant: r.enchant_level, stats: r.base_stats,
+    enchant: r.enchant_level, stats: r.base_stats, quality: Number(r.quality) || 1,
     price: Number(r.price) || 0, tradable: r.tradable !== false,
     equipped: r.owner_type === OWNER.equipment,
   }));
@@ -98,9 +98,11 @@ export async function grantStarterItems(charId) {
     `SELECT 1 FROM item_instances WHERE owner_id = $1 AND owner_type IN (1,2) LIMIT 1`,
     [charId]);
   if (has.rows[0]) return;
-  // [templateId, quantity]: бронзовый доспех + по стопке эликсиров здоровья/мощи
-  // и эликсир побега — чтобы поясом и выходом можно было пользоваться сразу
-  const grants = [[101, 1], [202, 5], [203, 5], [201, 1]];
+  // [templateId, quantity]: бронзовый доспех + серые (T1) расходники каждой
+  // категории — чтобы поясом, свитками и выходом можно было пользоваться сразу.
+  // 202 жизнь, 203 мощь, 230 мана, 240 кровь, 250 яд, 260 исцеление, 270 очищение, 201 побег.
+  const grants = [[101, 1], [202, 5], [203, 5], [230, 3], [240, 3],
+    [250, 2], [260, 2], [270, 1], [201, 1]];
   await tx(async (c) => {
     for (const [tpl, qty] of grants) {
       const ins = await c.query(

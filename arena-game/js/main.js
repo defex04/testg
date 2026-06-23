@@ -735,8 +735,11 @@ const SHOP_ERRORS = {
   insufficient_funds: 'Не хватает меди',
   not_for_sale: 'Этот товар сейчас не продается',
   not_found: 'Товар не найден',
+  level_too_low: 'Уровень слишком низкий для покупки',
 };
-const SHOP_EMOJI = { health: '🧪', power: '⚡', escape: '🏃', elixir: '⚗️' };
+let shopCharLevel = 1;          // уровень игрока для блокировки покупок не по уровню
+const SHOP_EMOJI = { health: '🧪', power: '⚗️', mana: '🔮', blood: '🩸',
+  escape: '🏃', poison: '☠️', heal_scroll: '🩹', cleanse: '🌀', elixir: '⚗️' };
 
 function shopErrorText(e) {
   return SHOP_ERRORS[e?.message] || ('Магазин: ' + (e?.message || 'ошибка'));
@@ -757,6 +760,7 @@ async function openShop() {
   locActions.innerHTML = '<div class="shop-loading">Загрузка товаров...</div>';
   try {
     const data = await api.shop();
+    shopCharLevel = Number(data.charLevel) || PLAYER.level || 1;
     renderShop(data.items || []);
   } catch (e) {
     showToast(shopErrorText(e));
@@ -782,22 +786,27 @@ function renderShop(items) {
   }
 
   for (const it of items) {
+    const q = it.quality || 1;
+    const levelReq = it.levelReq || 1;
+    const locked = shopCharLevel < levelReq;   // купить можно только по уровню
     const row = document.createElement('div');
-    row.className = 'shop-item';
+    row.className = 'shop-item q' + q + (locked ? ' locked' : '');
     row.innerHTML = `
-      <div class="shop-ico">${esc(shopIcon(it.kind))}</div>
+      <div class="shop-ico q${q}">${esc(shopIcon(it.kind))}</div>
       <div class="shop-info">
         <div class="shop-name">${esc(it.name)}</div>
         <div class="shop-desc">${esc(it.description || '')}</div>
-        <div class="shop-price">${Number(it.price) || 0} меди</div>
+        <div class="shop-price">${Number(it.price) || 0} меди
+          <span class="shop-lvl${locked ? ' lock' : ''}">ур. ${levelReq}</span></div>
       </div>
       <div class="shop-buy-row">
         <input class="shop-qty" type="number" min="1" max="99" value="1" inputmode="numeric" aria-label="Количество">
-        <button class="shop-buy" type="button">Купить</button>
+        <button class="shop-buy" type="button"${locked ? ' disabled' : ''}>${locked ? 'Ур. ' + levelReq : 'Купить'}</button>
       </div>`;
     const qty = row.querySelector('.shop-qty');
     const btn = row.querySelector('.shop-buy');
-    btn.addEventListener('click', () => buyShopItem(it, qty, btn));
+    if (locked) { qty.disabled = true; btn.title = `Требуется уровень ${levelReq}`; }
+    else btn.addEventListener('click', () => buyShopItem(it, qty, btn));
     list.appendChild(row);
   }
 
@@ -1096,10 +1105,16 @@ async function initBattle(resumedBattle = null, starter = null, pvpTarget = null
     }
     if (d.target) syncEffectFromFighter(d.target);
     const byName = esc(d.byName || battle.sides.left.name);
-    const targetName = d.targetName && d.targetName !== d.byName ? ` для <b>${esc(d.targetName)}</b>` : '';
-    if (d.kind === 'health') ui.log(`<b>${byName}</b> восстанавливает ${d.heal} HP${targetName}`);
+    const tn = d.targetName && d.targetName !== d.byName ? ` для <b>${esc(d.targetName)}</b>` : '';
+    const tnFoe = d.targetName && d.targetName !== d.byName ? ` <b>${esc(d.targetName)}</b>` : '';
+    if (d.kind === 'health') ui.log(`<b>${byName}</b> пьёт эликсир жизни${tn} (+${d.amount} HP за ${d.secs} c)`);
+    else if (d.kind === 'mana') ui.log(`<b>${byName}</b> пьёт эликсир маны${tn} (+${d.amount} MP за ${d.secs} c)`);
+    else if (d.kind === 'power') ui.log(`<b>${byName}</b> усиливает удары${tn} на +${Math.round((d.mult - 1) * 100)}% (${d.turns} х.)`);
+    else if (d.kind === 'blood') ui.log(`<b>${byName}</b> повышает шанс крита${tn} на +${Math.round((d.critAdd || 0) * 100)}% (${d.turns} х.)`);
+    else if (d.kind === 'poison') ui.log(`<b>${byName}</b> отравляет${tnFoe} (−${d.amount} HP за ${d.secs} c)`);
+    else if (d.kind === 'heal_scroll') ui.log(`<b>${byName}</b> читает свиток исцеления${tn} (+${d.amount} HP за ${d.secs} c)`);
+    else if (d.kind === 'cleanse') ui.log(`<b>${byName}</b> очищает эффекты${tnFoe || tn}`);
     else if (d.kind === 'escape') ui.log(`<b>${byName}</b> использует Эликсир побега`);
-    else ui.log(`<b>${byName}</b> усиливает удары${targetName} на +${Math.round((d.mult - 1) * 100)}% (${d.turns} х.)`);
 
     const side = effectPopupSide(d);
     if (!side) {
@@ -1110,8 +1125,16 @@ async function initBattle(resumedBattle = null, starter = null, pvpTarget = null
     const fighter = fighters[side];
     const pos = fighter
       ? arena.worldToScreen(fighter.headPoint()) : { x: side === 'left' ? 70 : 220, y: 90 };
-    if (d.kind === 'health' && d.heal > 0) {
-      ui.popup(pos, `+${d.heal}`, 'heal');
+    if (d.kind === 'health' || d.kind === 'heal_scroll') {
+      ui.popup(pos, 'Лечение', 'heal');
+    } else if (d.kind === 'mana') {
+      ui.popup(pos, 'Мана', 'buff');
+    } else if (d.kind === 'poison') {
+      ui.popup(pos, 'Яд', 'crit');
+    } else if (d.kind === 'blood') {
+      ui.popup(pos, 'Крит +', 'buff');
+    } else if (d.kind === 'cleanse') {
+      ui.popup(pos, 'Очищение', 'buff');
     } else if (d.kind === 'escape') {
       ui.popup(pos, 'Побег', 'escape');
       if (side === 'right') setOpponentVisible(false);
@@ -1125,6 +1148,18 @@ async function initBattle(resumedBattle = null, starter = null, pvpTarget = null
     if (side === 'left') selfBuffTurns = d.buffTurns || 0;
     refreshSelfEffects();
     renderCombatBar();         // мощь активна → её слот уходит на «перезарядку» (#3)
+  }));
+
+  // эффекты по времени (лечение/яд/мана) тикают на сервере — обновляем полосы и чипы
+  battle.addEventListener('effectTick', (e) => battleSerial(() => {
+    const d = e.detail;
+    if (d.roster) applyBattleRoster(d.roster);
+    const left = battle.sides.left;
+    if (left && left.maxHp) showHP('left', left.hp, left.maxHp);
+    const right = battle.focus || battle.sides.right;
+    if (right && right.maxHp) showHP('right', right.hp, right.maxHp);
+    refreshHeaderEffects();
+    updateBattleInfo();
   }));
 
   // battleEnd — через очередь: показ итога дожидается последней анимации удара/смерти
@@ -1159,6 +1194,8 @@ async function initBattle(resumedBattle = null, starter = null, pvpTarget = null
       : code === 'cannot_leave' ? 'Из боя нельзя просто уйти'
       : code === 'elixir_active' ? 'Эликсир мощи ещё действует'
       : code === 'belt_empty' ? 'Ячейка эликсира пуста'
+      : code === 'on_cooldown' ? 'Свиток ещё на перезарядке'
+      : code === 'no_target' ? 'Нет цели для свитка'
       : 'Сервер: ' + code);
   });
 
@@ -2768,13 +2805,45 @@ const itemKeyFor = (it) => it.icon || 'srv' + it.templateId;
 // Эмодзи-иконка эликсира по его эффекту. Серверные icon-строки шаблонов
 // (вроде 'elixirHealth') в ITEMS не маппятся — без этого в рюкзаке висела бы
 // коробка 📦 вместо колбы. Вид определяем по base_stats (как на сервере).
-const ELIXIR_EMOJI = { health: '🧪', power: '⚡', escape: '🏃' };
+const ELIXIR_EMOJI = { health: '🧪', power: '⚗️', mana: '🔮', blood: '🩸',
+  escape: '🏃', poison: '☠️', heal_scroll: '🩹', cleanse: '🌀' };
+// Подписи/действия по виду расходника (карточки превью, журнал боя).
+const ELIXIR_KIND_LABEL = { health: 'Эликсир жизни', power: 'Эликсир мощи',
+  mana: 'Эликсир маны', blood: 'Эликсир крови', escape: 'Эликсир побега',
+  poison: 'Свиток отравления', heal_scroll: 'Свиток исцеления', cleanse: 'Свиток очищения' };
 function elixirKindFromStats(stats) {
   const s = stats || {};
   if (s.escape) return 'escape';
+  if (s.scroll === 'poison') return 'poison';
+  if (s.scroll === 'heal') return 'heal_scroll';
+  if (s.scroll === 'cleanse') return 'cleanse';
+  if (s.kind === 'mana' || s.mana_pct != null) return 'mana';
+  if (s.kind === 'blood' || s.crit_add != null) return 'blood';
   if (s.power_mult != null) return 'power';
-  if (s.heal != null) return 'health';
+  if (s.heal_pct != null || s.heal != null) return 'health';
   return null;
+}
+
+const ELIXIR_ACTION = { health: 'Восстановить здоровье', power: 'Усилить урон',
+  mana: 'Восстановить ману', blood: 'Повысить шанс крита', escape: 'Покинуть бой',
+  poison: 'Отравить врага', heal_scroll: 'Исцелить цель', cleanse: 'Снять эффекты' };
+
+/** Короткое описание эффекта расходника по base_stats (для превью рюкзака). */
+function elixirEffectText(kind, s) {
+  s = s || {};
+  const p = (v) => Math.round((Number(v) || 0) * 100);
+  switch (kind) {
+    case 'health': return s.heal_pct != null
+      ? `+${p(s.heal_pct)}% HP за ${s.secs} c` : `+${s.heal} HP`;
+    case 'mana':   return `+${p(s.mana_pct)}% маны за ${s.secs} c`;
+    case 'power':  return `урон +${p((Number(s.power_mult) || 1) - 1)}% на ${s.power_turns} х.`;
+    case 'blood':  return `крит +${p(s.crit_add)}% на ${s.turns || 1} х.`;
+    case 'poison': return `−${p(s.dmg_pct)}% HP за ${s.secs} c · тайм-аут ${s.cooldown} c`;
+    case 'heal_scroll': return `+${p(s.heal_pct)}% HP за ${s.secs} c · тайм-аут ${s.cooldown} c`;
+    case 'cleanse': return `снимает яд/исцеление · тайм-аут ${s.cooldown} c`;
+    case 'escape': return 'выход из боя';
+    default: return '';
+  }
 }
 
 /**
@@ -2908,7 +2977,7 @@ const battleEffects = new Map();       // fighterId -> [{ icon, time, kind, labe
 let beltLive = false;                  // можно ли использовать пояс прямо сейчас
 let beltSnapshot = null;               // состав пояса на старте боя — для автозаполнения (#2)
 
-const elixirGlyph = (kind) => (kind === 'power' ? '⚡' : kind === 'escape' ? '🏃' : '🧪');
+const elixirGlyph = (kind) => ELIXIR_EMOJI[kind] || '🧪';
 
 /** Подтянуть состав пояса с сервера (сервер его помнит между сессиями). */
 async function loadBelt() {
@@ -3088,19 +3157,42 @@ function resetElixirBattle() {
   refreshSelfEffects();
 }
 
-function powerEffectFor(f) {
+// Чипы эффектов по виду (over-time): иконка + цвет (усиление/ослабление).
+const OT_CHIP = {
+  health:      { icon: '🧪', kind: 'buff',   label: 'Лечение' },
+  heal_scroll: { icon: '🩹', kind: 'buff',   label: 'Исцеление' },
+  mana:        { icon: '🔮', kind: 'buff',   label: 'Мана' },
+  poison:      { icon: '☠️', kind: 'debuff', label: 'Отравление' },
+};
+
+/** Все активные эффекты бойца чипами (мощь, крит, лечение/яд/мана по времени). */
+function effectsForFighter(f) {
+  const out = [];
   const turns = Number(f?.buffTurns || 0);
-  if (turns <= 0) return null;
-  const pct = Math.round(((Number(f?.buffMult) || 1.5) - 1) * 100);
-  return { icon: '💪', time: turns, kind: 'buff',
-    label: `Эликсир мощи: урон +${pct}%`, pct };
+  if (turns > 0) {
+    const pct = Math.round(((Number(f?.buffMult) || 1.5) - 1) * 100);
+    out.push({ icon: '💪', time: turns, kind: 'buff',
+      label: `Эликсир мощи: урон +${pct}%`, pct });
+  }
+  const critT = Number(f?.critBuffTurns || 0);
+  if (critT > 0) {
+    const pct = Math.round((Number(f?.critBuffAdd) || 0) * 100);
+    out.push({ icon: '🩸', time: critT, kind: 'buff',
+      label: `Эликсир крови: крит +${pct}%` });
+  }
+  for (const e of f?.effects || []) {
+    const m = OT_CHIP[e.kind] || { icon: '✦', kind: 'buff', label: 'Эффект' };
+    out.push({ icon: m.icon, time: e.remainSec, kind: m.kind,
+      label: `${m.label} (${e.remainSec} c)` });
+  }
+  return out;
 }
 
 function syncEffectFromFighter(f) {
   if (!f || f.id == null) return;
-  const eff = powerEffectFor(f);
+  const eff = effectsForFighter(f);
   const key = String(f.id);
-  if (eff) battleEffects.set(key, [eff]);
+  if (eff.length) battleEffects.set(key, eff);
   else battleEffects.delete(key);
 }
 
@@ -3120,11 +3212,15 @@ function refreshHeaderEffects() {
   syncEffectFromFighter(battle?.focus || battle?.sides?.right);
   const leftId = battle?.sides?.left?.id;
   const right = battle?.focus || battle?.sides?.right;
-  const selfPower = effectsFor(leftId)[0];
+  const selfPower = effectsFor(leftId).find((e) => e.pct != null) || null;
   selfBuffTurns = selfPower ? Number(selfPower.time) || 0 : 0;
   selfBuffPct = selfPower ? selfPower.pct || selfBuffPct : 0;
   ui.setEffects('left', effectsFor(leftId));
   ui.setEffects('right', effectsFor(right?.id));
+  // полоса маны (синяя) в шапке боя — из mp/maxMp бойцов («Эликсир маны»)
+  const leftF = battle?.sides?.left;
+  if (leftF && leftF.maxMp != null) ui.setEnergy('left', leftF.mp || 0, leftF.maxMp || 0);
+  if (right && right.maxMp != null) ui.setEnergy('right', right.mp || 0, right.maxMp || 0);
 }
 
 function applyBattleRoster(roster) {
@@ -3202,7 +3298,7 @@ function renderCombatBar() {
       const slot = document.createElement('button');
       slot.type = 'button';
       slot.className = `combat-slot elixir filled kind-${cell.kind || 'health'}`
-        + (onCooldown ? ' cooldown' : '');
+        + ' q' + (cell.quality || 1) + (onCooldown ? ' cooldown' : '');
       slot.disabled = onCooldown || !beltLive;
       slot.title = onCooldown
         ? `${cell.name} — усиление ещё действует (${selfBuffTurns})`
@@ -3317,11 +3413,11 @@ function renderDressingBelt() {
   dressingBeltEl.innerHTML = '<span class="belt-buckle" aria-hidden="true"></span>';
   for (let i = 0; i < ELIXIR_SLOTS; i++) {
     const cell = elixirBelt[i];
-    const cap = cell ? beltCapFor(cell.kind) : 0;
+    const cap = cell ? (cell.cap ?? beltCapFor(cell.kind)) : 0;
     const slot = document.createElement('button');
     slot.type = 'button';
     slot.className = 'belt-slot elixir round'
-      + (cell ? ` filled kind-${cell.kind || 'health'}` : '')
+      + (cell ? ` filled kind-${cell.kind || 'health'} q${cell.quality || 1}` : '')
       + (!cell && selectedBeltSlot === i ? ' selected' : '');
     slot.title = cell
       ? `${cell.name} ×${cell.qty != null ? cell.qty : 1} из ${cap} (клик — убрать из пояса)`
@@ -3479,26 +3575,54 @@ function renderDoll() {
 /** Строки рюкзака. Фейковые демо-вещи больше не подмешиваем (#3): онлайн —
  *  только серверный рюкзак; оффлайн (демо без сервера) — набор из ITEMS. */
 function invRows() {
-  return online && serverInv.length
-    ? serverInv.map((it) => ({ id: 'srv' + it.id, key: itemKeyFor(it), inst: it }))
-    : Object.keys(ITEMS).map((key) => ({ id: key, key, inst: null }));
+  if (!(online && serverInv.length)) {
+    return Object.keys(ITEMS).map((key) => ({ id: key, key, inst: null }));
+  }
+  // расходники (type 4) стакаются в рюкзаке без ограничений — одна запись на
+  // шаблон (суммарный остаток), даже если лежат в нескольких item_instances (#1).
+  const rows = [];
+  const elixByTpl = new Map();
+  for (const it of serverInv) {
+    if (it.type === 4) {
+      const ex = elixByTpl.get(it.templateId);
+      if (ex) { ex.inst.quantity = (ex.inst.quantity || 0) + (it.quantity || 0); continue; }
+      const row = { id: 'tpl' + it.templateId, key: itemKeyFor(it), inst: { ...it } };
+      elixByTpl.set(it.templateId, row);
+      rows.push(row);
+    } else {
+      rows.push({ id: 'srv' + it.id, key: itemKeyFor(it), inst: it });
+    }
+  }
+  return rows;
 }
 
 /** Разбор строки рюкзака: вещь/эликсир, слот, вид, заряды, категория (#5). */
 function invRowMeta(row) {
   const { key, inst } = row;
-  const item = ITEMS[key] || { name: inst.name, icon: '📦', slot: slotNameFor(inst.slot) };
+  const base = ITEMS[key] || { name: inst?.name, icon: '📦',
+    slot: inst ? slotNameFor(inst.slot) : null };
+  // имя — всегда из серверной записи: тиры эликсира делят один ITEMS-ключ по эмодзи,
+  // но имена у них разные (Малый/Лёгкий/… эликсир жизни)
+  const item = inst ? { ...base, name: inst.name } : base;
   const slotName = inst ? slotNameFor(inst.slot) : item.slot;
   const isElixir = inst ? inst.type === 4 : item.type === 'elixir';
   const ekind = isElixir
     ? (inst ? elixirKindFromStats(inst.stats) : (item.kind || null)) : null;
-  const beltable = ekind === 'health' || ekind === 'power' || ekind === 'escape';
+  // все боевые расходники кладутся в пояс (включая эликсир побега и свитки)
+  const beltable = isElixir && ekind != null;
   const tplId = inst ? inst.templateId : null;
-  const qty = inst ? (inst.quantity || 1) : 1;
+  const stats = inst ? inst.stats : null;
+  const quality = inst ? (inst.quality || 1) : 1;
+  const owned = inst ? (inst.quantity || 1) : 1;            // всего в рюкзаке (стопка)
+  // зарезервировано поясом: надетое в пояс «вычитается» из рюкзака (#2)
+  const reserved = beltable && tplId != null
+    ? elixirBelt.reduce((n, c) => c && c.templateId === tplId ? n + (c.qty || 0) : n, 0) : 0;
+  const available = Math.max(0, owned - reserved);
   const equipped = !isElixir && !!slotName && equipState[dressingSide][slotName] === key;
   // категории рюкзака: вещи (надеваются) · эликсиры · разное
   const category = isElixir ? 'elixir' : (slotName ? 'gear' : 'misc');
-  return { item, slotName, isElixir, ekind, beltable, tplId, qty, equipped, category };
+  return { item, slotName, isElixir, ekind, beltable, tplId, stats, quality,
+    qty: owned, owned, reserved, available, equipped, category };
 }
 
 const INV_EMPTY_TEXT = { gear: 'Нет вещей', elixir: 'Нет эликсиров', misc: 'Здесь пусто' };
@@ -3523,16 +3647,19 @@ function renderInventory() {
     invGridEl.appendChild(empty);
   }
   for (const r of shown) {
-    const { item, slotName, qty, equipped } = r.meta;
+    const { item, slotName, isElixir, available, qty, quality, equipped } = r.meta;
+    const count = isElixir ? available : qty;     // эликсиры: свободно в рюкзаке (#2)
     const cell = document.createElement('button');
     cell.type = 'button';
-    cell.className = 'inv-cell' + (equipped ? ' equipped' : '')
+    cell.className = 'inv-cell' + (isElixir ? ' q' + quality : '')
+      + (equipped ? ' equipped' : '')
       + (selectedInvId === r.id ? ' selected' : '');
     // выбран пустой слот куклы: подходящие подсвечиваем, прочие гасим
     if (selectedSlot) cell.classList.add(slotName === selectedSlot ? 'match' : 'dim');
-    cell.title = item.name + (qty > 1 ? ` ×${qty}` : '');
+    cell.title = item.name + (count !== 1 || isElixir ? ` ×${count}` : '');
+    const showQty = isElixir || qty > 1;
     cell.innerHTML = `<span class="inv-cell-ico">${item.icon || '📦'}</span>`
-      + (qty > 1 ? `<span class="inv-cell-qty">${qty}</span>` : '')
+      + (showQty ? `<span class="inv-cell-qty">${count}</span>` : '')
       + (equipped ? '<span class="inv-cell-on" title="Надето">✓</span>' : '');
     cell.addEventListener('click', () => {
       selectedInvId = selectedInvId === r.id ? null : r.id;
@@ -3547,23 +3674,26 @@ function renderInventory() {
 function renderInvPreview(row) {
   if (!invPreviewEl) return;
   if (!row) { invPreviewEl.classList.add('hidden'); invPreviewEl.innerHTML = ''; return; }
-  const { item, slotName, isElixir, ekind, beltable, tplId, qty, equipped } = row.meta;
+  const { item, slotName, isElixir, ekind, beltable, tplId, stats, quality,
+    owned, reserved, available, equipped } = row.meta;
   const rows = [];
   if (isElixir) {
-    rows.push(['Тип', beltable ? 'Боевой эликсир' : 'Эликсир']);
-    rows.push(['Действие', ekind === 'health' ? 'Восстановить здоровье'
-      : ekind === 'power' ? 'Усилить урон'
-      : ekind === 'escape' ? 'Покинуть бой' : '—']);
-    if (beltable) rows.push(['В ячейку', 'до ' + beltCapFor(ekind) + ' шт']);
-  } else if (slotName) {
-    rows.push(['Слот', SLOT_META[slotName]?.name || slotName]);
+    rows.push(['Тип', ELIXIR_KIND_LABEL[ekind] || 'Расходник']);
+    rows.push(['Действие', ELIXIR_ACTION[ekind] || '—']);
+    const fx = elixirEffectText(ekind, stats);
+    if (fx) rows.push(['Эффект', fx]);
+    if (beltable) rows.push(['В ячейку', 'до ' + beltCapFor(ekind, stats) + ' шт']);
+    rows.push(['В рюкзаке', '×' + available]);
+    if (reserved) rows.push(['В поясе', '×' + reserved]);
+  } else {
+    if (slotName) rows.push(['Слот', SLOT_META[slotName]?.name || slotName]);
+    rows.push(['В рюкзаке', '×' + owned]);
   }
-  rows.push(['В рюкзаке', '×' + qty]);
 
   invPreviewEl.classList.remove('hidden');
   invPreviewEl.innerHTML = `
     <div class="ip-head">
-      <span class="ip-ico">${item.icon || '📦'}</span>
+      <span class="ip-ico${isElixir ? ' q' + quality : ''}">${item.icon || '📦'}</span>
       <span class="ip-name">${esc(item.name)}</span>
       <button type="button" class="ip-close" title="Закрыть">✕</button>
     </div>
@@ -3576,11 +3706,7 @@ function renderInvPreview(row) {
 
   const actions = invPreviewEl.querySelector('.ip-actions');
   if (beltable) {
-    const reserved = tplId != null
-      ? elixirBelt.reduce((n, c) => c && c.templateId === tplId ? n + (c.qty || 0) : n, 0) : 0;
-    const owned = tplId != null
-      ? serverInv.reduce((n, it) => it.templateId === tplId ? n + (it.quantity || 0) : n, 0) : 0;
-    const cap = beltCapFor(ekind);
+    const cap = beltCapFor(ekind, stats);
     // куда поместится: выбранная ячейка (пустая/своя ниже лимита) ИЛИ авторазмещение
     const fitsSelected = selectedBeltSlot != null && (() => {
       const c = elixirBelt[selectedBeltSlot];

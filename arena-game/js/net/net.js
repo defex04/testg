@@ -320,6 +320,9 @@ function wireBattleHandlers() {
         kind: m.kind, heal: m.heal, mult: m.mult, turns: m.turns,
         buffTurns: m.buffTurns, hp: m.hp, maxHp: m.maxHp,
         slot: m.slot, slotQty: m.slotQty, roster: m.roster }));
+  socketHandlers.set('effectTick', (m) =>
+    currentBattle && currentBattle._on('effectTick',
+      { self: m.self, changed: m.changed || [], deaths: m.deaths || [], roster: m.roster }));
   socketHandlers.set('policy', (m) =>
     currentBattle && currentBattle._on('policy', { intervention: m.intervention }));
   socketHandlers.set('battleEnd', (m) =>
@@ -420,6 +423,20 @@ export class ServerBattle extends EventTarget {
       }
       if (this.focus && String(this.focus.id) === String(detail.target.id)) {
         this.focus = { ...this.focus, ...detail.target };
+      }
+    }
+    if (type === 'effectTick') {
+      // тик эффектов по времени: подмешиваем свежие HP/MP/эффекты в плашки
+      if (detail.self) this.sides.left = { ...this.sides.left, ...detail.self };
+      for (const c of detail.changed || []) {
+        if (c.side === 'right') {
+          if (this.sides.right && String(this.sides.right.id) === String(c.id))
+            this.sides.right = { ...this.sides.right, ...c };
+          if (this.focus && String(this.focus.id) === String(c.id))
+            this.focus = { ...this.focus, ...c };
+        } else if (this.sides.left && String(this.sides.left.id) === String(c.id)) {
+          this.sides.left = { ...this.sides.left, ...c };
+        }
       }
     }
     if (type === 'battleEnd') {

@@ -131,11 +131,16 @@ export const SPELLS = {
 export const SPELL_SLOTS = 3;            // ровно 3 слота заклинаний (нижняя панель)
 export const ELIXIR_SLOTS = 6;           // 6 эликсиров (нижняя панель, листаются стрелками)
 
-// Сколько зарядов ОДНОГО эликсира помещается в ОДНУ ячейку пояса (#1).
-// Жизнь и побег — по одному, мощь — стопкой до 10.
-// ДОЛЖНО совпадать с сервером (backend/src/belt.js beltCapFor).
-export const ELIXIR_BELT_CAP = { health: 1, power: 10, escape: 1 };
-export const beltCapFor = (kind) => ELIXIR_BELT_CAP[kind] ?? 1;
+// Сколько зарядов ОДНОГО расходника помещается в ОДНУ ячейку пояса (#1).
+// Точное значение задаёт шаблон (base_stats.belt_max) — сервер шлёт его как cap;
+// здесь только дефолты по виду. ДОЛЖНО совпадать с сервером (backend/src/belt.js).
+export const ELIXIR_BELT_CAP = { health: 1, power: 10, mana: 1, blood: 3,
+  escape: 1, poison: 1, heal_scroll: 1, cleanse: 1 };
+export const beltCapFor = (kind, stats) => {
+  const m = stats && stats.belt_max;
+  if (m != null) return Math.max(1, Number(m) || 1);
+  return ELIXIR_BELT_CAP[kind] ?? 1;
+};
 
 // ---------------------------------------------------------------------------
 // Кукла экипировки: какие слоты есть, как зовутся и с какой стороны от

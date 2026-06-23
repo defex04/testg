@@ -94,8 +94,10 @@ const healthA = invA.find((i) => i.templateId === 202);
 const left = healthA ? healthA.quantity : 0;
 ok(left === health0.quantity - 1,
   'заряд списан из инвентаря (−1)', 'было ' + health0.quantity + ' стало ' + left);
-ok(slotQtyAfter === health0.quantity - 1,
-  'клиенту пришёл новый остаток ячейки', 'slotQty=' + slotQtyAfter);
+// в ячейку положили 1 заряд (slot 0) → после использования она пустеет (остаток 0).
+// slotQty — остаток в ЯЧЕЙКЕ пояса, не в рюкзаке (per-charge модель).
+ok(slotQtyAfter === 0,
+  'клиенту пришёл новый остаток ячейки (1 заряд → пусто)', 'slotQty=' + slotQtyAfter);
 
 // 7) пустую ячейку выпить нельзя
 a.send({ type: 'elixir', slot: 5 });

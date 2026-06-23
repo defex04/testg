@@ -2,63 +2,74 @@ import { randomUUID } from 'crypto';
 import { game, tx } from './db.js';
 import { addCurrency, CUR, wallet } from './economy.js';
 import { getInventory } from './inventory.js';
+import { elixirParams } from './belt.js';
 
 const SHOP_LOCATION_ID = 1;
-const SHOP_ELIXIRS = [201, 202, 203];
 const ITEM_REASON_SHOP = 12;
 
 const err = (msg, status) => Object.assign(new Error(msg), { status });
+const pct = (v) => Math.round((Number(v) || 0) * 100);
 
-function elixirKind(baseStats) {
-  const s = baseStats || {};
-  if (s.escape) return 'escape';
-  if (s.power_mult != null) return 'power';
-  if (s.heal != null) return 'health';
-  return 'elixir';
-}
-
-function describeElixir(row) {
-  const s = row.base_stats || {};
-  if (s.escape) return 'Позволяет покинуть бой без обычного выхода.';
-  if (s.power_mult != null) {
-    const pct = Math.round((Number(s.power_mult) - 1) * 100);
-    const turns = Number(s.power_turns) || 3;
-    return `Урон +${pct}% на ${turns} хода.`;
+/** Описание товара по виду эффекта (для карточки в магазине). */
+function describeElixir(baseStats) {
+  const p = elixirParams(baseStats);
+  if (!p) return 'Боевой расходник.';
+  switch (p.kind) {
+    case 'escape':   return 'Позволяет покинуть бой без обычного выхода.';
+    case 'health':   return p.heal_pct != null
+      ? `Восстанавливает ${pct(p.heal_pct)}% здоровья за ${p.secs} c.`
+      : `Восстанавливает ${p.heal} HP в бою.`;
+    case 'mana':     return `Восстанавливает ${pct(p.mana_pct)}% маны за ${p.secs} c.`;
+    case 'power':    return `Урон +${pct(p.mult - 1)}% на ${p.turns} х.`;
+    case 'blood':    return `Шанс крита +${pct(p.crit_add)}% на ${p.turns} х.`;
+    case 'poison':   return `Отравляет цель: −${pct(p.dmg_pct)}% HP за ${p.secs} c (тайм-аут ${p.cooldown} c).`;
+    case 'heal_scroll': return `Исцеляет цель: +${pct(p.heal_pct)}% HP за ${p.secs} c (тайм-аут ${p.cooldown} c).`;
+    case 'cleanse':  return `Снимает отравление и исцеление с цели (тайм-аут ${p.cooldown} c).`;
+    default:         return 'Боевой расходник.';
   }
-  if (s.heal != null) return `Восстанавливает ${Number(s.heal) || 0} HP в бою.`;
-  return 'Боевой расходник.';
 }
 
 function product(row) {
+  const p = elixirParams(row.base_stats);
   return {
     templateId: Number(row.id),
     name: row.name,
     icon: row.icon,
     price: Number(row.price) || 0,
-    kind: elixirKind(row.base_stats),
-    description: describeElixir(row),
+    quality: Number(row.quality) || 1,
+    levelReq: Number(row.level_req) || 1,
+    kind: p ? p.kind : 'elixir',
+    description: describeElixir(row.base_stats),
   };
 }
 
-async function assertInShopLocation(client, charId) {
+/** Проверяет, что персонаж в локации с магазином; возвращает его строку. */
+async function shopCharacter(client, charId) {
   const ch = (await client.query(
-    `SELECT location_id FROM characters WHERE id = $1 AND status = 1`, [charId])).rows[0];
+    `SELECT id, level, location_id FROM characters WHERE id = $1 AND status = 1`,
+    [charId])).rows[0];
   if (!ch) throw err('not_found', 404);
   if (Number(ch.location_id) !== SHOP_LOCATION_ID) throw err('shop_unavailable', 403);
+  return ch;
 }
 
+/** Все боевые расходники в продаже (по уровню качества), c доступом по уровню. */
 async function shopProducts(client = game) {
   const { rows } = await client.query(
-    `SELECT id, name, icon, base_stats, price
+    `SELECT id, name, icon, base_stats, price, quality, level_req
        FROM item_templates
-      WHERE id = ANY($1::int[]) AND type = 4 AND sellable = TRUE
-      ORDER BY id`, [SHOP_ELIXIRS]);
+      WHERE type = 4 AND sellable = TRUE
+      ORDER BY level_req, quality, id`);
   return rows.map(product);
 }
 
 export async function getShop(charId) {
-  await assertInShopLocation(game, charId);
-  return { locationId: SHOP_LOCATION_ID, items: await shopProducts(game) };
+  const ch = await shopCharacter(game, charId);
+  return {
+    locationId: SHOP_LOCATION_ID,
+    charLevel: Number(ch.level) || 1,
+    items: await shopProducts(game),
+  };
 }
 
 export async function buyShopItem(charId, templateId, quantity) {
@@ -68,15 +79,18 @@ export async function buyShopItem(charId, templateId, quantity) {
   let bought;
 
   await tx(async (c) => {
-    await assertInShopLocation(c, charId);
+    const ch = await shopCharacter(c, charId);
     const row = (await c.query(
-      `SELECT id, name, icon, type, stackable, base_stats, price, sellable
-         FROM item_templates
-        WHERE id = $1 AND id = ANY($2::int[])`,
-      [tplId, SHOP_ELIXIRS])).rows[0];
+      `SELECT id, name, icon, type, stackable, base_stats, price, sellable,
+              quality, level_req
+         FROM item_templates WHERE id = $1`, [tplId])).rows[0];
     if (!row || row.type !== 4 || row.sellable === false) throw err('not_for_sale', 404);
     const price = Number(row.price) || 0;
     if (price <= 0) throw err('not_for_sale', 404);
+    // уровневый доступ: купить можно только если уровень позволяет
+    if ((Number(ch.level) || 1) < (Number(row.level_req) || 1)) {
+      throw err('level_too_low', 403);
+    }
     const cost = price * qty;
 
     await addCurrency(c, charId, CUR.copper, -cost, 4,

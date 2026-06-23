@@ -35,6 +35,7 @@ const other = (s) => (s === 'left' ? 'right' : 'left');
 function makeBattle(id, kind, locationId, policy, engine) {
   return { id, kind, locationId, engine, policy,
     players: new Map(), timer: null, finishTimer: null, turnEndsAt: 0,
+    effectTimer: null, lastEffectAt: 0,   // тикер эффектов по времени (HoT/DoT/мана)
     step: 0 };   // токен sub-turn: отложенные колбэки устаревают при смене (анти-двойной-advance)
 }
 function addPlayer(b, charId, send, side) {
@@ -53,7 +54,11 @@ function broadcast(b, payloadFor) {
 // --- зеркалирование: команда зрителя как left ---
 const pub = (f) => f && ({ id: f.id, name: f.name, level: f.level,
   hp: Math.round(f.hp), maxHp: f.maxHp, alive: f.alive,
-  buffTurns: f.buffTurns || 0, buffMult: f.buffMult || 1 });
+  mp: Math.round(f.mp || 0), maxMp: f.maxMp || 0,
+  buffTurns: f.buffTurns || 0, buffMult: f.buffMult || 1,
+  critBuffTurns: f.critBuffTurns || 0, critBuffAdd: f.critBuffAdd || 0,
+  effects: (f.effects || []).map((e) => ({ kind: e.kind,
+    remainSec: Math.max(0, Math.ceil((e.durationMs - e.elapsedMs) / 1000)) })) });
 const rosterFor = (b, vSide) => ({
   left:  b.engine.teams[vSide].map((id) => pub(b.engine.fighter(id))),
   right: b.engine.teams[other(vSide)].map((id) => pub(b.engine.fighter(id))),
@@ -154,9 +159,16 @@ function elixirEventFor(b, q, actor, target, data) {
     heal: data.heal || 0,
     mult: data.mult || 1,
     turns: data.turns || 0,
+    secs: data.secs || 0,             // длительность эффекта по времени (HoT/DoT/мана)
+    amount: data.amount || 0,         // суммарная величина эффекта (HP/MP)
+    critAdd: data.critAdd || 0,       // прибавка к криту («Эликсир крови»)
+    removed: data.removed || null,    // снятые виды («Свиток очищения»)
+    cooldownUntil: data.cooldownUntil || 0,   // тайм-аут свитка (для пьющего)
     buffTurns: target.buffTurns || 0,
     hp: Math.round(target.hp),
     maxHp: target.maxHp,
+    mp: Math.round(target.mp || 0),
+    maxMp: target.maxMp || 0,
     slot: data.slot,
     slotQty: data.slotQty,
     roster: rosterFor(b, qme.side),
@@ -184,6 +196,14 @@ async function targetCfg() {
  * при равной ловкости. Значение фиксируется в бойце движка и больше не меняется,
  * поэтому очередь раундов стабильна (см. engine._buildOrder).
  */
+const MAX_MP = 100;   // максимум маны в бою (как в окне «Бой #N»: /api/battles/:id)
+/** Текущая мана персонажа для бойца движка («Эликсир маны» восстанавливает её). */
+async function mpFor(charId) {
+  const row = (await game.query(
+    `SELECT mp_cur FROM characters WHERE id = $1`, [charId])).rows[0];
+  return { mp: row ? Number(row.mp_cur) || 0 : 0, maxMp: MAX_MP };
+}
+
 async function initiativeFor(charId, level) {
   const row = (await game.query(
     `SELECT agi FROM character_stats WHERE character_id = $1`, [charId])).rows[0];
@@ -273,7 +293,7 @@ export async function startHunt(ch, send) {
 
   const engine = new Engine({
     left:  [{ id: ch.id, charId: ch.id, name: ch.name, level: ch.level,
-              isAI: false, ...(await combatProfileFor(ch.id, start)) }],
+              isAI: false, ...(await combatProfileFor(ch.id, start)), ...(await mpFor(ch.id)) }],
     right: [{ id: `npc-${npc.id}`, name: npc.name, level: npc.level, isAI: true, ...npcStats }],
   }, { turnTime, target: await targetCfg() });
 
@@ -288,6 +308,7 @@ export async function startHunt(ch, send) {
     .catch(console.error);
 
   p.send({ type: 'battleStart', battleId, kind: 'hunt', ...startView(b, p) });
+  startEffectTicker(b);
   beginRound(b);
   return battleId;
 }
@@ -336,9 +357,11 @@ export async function startDuel(att, def, sendAtt, sendDef) {
   ]);
   const engine = new Engine({
     left:  [{ id: att.id, charId: att.id, name: att.name, level: att.level,
-              isAI: false, initiative: attIni, ...(await combatProfileFor(att.id, start)) }],
+              isAI: false, initiative: attIni,
+              ...(await combatProfileFor(att.id, start)), ...(await mpFor(att.id)) }],
     right: [{ id: def.id, charId: def.id, name: def.name, level: def.level,
-              isAI: false, initiative: defIni, ...(await combatProfileFor(def.id, start)) }],
+              isAI: false, initiative: defIni,
+              ...(await combatProfileFor(def.id, start)), ...(await mpFor(def.id)) }],
   }, { turnTime, target: await targetCfg() });
 
   const b = makeBattle(battleId, 'pvp', att.location_id, policy, engine);
@@ -354,6 +377,7 @@ export async function startDuel(att, def, sendAtt, sendDef) {
     .catch(console.error);
 
   broadcast(b, (p) => ({ type: 'battleStart', battleId, kind: 'pvp', ...startView(b, p) }));
+  startEffectTicker(b);
   beginRound(b);
   return battleId;
 }
@@ -373,7 +397,8 @@ export async function joinBattle(charId, battleId, side, send) {
   const start = await gameConfig('character.start');
   const initiative = await initiativeFor(ch.id, ch.level);
   b.engine.addFighter(side, { id: ch.id, charId: ch.id, name: ch.name, level: ch.level,
-    isAI: false, initiative, ...(await combatProfileFor(ch.id, start)) });
+    isAI: false, initiative,
+    ...(await combatProfileFor(ch.id, start)), ...(await mpFor(ch.id)) });
   const p = addPlayer(b, ch.id, send, side);
   // если вмешались прямо во время розыгрыша — этот sub-turn новичок не видел,
   // поэтому не ждём от него turnDone (иначе он зря держит ход до страховки)
@@ -572,6 +597,50 @@ function beginRound(b) {
   enterActor(b);
 }
 
+// --- Эффекты по времени (HoT/DoT/мана) тикают по «настенным» часам независимо от
+//     ходов: один интервал на бой (engine.tickEffects). Запускается на старте боя,
+//     гасится в dropLive. Рассылает effectTick с обновлёнными HP/MP и ростером. ---
+function startEffectTicker(b) {
+  if (b.effectTimer) return;
+  b.lastEffectAt = Date.now();
+  b.effectTimer = setInterval(() => onEffectTick(b), 1000);
+}
+
+function onEffectTick(b) {
+  if (!b || b.engine.phase === 'ended') return;
+  const now = Date.now();
+  const dt = now - (b.lastEffectAt || now);
+  b.lastEffectAt = now;
+  const res = b.engine.tickEffects(dt);
+  if (!res.changed.length) return;
+  snapshot(b.id, b).catch(console.error);
+  broadcast(b, (p) => effectTickFor(b, p, res));
+  if (res.deaths.length) handleEffectDeaths(b);
+}
+
+/** effectTick для зрителя: изменившиеся бойцы переведены в его систему (он — left). */
+function effectTickFor(b, p, res) {
+  const me = b.engine.fighter(p.charId);
+  const vSide = me ? me.side : 'left';
+  return {
+    type: 'effectTick',
+    self: me ? pub(me) : null,
+    changed: res.changed.map((f) => ({ side: f.side === vSide ? 'left' : 'right', ...pub(f) })),
+    deaths: res.deaths.map(String),
+    roster: rosterFor(b, vSide),
+  };
+}
+
+/** Кто-то умер от яда (тик эффекта): закрыть бой или сдвинуть зависший ход. */
+function handleEffectDeaths(b) {
+  if (b.engine.finished()) return void endBattle(b).catch(console.error);
+  // активный боец умер от яда в свою фазу выбора — двигаем ход дальше
+  if (b.engine.phase === 'choose' && !b.engine.currentActor()) {
+    const next = b.engine.advance();
+    if (next) enterActor(b); else beginRound(b);
+  }
+}
+
 export function submitMove(charId, move) {
   const b = live.get(byChar.get(cid(charId)));
   if (!b) return false;
@@ -624,16 +693,39 @@ export async function useElixir(charId, msg = {}) {
   if (!params || Number(belt.quantity) <= 0) {
     p?.send({ type: 'error', error: 'belt_empty' }); return false;
   }
-  // Хил и мощь — только в свой ход. Побег можно провести сразу: это выход из боя,
-  // а не боевое действие против цели.
-  if (params.kind !== 'escape'
-      && (b.engine.phase !== 'choose' || b.engine.currentActorId() !== me.id)) {
-    p?.send({ type: 'error', error: 'not_your_turn' });
+  // Расходники можно применять в ЛЮБОЙ ход (не обязательно свой) — эффекты идут по
+  // реальному времени. Ограничения: тайм-аут свитка и «эликсир того же вида уже活ен».
+  const kind = params.kind;
+  const SCROLL = kind === 'poison' || kind === 'heal_scroll' || kind === 'cleanse';
+  // тайм-аут свитка (wall-clock, на пьющего): нельзя бросить тот же свиток, пока идёт
+  if (SCROLL && (me.cooldowns[kind] || 0) > Date.now()) {
+    p?.send({ type: 'error', error: 'on_cooldown', cooldownUntil: me.cooldowns[kind] });
     return false;
   }
-  // нельзя пить эликсир мощи, пока его усиление ещё действует (тот же эффект)
-  if (params.kind === 'power' && me.buffTurns > 0) {
-    p?.send({ type: 'error', error: 'elixir_active' }); return false;
+  // цель эффекта: союзные (жизнь/мощь/мана/кровь/исцеление) — на выбранного союзника
+  // или себя; яд — на выбранного врага либо того, кто напротив; очищение — на любого.
+  let tf = me;
+  const sel = msg.target != null ? b.engine.fighter(cid(msg.target)) : null;
+  if (kind === 'poison') {
+    tf = (sel && sel.alive && sel.side !== me.side)
+      ? sel : (b.engine.opponentOf(me.id) || b.engine.enemiesOf(me.id)[0] || null);
+    if (!tf) { p?.send({ type: 'error', error: 'no_target' }); return false; }
+  } else if (kind === 'cleanse') {
+    if (sel && sel.alive) tf = sel;
+  } else if (kind !== 'escape') {
+    if (sel && sel.alive && sel.side === me.side) tf = sel;
+  }
+
+  // ЭЛИКСИРЫ одного вида НЕ стакаются: нельзя наложить, пока тот же эффект активен на
+  // цели (эликсир жизни заблокирован и при активном свитке исцеления). СВИТКИ —
+  // стакаются (несколько союзников лечат/травят одного), их держит только тайм-аут.
+  if (kind !== 'escape' && !SCROLL) {
+    const busy =
+      (kind === 'health' && tf.effects.some((e) => e.kind === 'health' || e.kind === 'heal_scroll'))
+      || (kind === 'mana'  && tf.effects.some((e) => e.kind === 'mana'))
+      || (kind === 'power' && tf.buffTurns > 0)
+      || (kind === 'blood' && tf.critBuffTurns > 0);
+    if (busy) { p?.send({ type: 'error', error: 'elixir_active' }); return false; }
   }
 
   // авторитетно списываем 1 заряд из инвентаря И из ячейки пояса (в одной tx).
@@ -679,32 +771,52 @@ export async function useElixir(charId, msg = {}) {
     return false;
   }
 
-  if (params.kind === 'escape') {
+  if (kind === 'escape') {
     broadcastElixir(b, me, me, { kind: 'escape', slot, slotQty });
     await escapeFighter(b, cid(charId));
     return true;
   }
 
-  // цель эффекта: выбранный в ростере союзник или себя (своя сторона, живой)
-  let tf = me;
-  if (msg.target != null) {
-    const cand = b.engine.fighter(cid(msg.target));
-    if (cand && cand.alive && cand.side === me.side) tf = cand;
+  // применяем эффект (значения из шаблона зажаты — анти-чит). Лечение/урон/мана по
+  // времени — через тикер (addOverTime); мощь/кровь — на ходы; очищение — снятие.
+  const out = { kind, slot, slotQty };
+  if (kind === 'health' || kind === 'heal_scroll') {
+    const secs = clampNum(params.secs, 1, 600, 60);
+    out.secs = secs;
+    out.amount = Math.round(tf.maxHp * clampNum(params.heal_pct, 0.01, 1, 0.2));
+    // свиток исцеления стакается (несколько лекарей на одну цель), эликсир жизни — нет
+    b.engine.addOverTime(tf.id, kind, out.amount, secs * 1000, me.id, kind === 'heal_scroll');
+  } else if (kind === 'mana') {
+    const secs = clampNum(params.secs, 1, 600, 60);
+    out.secs = secs;
+    out.amount = Math.round((tf.maxMp || 0) * clampNum(params.mana_pct, 0.01, 1, 0.2));
+    b.engine.addOverTime(tf.id, 'mana', out.amount, secs * 1000, me.id);
+  } else if (kind === 'poison') {
+    const secs = clampNum(params.secs, 1, 600, 120);
+    out.secs = secs;
+    out.amount = Math.round(tf.maxHp * clampNum(params.dmg_pct, 0.01, 1, 0.15));
+    // свиток отравления стакается: несколько источников яда на одной цели
+    b.engine.addOverTime(tf.id, 'poison', out.amount, secs * 1000, me.id, true);
+  } else if (kind === 'power') {
+    out.mult = clampNum(params.mult, 1, 2, 1.3);
+    out.turns = clampNum(params.turns, 1, 5, 3);
+    b.engine.addBuff(tf.id, out.mult, out.turns);
+  } else if (kind === 'blood') {
+    out.critAdd = clampNum(params.crit_add, 0, 1, 0.2);
+    out.turns = clampNum(params.turns, 1, 3, 1);
+    b.engine.addCritBuff(tf.id, out.critAdd, out.turns);
+  } else if (kind === 'cleanse') {
+    out.removed = b.engine.cleanse(tf.id, params.removes);
   }
-  const kind = params.kind;
-  let healed = 0, mult = 1, turns = 0;
-  if (kind === 'health') {
-    // лечим на абсолютную величину из шаблона, зажатую до макс. HP (анти-чит)
-    healed = b.engine.heal(tf.id, clampNum(params.heal, 1, tf.maxHp, Math.round(tf.maxHp * 0.3)));
-  } else {
-    mult = clampNum(params.mult, 1, 2, 1.3);
-    turns = clampNum(params.turns, 1, 5, 3);
-    b.engine.addBuff(tf.id, mult, turns);
+  // тайм-аут свитка ставим после успешного применения (на пьющего)
+  if (SCROLL) {
+    me.cooldowns[kind] = Date.now() + clampNum(params.cooldown, 0, 600, 90) * 1000;
+    out.cooldownUntil = me.cooldowns[kind];
   }
   await snapshot(b.id, b);
 
   // slotQty (остаток заряда в ячейке пояса после списания) уже посчитан выше в tx
-  broadcastElixir(b, me, tf, { kind, heal: healed, mult, turns, slot, slotQty });
+  broadcastElixir(b, me, tf, out);
   return true;
 }
 
@@ -755,7 +867,7 @@ function advance(b) {
 // Завершение / прерывание / побег
 // ============================================================
 function dropLive(b) {
-  clearInterval(b.timer); clearTimeout(b.finishTimer);
+  clearInterval(b.timer); clearTimeout(b.finishTimer); clearInterval(b.effectTimer);
   live.delete(b.id);
   for (const p of b.players.values()) byChar.delete(p.charId);
 }
@@ -786,8 +898,8 @@ async function endBattle(b) {
           { idempotencyKey: randomUUID(), type: 1, id: b.id });
         await addExp(c, p.charId, reward.exp);
       }
-      await c.query(`UPDATE characters SET hp_cur = $2 WHERE id = $1`,
-        [p.charId, me.maxHp]);
+      await c.query(`UPDATE characters SET hp_cur = $2, mp_cur = $3 WHERE id = $1`,
+        [p.charId, me.maxHp, Math.round(me.mp || 0)]);
     }
   });
   await redis.del(snapKey(b.id));
@@ -815,8 +927,9 @@ async function abortBattle(b, reason) {
         `UPDATE battle_participants SET status = 3, result = 4, left_round = $3
           WHERE battle_id = $1 AND character_id = $2`,
         [b.id, p.charId, b.engine.turn]);
-      await c.query(`UPDATE characters SET hp_cur = $2 WHERE id = $1`,
-        [p.charId, b.engine.fighter(p.charId).maxHp]);
+      const af = b.engine.fighter(p.charId);
+      await c.query(`UPDATE characters SET hp_cur = $2, mp_cur = $3 WHERE id = $1`,
+        [p.charId, af.maxHp, Math.round(af.mp || 0)]);
     }
   });
   await redis.del(snapKey(b.id));
@@ -869,7 +982,8 @@ async function escapeFighter(b, charId) {
       `UPDATE battle_participants SET status = 3, result = 4, left_round = $3,
           damage_dealt = $4 WHERE battle_id = $1 AND character_id = $2`,
       [b.id, charId, b.engine.turn, p.totalDamage]);
-    await c.query(`UPDATE characters SET hp_cur = $2 WHERE id = $1`, [charId, f.maxHp]);
+    await c.query(`UPDATE characters SET hp_cur = $2, mp_cur = $3 WHERE id = $1`,
+      [charId, f.maxHp, Math.round(f.mp || 0)]);
   });
   p.send({ type: 'battleEnd', winner: null, victory: false, aborted: true,
     reason: 'escape', sides: sidesFor(b, p), roster: rosterFor(b, f.side) });

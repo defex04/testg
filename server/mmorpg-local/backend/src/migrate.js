@@ -139,6 +139,122 @@ const STATEMENTS = [
   `ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS target_name TEXT`,
 ];
 
+// ---------------------------------------------------------------------------
+// Боевые расходники: 7 категорий × 5 уровней качества (серый→зелёный→синий→
+// фиолетовый→оранжевый). Цвет фона рисует клиент по quality; доступ — level_req
+// (1/3/5/10/15); параметры эффекта лежат в base_stats — единый источник правды
+// (сервер их валидирует, анти-чит). Стопка в рюкзаке без лимита (max_stack 999),
+// вместимость ячейки пояса — belt_max. Новые шаблоны вставляются идемпотентно
+// (ON CONFLICT DO NOTHING — админ-правки не затираются); существующие 201/202/203
+// конвертируются ОДИН раз под флагом migration.consumables_v1_done.
+// ---------------------------------------------------------------------------
+const Q_LEVEL = [1, 3, 5, 10, 15];           // level_req по уровню качества 1..5
+const sq = (s) => "'" + String(s).replace(/'/g, "''") + "'";
+const consumables = [];
+const pushTier = (ids, icon, rows, mkStats) =>
+  rows.forEach((row, i) => consumables.push({
+    id: ids[i], name: row[0], quality: i + 1, level: Q_LEVEL[i],
+    price: row[row.length - 1], icon, stats: mkStats(row, i) }));
+
+// 🧪 Эликсир жизни — HoT %maxHP за секунды (на себя/союзника). id 202(T1),211..214
+pushTier([202, 211, 212, 213, 214], 'elixHealth', [
+  ['Малый эликсир жизни', 0.20, 60, 3, 150],
+  ['Лёгкий эликсир жизни', 0.25, 55, 3, 250],
+  ['Эликсир жизни', 0.35, 40, 2, 450],
+  ['Большой эликсир жизни', 0.45, 35, 2, 800],
+  ['Великий эликсир жизни', 0.55, 30, 1, 1300],
+], (r) => ({ kind: 'health', heal_pct: r[1], secs: r[2], belt_max: r[3] }));
+
+// ⚗️ Эликсир мощи — +урон% на N ходов (на себя). id 203(T1),221..224
+pushTier([203, 221, 222, 223, 224], 'elixPower', [
+  ['Эликсир мощи: проблеск', 1.25, 1, 5, 120],
+  ['Эликсир мощи', 1.30, 1, 6, 200],
+  ['Эликсир мощи: прилив', 1.35, 1, 7, 360],
+  ['Эликсир ярости', 1.45, 2, 10, 650],
+  ['Эликсир неистовства', 1.50, 3, 11, 1100],
+], (r) => ({ power_mult: r[1], power_turns: r[2], belt_max: r[3] }));
+
+// 🔮 Эликсир маны — восстановление MP% за секунды (на себя/союзника). id 230..234
+pushTier([230, 231, 232, 233, 234], 'elixMana', [
+  ['Малый эликсир маны', 0.20, 60, 3, 120],
+  ['Лёгкий эликсир маны', 0.25, 55, 3, 200],
+  ['Эликсир маны', 0.35, 40, 2, 360],
+  ['Большой эликсир маны', 0.45, 35, 2, 650],
+  ['Великий эликсир маны', 0.55, 30, 1, 1100],
+], (r) => ({ kind: 'mana', mana_pct: r[1], secs: r[2], belt_max: r[3] }));
+
+// 🩸 Эликсир крови — +шанс крита (проц. пункты) на 1 ход (на себя). id 240..244
+pushTier([240, 241, 242, 243, 244], 'elixBlood', [
+  ['Малый эликсир крови', 0.20, 3, 140],
+  ['Лёгкий эликсир крови', 0.25, 4, 240],
+  ['Эликсир крови', 0.30, 6, 430],
+  ['Большой эликсир крови', 0.35, 7, 780],
+  ['Великий эликсир крови', 0.40, 9, 1250],
+], (r) => ({ kind: 'blood', crit_add: r[1], turns: 1, belt_max: r[2] }));
+
+// ☠️ Свиток отравления — DoT %maxHP цели за секунды (на врага), с тайм-аутом. id 250..254
+pushTier([250, 251, 252, 253, 254], 'scrollPoison', [
+  ['Слабый свиток отравления', 0.15, 120, 150, 1, 180],
+  ['Свиток отравления', 0.20, 110, 140, 1, 300],
+  ['Крепкий свиток отравления', 0.25, 100, 130, 1, 520],
+  ['Свиток едкого яда', 0.30, 90, 120, 1, 900],
+  ['Свиток смертельного яда', 0.30, 90, 110, 3, 1500],
+], (r) => ({ scroll: 'poison', dmg_pct: r[1], secs: r[2], cooldown: r[3], belt_max: r[4] }));
+
+// ✚ Свиток исцеления — HoT %maxHP цели за секунды (на себя/союзника), с тайм-аутом. id 260..264
+pushTier([260, 261, 262, 263, 264], 'scrollHeal', [
+  ['Малый свиток исцеления', 0.15, 120, 150, 1, 180],
+  ['Свиток исцеления', 0.20, 110, 140, 1, 300],
+  ['Большой свиток исцеления', 0.25, 100, 130, 1, 520],
+  ['Великий свиток исцеления', 0.30, 90, 120, 1, 900],
+  ['Священный свиток исцеления', 0.30, 90, 110, 3, 1500],
+], (r) => ({ scroll: 'heal', heal_pct: r[1], secs: r[2], cooldown: r[3], belt_max: r[4] }));
+
+// 🌀 Свиток очищения — снимает отравление И исцеление с цели (любой), с тайм-аутом. id 270..274
+pushTier([270, 271, 272, 273, 274], 'scrollCleanse', [
+  ['Малый свиток очищения', 90, 1, 200],
+  ['Свиток очищения', 80, 1, 330],
+  ['Большой свиток очищения', 70, 2, 560],
+  ['Великий свиток очищения', 60, 2, 950],
+  ['Совершенный свиток очищения', 50, 3, 1600],
+], (r) => ({ scroll: 'cleanse', removes: ['poison', 'heal_scroll'], cooldown: r[1], belt_max: r[2] }));
+
+for (const c of consumables) {
+  STATEMENTS.push(
+    `INSERT INTO item_templates (id, name, type, quality, stackable, max_stack,
+        base_stats, icon, price, sellable, level_req)
+     VALUES (${c.id}, ${sq(c.name)}, 4, ${c.quality}, TRUE, 999,
+        ${sq(JSON.stringify(c.stats))}::jsonb, ${sq(c.icon)}, ${c.price}, TRUE, ${c.level})
+     ON CONFLICT (id) DO NOTHING`);
+}
+
+// Рюкзак не ограничивает стопку расходников (ТЗ: «максимум эликсиров неограничено») —
+// поднимаем max_stack у всех боевых расходников. Идемпотентно (гоняется каждую миграцию).
+STATEMENTS.push(
+  `UPDATE item_templates SET max_stack = 1000000
+    WHERE type = 4 AND (max_stack IS NULL OR max_stack < 1000000)`);
+
+// Разовая конвертация старых шаблонов в «серый» уровень новой системы: 202 → жизнь T1
+// (формат менялся с {heal:N} на %+время), 203 → мощь T1, 201 → побег (продаётся, ур.1).
+STATEMENTS.push(
+  `DO $$
+   BEGIN
+     IF NOT EXISTS (SELECT 1 FROM game_config WHERE key = 'migration.consumables_v1_done') THEN
+       UPDATE item_templates SET name = 'Малый эликсир жизни', quality = 1, level_req = 1,
+          max_stack = 999, sellable = TRUE, price = 150,
+          base_stats = '{"kind":"health","heal_pct":0.2,"secs":60,"belt_max":3}'::jsonb,
+          version = version + 1 WHERE id = 202;
+       UPDATE item_templates SET name = 'Эликсир мощи: проблеск', quality = 1, level_req = 1,
+          max_stack = 999, sellable = TRUE, price = 120,
+          base_stats = '{"power_mult":1.25,"power_turns":1,"belt_max":5}'::jsonb,
+          version = version + 1 WHERE id = 203;
+       UPDATE item_templates SET level_req = 1, sellable = TRUE, price = 300, quality = 1,
+          max_stack = 999, version = version + 1 WHERE id = 201;
+       INSERT INTO game_config (key, value)
+          VALUES ('migration.consumables_v1_done', 'true'::jsonb);
+     END IF;
+   END $$`);
+
 export async function runMigrations() {
   for (const sql of STATEMENTS) await adminPg().query(sql);
   console.log('Миграции применены:', STATEMENTS.length);

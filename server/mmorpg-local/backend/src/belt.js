@@ -10,10 +10,11 @@ import { game } from './db.js';
 export const BELT_SLOTS = 6;
 const err = (msg, status) => Object.assign(new Error(msg), { status });
 
-// Сколько зарядов ОДНОГО эликсира помещается в ОДНУ ячейку пояса (#1).
-// Жизнь и побег — по одному, мощь — стопкой до 10. Шаблон может переопределить через
-// base_stats.belt_max. ДОЛЖНО совпадать с клиентом (content.js ELIXIR_BELT_CAP).
-const BELT_CAP = { health: 1, power: 10, escape: 1 };
+// Сколько зарядов ОДНОГО расходника помещается в ОДНУ ячейку пояса (#1).
+// Точное значение задаёт шаблон через base_stats.belt_max; здесь — лишь дефолты
+// по виду. ДОЛЖНО совпадать с клиентом (content.js ELIXIR_BELT_CAP / beltCapFor).
+const BELT_CAP = { health: 1, power: 10, mana: 1, blood: 3,
+  escape: 1, poison: 1, heal_scroll: 1, cleanse: 1 };
 function beltCapFor(kind, baseStats) {
   const s = baseStats || {};
   if (s.belt_max != null) return Math.max(1, Number(s.belt_max) || 1);
@@ -21,17 +22,33 @@ function beltCapFor(kind, baseStats) {
 }
 
 /**
- * Параметры боевого эликсира из шаблона (base_stats), или null, если это не
- * боевой бафф/хил/побег.
- * Формат как в сидах: здоровье {heal:N} (абсолютное лечение), мощь
- * {power_mult:M, power_turns:T} (множитель урона на T ударов).
+ * Параметры боевого расходника из шаблона (base_stats), или null, если это не
+ * боевой эликсир/свиток. Возвращает унифицированный {kind, ...параметры эффекта}.
+ * Виды: escape · health(HoT) · power · mana · blood(крит) · poison(DoT) ·
+ * heal_scroll(HoT) · cleanse(снятие). Старый формат {heal:N} (мгновенный) —
+ * поддержан для совместимости.
  */
 export function elixirParams(baseStats) {
   const s = baseStats || {};
-  if (s.escape) return { kind: 'escape' };
-  if (s.heal != null) return { kind: 'health', heal: Number(s.heal) || 0 };
+  const num = (v, d) => (v == null || Number.isNaN(Number(v)) ? d : Number(v));
+  const beltMax = s.belt_max != null ? Math.max(1, Number(s.belt_max) || 1) : null;
+  if (s.escape) return { kind: 'escape', belt_max: beltMax };
+  if (s.scroll === 'poison') return { kind: 'poison', dmg_pct: num(s.dmg_pct, 0.15),
+    secs: num(s.secs, 120), cooldown: num(s.cooldown, 120), belt_max: beltMax };
+  if (s.scroll === 'heal') return { kind: 'heal_scroll', heal_pct: num(s.heal_pct, 0.15),
+    secs: num(s.secs, 120), cooldown: num(s.cooldown, 120), belt_max: beltMax };
+  if (s.scroll === 'cleanse') return { kind: 'cleanse',
+    removes: Array.isArray(s.removes) ? s.removes : ['poison', 'heal_scroll'],
+    cooldown: num(s.cooldown, 90), belt_max: beltMax };
+  if (s.kind === 'mana' || s.mana_pct != null) return { kind: 'mana',
+    mana_pct: num(s.mana_pct, 0.2), secs: num(s.secs, 60), belt_max: beltMax };
+  if (s.kind === 'blood' || s.crit_add != null) return { kind: 'blood',
+    crit_add: num(s.crit_add, 0.2), turns: num(s.turns, 1), belt_max: beltMax };
+  if (s.heal_pct != null) return { kind: 'health', heal_pct: num(s.heal_pct, 0.2),
+    secs: num(s.secs, 60), belt_max: beltMax };
+  if (s.heal != null) return { kind: 'health', heal: Number(s.heal) || 0, belt_max: beltMax };
   if (s.power_mult != null) return { kind: 'power',
-    mult: Number(s.power_mult) || 1.3, turns: Number(s.power_turns) || 3 };
+    mult: num(s.power_mult, 1.3), turns: num(s.power_turns, 3), belt_max: beltMax };
   return null;
 }
 
@@ -43,10 +60,10 @@ async function ownedQty(charId, templateId) {
     [charId, templateId])).rows[0].qty);
 }
 
-/** Состав пояса персонажа: для каждой ячейки — шаблон, вид и заряды (quantity). */
+/** Состав пояса персонажа: для каждой ячейки — шаблон, вид, заряды и вместимость. */
 export async function getBelt(charId) {
   const { rows } = await game.query(
-    `SELECT b.slot, b.template_id, b.quantity, t.name, t.icon, t.base_stats
+    `SELECT b.slot, b.template_id, b.quantity, t.name, t.icon, t.base_stats, t.quality
        FROM character_belt b JOIN item_templates t ON t.id = b.template_id
       WHERE b.character_id = $1 ORDER BY b.slot`, [charId]);
   const out = new Array(BELT_SLOTS).fill(null);
@@ -55,7 +72,8 @@ export async function getBelt(charId) {
     if (slot < 0 || slot >= BELT_SLOTS) continue;
     const el = elixirParams(r.base_stats) || { kind: 'health' };
     out[slot] = { slot, templateId: r.template_id, name: r.name, icon: r.icon,
-      kind: el.kind, qty: Number(r.quantity) };
+      kind: el.kind, qty: Number(r.quantity),
+      cap: beltCapFor(el.kind, r.base_stats), quality: Number(r.quality) || 1 };
   }
   return out;
 }

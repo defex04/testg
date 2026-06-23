@@ -80,6 +80,13 @@ function miniEffectsHtml(list = []) {
   }).join('');
 }
 
+const OT_CHIP = {
+  health:      { icon: '🧪', kind: 'buff',   label: 'Лечение' },
+  heal_scroll: { icon: '🩹', kind: 'buff',   label: 'Исцеление' },
+  mana:        { icon: '🔮', kind: 'buff',   label: 'Мана' },
+  poison:      { icon: '☠️', kind: 'debuff', label: 'Отравление' },
+};
+
 function fighterEffects(f = {}) {
   const out = [];
   const turns = Number(f.buffTurns || 0);
@@ -87,6 +94,16 @@ function fighterEffects(f = {}) {
     const pct = Math.round(((Number(f.buffMult) || 1.5) - 1) * 100);
     out.push({ icon: '💪', time: turns, kind: 'buff',
       label: `Эликсир мощи: урон +${pct}%` });
+  }
+  const critT = Number(f.critBuffTurns || 0);
+  if (critT > 0) {
+    const pct = Math.round((Number(f.critBuffAdd) || 0) * 100);
+    out.push({ icon: '🩸', time: critT, kind: 'buff', label: `Эликсир крови: крит +${pct}%` });
+  }
+  for (const e of f.effects || []) {
+    const m = OT_CHIP[e.kind] || { icon: '✦', kind: 'buff', label: 'Эффект' };
+    out.push({ icon: m.icon, time: e.remainSec, kind: m.kind,
+      label: `${m.label} (${e.remainSec} c)` });
   }
   return out;
 }
