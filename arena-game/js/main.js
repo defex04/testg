@@ -559,9 +559,8 @@ function ensureBattleInfo() {
       <div class="binfo-stats">
         <div class="bis ally"><span class="bis-k">Союзники</span><span class="bis-v" data-bi="ally">—</span></div>
         <div class="bis enemy"><span class="bis-k">Противники</span><span class="bis-v" data-bi="enemy">—</span></div>
-        <div class="bis"><span class="bis-k">Урон</span><span class="bis-v" data-bi="dmg">0</span></div>
-        <div class="bis"><span class="bis-k">Убито</span><span class="bis-v" data-bi="kills">0</span></div>
-        <div class="bis"><span class="bis-k">Длительность</span><span class="bis-v" data-bi="dur">—</span></div>
+        <div class="bis plain"><span class="bis-k">Урон</span><span class="bis-v" data-bi="dmg">0</span></div>
+        <div class="bis plain"><span class="bis-k">Убито</span><span class="bis-v" data-bi="kills">0</span></div>
         <button type="button" class="bis binfo-copy-link" data-bi="copy">🔗 Скопировать</button>
       </div>
       <div class="binfo-tip" data-bi="tip"></div>
@@ -571,7 +570,7 @@ function ensureBattleInfo() {
     root: battleForeground.firstElementChild,
     dmg: q('[data-bi="dmg"]'), kills: q('[data-bi="kills"]'),
     ally: q('[data-bi="ally"]'), enemy: q('[data-bi="enemy"]'),
-    dur: q('[data-bi="dur"]'), tip: q('[data-bi="tip"]'), copy: q('[data-bi="copy"]'),
+    tip: q('[data-bi="tip"]'), copy: q('[data-bi="copy"]'),
   };
   biEls.copy.addEventListener('click', async () => {
     const id = battle && battle.battleId;
@@ -587,16 +586,11 @@ function aliveCount(side) {
   for (const f of list) if (f.alive !== false && (f.hp == null || f.hp > 0)) alive++;
   return { alive, total: list.length, dead: list.length - alive };
 }
-function updateBattleDuration() {
-  if (!biEls || !battleStartedAt) return;
-  biEls.dur.textContent = fmtDuration(Date.now() - battleStartedAt);
-}
 function updateBattleInfo() {
   if (mode !== 'battle') return;
   const e = ensureBattleInfo();
   if (!e) return;
   if (!battleStartedAt) battleStartedAt = Date.now();
-  if (!battleDurTimer) battleDurTimer = setInterval(updateBattleDuration, 1000);
   const turn = lastTurnShown || 1;
   e.dmg.textContent = totalDamage;
   const a = aliveCount('left');
@@ -604,7 +598,6 @@ function updateBattleInfo() {
   e.ally.textContent = `${a.alive}/${a.total}`;      // живых/всего, как раньше
   e.enemy.textContent = `${en.alive}/${en.total}`;
   e.kills.textContent = en.dead;            // сколько противников пало (убито нашей стороной)
-  updateBattleDuration();
   e.tip.textContent = BATTLE_TIPS[(turn - 1) % BATTLE_TIPS.length];
 }
 function clearBattleInfo() {
@@ -1142,10 +1135,9 @@ async function initBattle(resumedBattle = null, starter = null, pvpTarget = null
     // в журнал — только удары (#10): пропуски ход не логируем
     try {
       for (const s of d.strikes || []) {
-        if (s.offscreen) {         // удар между другими бойцами — только в журнал
-          ui.log(offscreenLog(s));
-          continue;
-        }
+        // удары показываем (и логируем) ТОЛЬКО с противником напротив, т.е. где я —
+        // атакующий или цель. Чужие удары (offscreen) в мой лог не идут (ТЗ #5).
+        if (s.offscreen) continue;
         await playStrike(s, d.sides);
       }
     } catch (err) {
@@ -1182,17 +1174,23 @@ async function initBattle(resumedBattle = null, starter = null, pvpTarget = null
       renderCombatBar();
     }
     if (d.target) syncEffectFromFighter(d.target);
-    const byName = esc(d.byName || battle.sides.left.name);
-    const tn = d.targetName && d.targetName !== d.byName ? ` для <b>${esc(d.targetName)}</b>` : '';
-    const tnFoe = d.targetName && d.targetName !== d.byName ? ` <b>${esc(d.targetName)}</b>` : '';
-    if (d.kind === 'health') ui.log(`<b>${byName}</b> пьёт эликсир жизни${tn} (+${d.amount} HP за ${d.secs} c)`);
-    else if (d.kind === 'mana') ui.log(`<b>${byName}</b> пьёт эликсир маны${tn} (+${d.amount} MP за ${d.secs} c)`);
-    else if (d.kind === 'power') ui.log(`<b>${byName}</b> усиливает удары${tn} на +${Math.round((d.mult - 1) * 100)}% (${d.turns} х.)`);
-    else if (d.kind === 'blood') ui.log(`<b>${byName}</b> повышает шанс крита${tn} на +${Math.round((d.critAdd || 0) * 100)}% (${d.turns} х.)`);
-    else if (d.kind === 'poison') ui.log(`<b>${byName}</b> отравляет${tnFoe} (−${d.amount} HP за ${d.secs} c)`);
-    else if (d.kind === 'heal_scroll') ui.log(`<b>${byName}</b> читает свиток исцеления${tn} (+${d.amount} HP за ${d.secs} c)`);
-    else if (d.kind === 'cleanse') ui.log(`<b>${byName}</b> очищает эффекты${tnFoe || tn}`);
-    else if (d.kind === 'escape') ui.log(`<b>${byName}</b> использует Эликсир побега`);
+    // В ЛОГ — только события, которые касаются меня: я применил расходник (isUser)
+    // или его применили на меня (onSelf). Чужие эликсиры (между другими бойцами)
+    // в моём логе не показываем — неважно, стоят ли они напротив (ТЗ #5).
+    if (d.isUser || d.onSelf) {
+      const byName = esc(d.byName || battle.sides.left.name);
+      const tn = d.targetName && d.targetName !== d.byName ? ` для <b>${esc(d.targetName)}</b>` : '';
+      const tnFoe = d.targetName && d.targetName !== d.byName ? ` <b>${esc(d.targetName)}</b>` : '';
+      const every = d.everySec ? `, каждые ${d.everySec} c` : '';
+      if (d.kind === 'health') ui.log(`<b>${byName}</b> пьёт эликсир жизни${tn} (+${d.amount} HP за ${d.secs} c${every})`);
+      else if (d.kind === 'mana') ui.log(`<b>${byName}</b> пьёт эликсир маны${tn} (+${d.amount} MP за ${d.secs} c${every})`);
+      else if (d.kind === 'power') ui.log(`<b>${byName}</b> усиливает удары${tn} на +${Math.round((d.mult - 1) * 100)}% (${d.turns} х.)`);
+      else if (d.kind === 'blood') ui.log(`<b>${byName}</b> повышает шанс крита${tn} на +${Math.round((d.critAdd || 0) * 100)}% (${d.turns} х.)`);
+      else if (d.kind === 'poison') ui.log(`<b>${byName}</b> отравляет${tnFoe} (−${d.amount} HP за ${d.secs} c${every})`);
+      else if (d.kind === 'heal_scroll') ui.log(`<b>${byName}</b> читает свиток исцеления${tn} (+${d.amount} HP за ${d.secs} c${every})`);
+      else if (d.kind === 'cleanse') ui.log(`<b>${byName}</b> очищает эффекты${tnFoe || tn}`);
+      else if (d.kind === 'escape') ui.log(`<b>${byName}</b> использует Эликсир побега`);
+    }
 
     const side = effectPopupSide(d);
     if (!side) {
@@ -2896,14 +2894,15 @@ const ELIXIR_ACTION = { health: 'Восстановить здоровье', pow
 function elixirEffectText(kind, s) {
   s = s || {};
   const p = (v) => Math.round((Number(v) || 0) * 100);
+  const tk = (v) => Math.max(1, Number(v) || 5);     // период тика (сек), дефолт 5 (#3)
   switch (kind) {
     case 'health': return s.heal_pct != null
-      ? `+${p(s.heal_pct)}% HP за ${s.secs} c` : `+${s.heal} HP`;
-    case 'mana':   return `+${p(s.mana_pct)}% маны за ${s.secs} c`;
+      ? `+${p(s.heal_pct)}% HP за ${s.secs} c (каждые ${tk(s.tick)} c)` : `+${s.heal} HP`;
+    case 'mana':   return `+${p(s.mana_pct)}% маны за ${s.secs} c (каждые ${tk(s.tick)} c)`;
     case 'power':  return `урон +${p((Number(s.power_mult) || 1) - 1)}% на ${s.power_turns} х.`;
     case 'blood':  return `крит +${p(s.crit_add)}% на ${s.turns || 1} х.`;
-    case 'poison': return `−${p(s.dmg_pct)}% HP за ${s.secs} c · тайм-аут ${s.cooldown} c`;
-    case 'heal_scroll': return `+${p(s.heal_pct)}% HP за ${s.secs} c · тайм-аут ${s.cooldown} c`;
+    case 'poison': return `−${p(s.dmg_pct)}% HP за ${s.secs} c (каждые ${tk(s.tick)} c) · тайм-аут ${s.cooldown} c`;
+    case 'heal_scroll': return `+${p(s.heal_pct)}% HP за ${s.secs} c (каждые ${tk(s.tick)} c) · тайм-аут ${s.cooldown} c`;
     case 'cleanse': return `снимает яд/исцеление · тайм-аут ${s.cooldown} c`;
     case 'escape': return 'выход из боя';
     default: return '';
@@ -3110,7 +3109,10 @@ function showEffectPreview(eff) {
   const rows = [];
   if (eff.label) rows.push(['Эффект', eff.label]);
   rows.push(['Вид', eff.kind === 'debuff' ? 'Ослабление' : 'Усиление']);
-  if (eff.time != null && eff.time !== '') rows.push(['Осталось', eff.time + ' х.']);
+  if (eff.time != null && eff.time !== '') {
+    rows.push(['Осталось', eff.unit === 'sec' ? eff.time + ' c' : eff.time + ' х.']);
+  }
+  if (eff.every) rows.push(['Тик', 'каждые ' + eff.every + ' c']);
   fxPreviewCardEl.className = 'fx-preview-card ' + (eff.kind === 'debuff' ? 'debuff' : 'buff');
   fxPreviewCardEl.innerHTML = `
     <div class="fx-head"><span class="fx-ico">${esc(eff.icon || '✦')}</span>
@@ -3260,18 +3262,18 @@ function resetElixirBattle() {
 function showEffectNumbers(changed) {
   if (!ui || !arena) return;
   for (const c of changed || []) {
-    const d = Number(c.dHp) || 0;               // + лечение, − урон (только эффект)
-    if (!d) continue;
-    const acc = (effectAccum[c.id] || 0) + d;
-    const thr = Math.max(8, Math.round((c.maxHp || 1000) * 0.012));
-    if (Math.abs(acc) < thr) { effectAccum[c.id] = acc; continue; }
-    effectAccum[c.id] = 0;
-    const shown = Math.round(acc);
+    // dHp — РОВНО то, что эффект изменил на этом тике (сервер уже применил его к HP,
+    // и этот же effectTick двигает полосу HP). Показываем число тик-в-тик, без
+    // накопления порога: «−14 на табло ⇔ −14 с полоски» (ТЗ #3).
+    const shown = Math.round(Number(c.dHp) || 0);
+    if (!shown) continue;
     const side = c.side === 'left' ? 'left' : 'right';   // позиция: я слева, фокус справа
     const fighter = fighters[side];
     const pos = fighter
       ? arena.worldToScreen(fighter.headPoint()) : { x: side === 'left' ? 70 : 220, y: 110 };
-    ui.popup(pos, shown > 0 ? `+${shown}` : `${shown}`, shown > 0 ? 'heal' : 'dmg');
+    // лечение от свитков/HoT — зелёным «+N»; урон ОТ ЭФФЕКТА (яд/DoT) — СЕРЫМ «−N»,
+    // чтобы отличать его от красного урона удара (ТЗ #7)
+    ui.popup(pos, shown > 0 ? `+${shown}` : `${shown}`, shown > 0 ? 'heal' : 'effect-dmg');
   }
 }
 
@@ -3290,19 +3292,20 @@ function effectsForFighter(f) {
   const turns = Number(f?.buffTurns || 0);
   if (turns > 0) {
     const pct = Math.round(((Number(f?.buffMult) || 1.5) - 1) * 100);
-    out.push({ icon: '💪', time: turns, kind: 'buff',
+    out.push({ icon: '💪', time: turns, unit: 'turn', kind: 'buff',
       label: `Эликсир мощи: урон +${pct}%`, pct, q: f?.buffQuality || 0 });
   }
   const critT = Number(f?.critBuffTurns || 0);
   if (critT > 0) {
     const pct = Math.round((Number(f?.critBuffAdd) || 0) * 100);
-    out.push({ icon: '🩸', time: critT, kind: 'buff',
+    out.push({ icon: '🩸', time: critT, unit: 'turn', kind: 'buff',
       label: `Эликсир крови: крит +${pct}%`, q: f?.critBuffQuality || 0 });
   }
   for (const e of f?.effects || []) {
     const m = OT_CHIP[e.kind] || { icon: '✦', kind: 'buff', label: 'Эффект' };
-    out.push({ icon: m.icon, time: e.remainSec, kind: m.kind,
-      label: `${m.label} (${e.remainSec} c)`, q: e.q || 0 });
+    const every = Number(e.everySec) || 0;
+    out.push({ icon: m.icon, time: e.remainSec, unit: 'sec', every, kind: m.kind,
+      label: `${m.label}: ${e.remainSec} c${every ? `, каждые ${every} c` : ''}`, q: e.q || 0 });
   }
   return out;
 }
@@ -3792,7 +3795,10 @@ function renderInventory() {
   invTabsEl?.querySelectorAll('.inv-tab').forEach((b) =>
     b.classList.toggle('active', b.dataset.cat === effCat));
 
-  const shown = rows.filter((r) => r.meta.category === effCat);
+  // 0 шт. в рюкзаке не показываем: эликсир, целиком надетый в пояс, исчезает из
+  // сетки рюкзака (его «свободный» остаток 0) — пустые квадратики не нужны (ТЗ #10)
+  const shown = rows.filter((r) => r.meta.category === effCat
+    && !(r.meta.isElixir && r.meta.available <= 0));
   if (!shown.some((r) => r.id === selectedInvId)) selectedInvId = null;
 
   invGridEl.innerHTML = '';

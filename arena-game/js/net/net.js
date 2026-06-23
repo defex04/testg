@@ -382,11 +382,10 @@ export class ServerBattle extends EventTarget {
 
   _applySides(s) {
     if (!s) return;
-    if (s.left) {
-      this.sides.left.hp = s.left.hp;
-      if (s.left.buffTurns != null) this.sides.left.buffTurns = s.left.buffTurns;
-      if (s.left.buffMult != null) this.sides.left.buffMult = s.left.buffMult;
-    }
+    // s.left = pub(me): полный снимок бойца (hp/mp/buffTurns/critBuffTurns/effects/…).
+    // Сливаем его ЦЕЛИКОМ, иначе серверный сброс счётчиков (крит/мощь) не доходит до
+    // плашки, и чип «Эликсира крови» висит после того, как заряд кончился (#2).
+    if (s.left) this.sides.left = { ...this.sides.left, ...s.left };
     if (s.right) this.sides.right = { ...s.right };
   }
   _applyFocus(focus) {

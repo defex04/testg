@@ -34,7 +34,11 @@
       "PowerShell($paths = @\\(\"$env:ProgramFiles\\\\nodejs\\\\node.exe\",\"${env:ProgramFiles\\(x86\\)}\\\\nodejs\\\\node.exe\",\"$env:LOCALAPPDATA\\\\Programs\\\\nodejs\\\\node.exe\",\"$env:APPDATA\\\\npm\\\\node.exe\"\\); $found = $paths | Where-Object { Test-Path $_ }; if \\($found\\) { $found } else { Get-Command node,nodejs,nvm -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source; \"searching...\"; Get-ChildItem -Path C:\\\\ -Filter node.exe -Recurse -ErrorAction SilentlyContinue -Depth 4 | Select-Object -First 5 -ExpandProperty FullName })",
       "PowerShell($d = Get-Command docker -ErrorAction SilentlyContinue; if \\($d\\) { \"docker: $\\($d.Source\\)\"; docker ps --format \"{{.Names}} {{.Image}}\" 2>$null } else { \"no docker\" })",
       "Bash(command -v python python3 py)",
-      "Bash(cd arena-game *)"
+      "Bash(cd arena-game *)",
+      "Bash(cd server/mmorpg-local/backend/src/battle && wc -l engine.js manager.js stats.js sim.js && echo \"===belt===\" && wc -l ../belt.js ../shop.js ../inventory.js)",
+      "Bash(grep -n \"Гроссбух =====\\\\|class.*SimPlayer\\\\|SP = new\\\\|R.ledger\\\\|/\\\\* =====\" admin.html)",
+      "PowerShell($node = \\(Get-Command node -ErrorAction SilentlyContinue\\); if \\($node\\) { \"node: $\\($node.Source\\)\" } else { \"no node\"; $cands = @\\(\"$env:ProgramFiles\\\\nodejs\\\\node.exe\",\"$env:LOCALAPPDATA\\\\Programs\\\\nodejs\\\\node.exe\",\"$env:APPDATA\\\\npm\\\\node.exe\"\\); foreach\\($c in $cands\\){ if\\(Test-Path $c\\){ \"found: $c\" } } })",
+      "Bash(mkdir -p \"C:/Users/andre/Downloads/new/.claude\" && cat \"C:/Users/andre/Downloads/new/.claude/launch.json\" 2>/dev/null || echo \"NO LAUNCH FILE\")"
     ]
   }
 }

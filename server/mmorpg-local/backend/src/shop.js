@@ -17,13 +17,13 @@ function describeElixir(baseStats) {
   switch (p.kind) {
     case 'escape':   return 'Позволяет покинуть бой без обычного выхода.';
     case 'health':   return p.heal_pct != null
-      ? `Восстанавливает ${pct(p.heal_pct)}% здоровья за ${p.secs} c.`
+      ? `Восстанавливает ${pct(p.heal_pct)}% здоровья за ${p.secs} c (каждые ${p.tick} c).`
       : `Восстанавливает ${p.heal} HP в бою.`;
-    case 'mana':     return `Восстанавливает ${pct(p.mana_pct)}% маны за ${p.secs} c.`;
+    case 'mana':     return `Восстанавливает ${pct(p.mana_pct)}% маны за ${p.secs} c (каждые ${p.tick} c).`;
     case 'power':    return `Урон +${pct(p.mult - 1)}% на ${p.turns} х.`;
     case 'blood':    return `Шанс крита +${pct(p.crit_add)}% на ${p.turns} х.`;
-    case 'poison':   return `Отравляет цель: −${pct(p.dmg_pct)}% HP за ${p.secs} c (тайм-аут ${p.cooldown} c).`;
-    case 'heal_scroll': return `Исцеляет цель: +${pct(p.heal_pct)}% HP за ${p.secs} c (тайм-аут ${p.cooldown} c).`;
+    case 'poison':   return `Отравляет цель: −${pct(p.dmg_pct)}% HP за ${p.secs} c (каждые ${p.tick} c, тайм-аут ${p.cooldown} c).`;
+    case 'heal_scroll': return `Исцеляет цель: +${pct(p.heal_pct)}% HP за ${p.secs} c (каждые ${p.tick} c, тайм-аут ${p.cooldown} c).`;
     case 'cleanse':  return `Снимает отравление и исцеление с цели (тайм-аут ${p.cooldown} c).`;
     default:         return 'Боевой расходник.';
   }

@@ -693,20 +693,23 @@ body.loc-castle.in-battle.battle-dock-closed .binfo-panel {
   gap: 8px;
   padding: 3px 8px;
   border-radius: 7px;
-  border-left: 3px solid rgba(201, 168, 76, .4);
   background: rgba(255, 255, 255, .03);
 }
-.bis.ally  { border-left-color: rgba(111, 180, 255, .7); }
-.bis.enemy { border-left-color: rgba(255, 120, 90, .7); }
+/* союзники/противники — оформление с ОБЕИХ сторон (ТЗ #11) */
+.bis.ally  { border-left: 3px solid rgba(111, 180, 255, .7);
+             border-right: 3px solid rgba(111, 180, 255, .7); }
+.bis.enemy { border-left: 3px solid rgba(255, 120, 90, .7);
+             border-right: 3px solid rgba(255, 120, 90, .7); }
+/* урон/убито — без бокового оформления (ТЗ #11) */
+.bis.plain { border: none; }
 
-/* кнопка «скопировать» — ячейка сетки рядом с «Длительность», единственный
-   кликабельный элемент пассивной панели (у неё pointer-events:none) */
+/* кнопка «скопировать» — на всю ширину сетки и по центру (ТЗ #11) */
 .binfo-copy-link {
+  grid-column: 1 / -1;
   pointer-events: auto;
   justify-content: center;
   gap: 5px;
   border: none;
-  border-left: 3px solid rgba(201, 168, 76, .5);
   color: var(--gold-bright);
   font-family: var(--font-display);
   font-size: 11.5px;
@@ -1451,8 +1454,30 @@ body.loc-castle.in-battle .sprite-main .sm-ico {
   animation: loc-panel-in .18s ease-out;
   will-change: transform, opacity;
 }
+/* магазин — отдельное окно по центру, размером как почта (ТЗ #9): прежде он
+   «прилипал» к низу и открывался криво. Фиксируем по центру экрана. */
 .loc-body.open.shop-open {
-  max-height: min(64vh, 520px);
+  position: fixed;
+  left: 50%; top: 50%;
+  bottom: auto;
+  transform: translate(-50%, -50%);
+  width: min(560px, calc(100vw - 28px));
+  height: min(640px, calc(100dvh - 44px));
+  max-height: none;
+  z-index: 72;
+  animation: shop-panel-in .18s ease-out;
+}
+/* затемнение позади окна магазина — как у почты */
+.loc-body.open.shop-open::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background: rgba(5, 7, 3, .74);
+}
+@keyframes shop-panel-in {
+  from { opacity: 0; transform: translate(-50%, calc(-50% + 8px)); }
+  to   { opacity: 1; transform: translate(-50%, -50%); }
 }
 
 .battles-list {
@@ -2135,14 +2160,19 @@ body.loc-castle.in-battle .sprite-main .sm-ico {
   align-items: center;
   column-gap: 10px;
   margin-top: 6px;
-  min-height: 28px;
+  /* ВЫСОТА ФИКСИРОВАНА (ТЗ): место под чипы эффектов зарезервировано всегда,
+     поэтому появление/исчезновение эффектов НЕ меняет высоту шапки → сцена и
+     бойцы не дёргаются и не ресайзятся (#1, #4). */
+  height: 40px;
 }
 .bh-effects {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;          /* без переноса — иначе ряд рос бы вниз и двигал сцену */
   gap: 4px;
-  align-content: center;
+  align-items: center;
   min-width: 0;
+  height: 100%;
+  overflow: hidden;           /* лишние чипы клипаются, а не растягивают шапку */
 }
 .bh-effects-left { justify-content: flex-start; }
 .bh-effects-right { justify-content: flex-end; }
@@ -2151,7 +2181,7 @@ body.loc-castle.in-battle .sprite-main .sm-ico {
 .effect-chip {
   position: relative;
   flex: 0 0 auto;
-  width: 32px;
+  width: 32px;                      /* размер иконки эффекта в окне боя (ТЗ #2: слегка меньше) */
   height: 32px;
   padding: 0;                       /* сброс кнопки: чип — тап-цель превью эффекта (#8) */
   border-radius: 8px;
@@ -2177,7 +2207,7 @@ button.effect-chip:hover { border-color: var(--gold); }
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 18px;
+  font-size: 18px;                  /* emoji-иконка эффекта (ТЗ #2) */
   line-height: 1;
 }
 .effect-ico img { width: 100%; height: 100%; object-fit: contain; display: block; }
@@ -2730,6 +2760,12 @@ body.hints-off .strike-wheel.hint-attack .sw-sprite.sword:not(.thrust):not(.clan
   font-size: 26px;
   color: #8be28b;
   text-shadow: 0 2px 4px #000, 0 0 12px rgba(120, 230, 120, .65);
+}
+/* урон от эффекта по времени (яд/DoT) — серым, в отличие от красного урона удара (ТЗ #7) */
+.bui-popup.effect-dmg {
+  font-size: 24px;
+  color: #c4c4c4;
+  text-shadow: 0 2px 4px #000, 0 0 10px rgba(170, 170, 170, .5);
 }
 .bui-popup.escape {
   font-size: 22px;
@@ -3874,8 +3910,8 @@ button.belt-slot { padding: 0; font: inherit; color: inherit; -webkit-tap-highli
   .bar-icon { width: 13px; height: 13px; }
   .bh-damage { font-size: 10.5px; }
   .bh-timer { font-size: 15px; }
-  .effect-chip { width: 29px; height: 29px; }
-  .effect-ico { font-size: 16px; }
+  .effect-chip { width: 30px; height: 30px; }   /* узкие экраны (ТЗ #2) */
+  .effect-ico { font-size: 17px; }
 
   .sw-skip { padding: 5px 11px; font-size: 11px; }
   .sw-status { font-size: 11px; margin-top: 34px; }
@@ -3961,7 +3997,7 @@ button.belt-slot { padding: 0; font: inherit; color: inherit; -webkit-tap-highli
 @media (max-height: 640px) {
   .battle-head { padding-top: 6px; }
   .bh-damage-row { margin-top: 5px; }
-  .bh-lower { margin-top: 3px; min-height: 18px; }
+  .bh-lower { margin-top: 3px; height: 36px; }   /* фиксированная высота и на низких экранах */
   .arena-stage { min-height: 190px; }
 }
 
@@ -3997,8 +4033,13 @@ button.belt-slot { padding: 0; font: inherit; color: inherit; -webkit-tap-highli
     bottom: calc(min(18vw, 58px) + 20px);
     max-height: 42vh;
   }
+  /* в городе магазин тоже центрируется окном-почтой (перебивает .loc-body.open
+     с раскладкой «прилипания к низу», ТЗ #9) */
   body.loc-castle .loc-body.open.shop-open {
-    max-height: min(64vh, 560px);
+    width: min(560px, calc(100vw - 20px));
+    height: min(640px, calc(100dvh - 32px));
+    bottom: auto;
+    max-height: none;
   }
   body.loc-castle .bottom-dock.dock-open .dock-body {
     padding: 8px 10px 6px;

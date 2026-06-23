@@ -68,6 +68,14 @@ shopRoutes(app, authed);
 adminRoutes(app);
 const pub = fileURLToPath(new URL('../public', import.meta.url));
 app.get('/admin', (req, res) => res.sendFile(pub + '/admin.html'));
+// исходник движка боя как ESM — «Живой бой» в админке импортирует НАСТОЯЩИЙ
+// engine.js в браузере (никакой копии-дубля: тестируем боевой код 1:1). Отдаём
+// ТОЛЬКО engine.js (чистый, без импортов) — не весь каталог battle/ (там manager
+// с SQL и т.п.), чтобы не светить серверный код наружу.
+app.get('/battle-src/engine.js', (req, res) => {
+  res.type('application/javascript');
+  res.sendFile(fileURLToPath(new URL('./battle/engine.js', import.meta.url)));
+});
 const uploadsDir = process.env.UPLOADS_DIR || '/app/uploads';
 fs.mkdirSync(uploadsDir, { recursive: true });
 app.use('/uploads', express.static(uploadsDir));

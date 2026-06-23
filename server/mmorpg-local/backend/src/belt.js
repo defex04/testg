@@ -28,24 +28,29 @@ function beltCapFor(kind, baseStats) {
  * heal_scroll(HoT) · cleanse(снятие). Старый формат {heal:N} (мгновенный) —
  * поддержан для совместимости.
  */
+// Период дискретного тика эффекта по времени (сек): сколько ждать между
+// порциями HoT/DoT/маны. Берётся из шаблона (base_stats.tick), иначе 5 c —
+// эффект «как часы» (ТЗ #3). Длительность делит его на целое число шагов.
+const DEFAULT_TICK = 5;
 export function elixirParams(baseStats) {
   const s = baseStats || {};
   const num = (v, d) => (v == null || Number.isNaN(Number(v)) ? d : Number(v));
   const beltMax = s.belt_max != null ? Math.max(1, Number(s.belt_max) || 1) : null;
+  const tick = Math.max(1, num(s.tick, DEFAULT_TICK));    // период тика, секунды
   if (s.escape) return { kind: 'escape', belt_max: beltMax };
   if (s.scroll === 'poison') return { kind: 'poison', dmg_pct: num(s.dmg_pct, 0.15),
-    secs: num(s.secs, 120), cooldown: num(s.cooldown, 120), belt_max: beltMax };
+    secs: num(s.secs, 120), cooldown: num(s.cooldown, 120), tick, belt_max: beltMax };
   if (s.scroll === 'heal') return { kind: 'heal_scroll', heal_pct: num(s.heal_pct, 0.15),
-    secs: num(s.secs, 120), cooldown: num(s.cooldown, 120), belt_max: beltMax };
+    secs: num(s.secs, 120), cooldown: num(s.cooldown, 120), tick, belt_max: beltMax };
   if (s.scroll === 'cleanse') return { kind: 'cleanse',
     removes: Array.isArray(s.removes) ? s.removes : ['poison', 'heal_scroll'],
     cooldown: num(s.cooldown, 90), belt_max: beltMax };
   if (s.kind === 'mana' || s.mana_pct != null) return { kind: 'mana',
-    mana_pct: num(s.mana_pct, 0.2), secs: num(s.secs, 60), belt_max: beltMax };
+    mana_pct: num(s.mana_pct, 0.2), secs: num(s.secs, 60), tick, belt_max: beltMax };
   if (s.kind === 'blood' || s.crit_add != null) return { kind: 'blood',
     crit_add: num(s.crit_add, 0.2), turns: num(s.turns, 1), belt_max: beltMax };
   if (s.heal_pct != null) return { kind: 'health', heal_pct: num(s.heal_pct, 0.2),
-    secs: num(s.secs, 60), belt_max: beltMax };
+    secs: num(s.secs, 60), tick, belt_max: beltMax };
   if (s.heal != null) return { kind: 'health', heal: Number(s.heal) || 0, belt_max: beltMax };
   if (s.power_mult != null) return { kind: 'power',
     mult: num(s.power_mult, 1.3), turns: num(s.power_turns, 3), belt_max: beltMax };

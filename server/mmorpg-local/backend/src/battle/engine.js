@@ -348,7 +348,13 @@ export class Engine {
     }
     // «Эликсир крови»: прибавка к криту действует на ХОД бойца — гасим её на его
     // ударе (но не на контратаке, иначе сгорела бы до его настоящего хода).
-    if (!isCounter && attacker.critBuffTurns > 0) attacker.critBuffTurns -= 1;
+    // Когда заряды кончились — полностью обнуляем (чтобы чип/счётчик не «висел», #2).
+    if (!isCounter && attacker.critBuffTurns > 0) {
+      attacker.critBuffTurns -= 1;
+      if (attacker.critBuffTurns <= 0) { attacker.critBuffTurns = 0; attacker.critBuffAdd = 0; }
+    }
+    // «Эликсир мощи»: тот же порядок — на нуле зарядов сбрасываем множитель.
+    if (attacker.buffTurns <= 0 && attacker.buffMult !== 1) attacker.buffMult = 1;
     return {
       attackerId: attacker.id, defenderId: defender.id,
       attackerSide: attacker.side, defenderSide: defender.side,
@@ -415,27 +421,43 @@ export class Engine {
 
   /**
    * Эффект по времени (HoT/DoT/мана): total — суммарная величина (HP/MP),
-   * растянутая на durationMs реального времени. kind: 'health' | 'heal_scroll'
+   * РАВНЫМИ ПОРЦИЯМИ применяемая ДИСКРЕТНЫМИ тиками каждые periodMs реального
+   * времени, пока не истечёт durationMs. kind: 'health' | 'heal_scroll'
    * (лечение), 'poison' (урон), 'mana' (восстановление MP).
+   *
+   * Тик — «как часы» (#3): длительность делится на целое число равных шагов
+   * (ticksTotal = round(duration/period)), порция = total/ticksTotal, реальный
+   * период = duration/ticksTotal (последний шаг приходится ровно на конец). Это
+   * детерминированно и не зависит от джиттера событийного цикла (tickEffects
+   * считает по «настенному» elapsedMs, а не по числу вызовов).
+   *
    * stack=false → эффект того же вида ЗАМЕНЯЕТСЯ (эликсиры: рефреш, без стопок);
    * stack=true  → ДОБАВЛЯЕТСЯ к идущим (свитки яда/исцеления копятся от нескольких
    * источников на одну цель). См. tickEffects.
    */
-  addOverTime(id, kind, total, durationMs, srcId = null, stack = false, quality = 0) {
+  addOverTime(id, kind, total, durationMs, srcId = null, stack = false,
+              quality = 0, periodMs = 5000) {
     const f = this.fighter(id);
     if (!f || !f.alive) return false;
     if (!stack) f.effects = f.effects.filter((e) => e.kind !== kind);
+    const dur = Math.max(1, Number(durationMs) || 1);
+    const per = Math.max(1, Math.min(dur, Number(periodMs) || 5000));
+    const ticksTotal = Math.max(1, Math.round(dur / per));
+    const stepMs = dur / ticksTotal;            // реальный период тика (мс)
     f.effects.push({ kind, total: Math.max(0, Number(total) || 0),
-      applied: 0, durationMs: Math.max(1, Number(durationMs) || 1),
-      elapsedMs: 0, srcId, quality });
+      applied: 0, durationMs: dur, elapsedMs: 0,
+      stepMs, ticksTotal, ticksDone: 0,
+      srcId, quality });
     return true;
   }
 
   /**
-   * Тик эффектов по времени: dtMs — прошедшее реальное время. Применяет дробную
-   * долю каждого эффекта. Кладёт на бойца `_effDelta` — ЧИСТОЕ изменение HP именно
-   * от эффектов за этот тик (для всплывашек: полоса HP двигается и от ударов, а
-   * число должно показывать ровно эффект, #2). Возвращает:
+   * Тик эффектов по времени: dtMs — прошедшее реальное время. Применяет ВСЕ
+   * дискретные шаги, чьё время наступило (стабильно при любом dt — наверстывает
+   * пропущенные тики, если событийный цикл подвис). Кладёт на бойца `_effDelta`
+   * — ЧИСТОЕ изменение HP именно от эффектов за этот тик (для всплывашек: полоса
+   * HP двигается и от ударов, а число должно показывать ровно эффект, #2).
+   * Возвращает:
    *  - changed: бойцы, у кого что-то поменялось;
    *  - deaths:  id умерших от яда;
    *  - damageBySrc: Map(srcId → суммарный урон ядом) — для статистики (#1);
@@ -450,12 +472,15 @@ export class Engine {
       if (!f.alive || !f.effects.length) continue;
       let touched = false, effDelta = 0;
       for (const e of f.effects) {
-        const step = Math.min(dt, e.durationMs - e.elapsedMs);
-        if (step <= 0) continue;
-        e.elapsedMs += step;
-        const target = e.total * (e.elapsedMs / e.durationMs);
-        const delta = target - e.applied;     // сколько применить в этом тике
-        e.applied = target;
+        if (f.alive === false) break;
+        e.elapsedMs = Math.min(e.durationMs, e.elapsedMs + dt);
+        // сколько целых шагов «созрело» к текущему времени (но не больше всего)
+        const dueTicks = Math.min(e.ticksTotal, Math.floor(e.elapsedMs / e.stepMs + 1e-6));
+        if (dueTicks <= e.ticksDone) continue;
+        const want = e.total * (dueTicks / e.ticksTotal);   // сколько ВСЕГО должно быть применено
+        const delta = want - e.applied;
+        e.applied = want;
+        e.ticksDone = dueTicks;
         if (delta === 0) continue;
         touched = true;
         if (e.kind === 'mana') {
@@ -476,7 +501,8 @@ export class Engine {
           effDelta += f.hp - before;
         }
       }
-      f.effects = f.effects.filter((e) => e.elapsedMs < e.durationMs - 0.5);
+      // эффект снят, когда отыграл все свои шаги (а не «почти» по времени)
+      f.effects = f.effects.filter((e) => e.ticksDone < e.ticksTotal);
       if (touched) { f._effDelta = effDelta; changed.push(f); if (!f.alive) deaths.push(f.id); }
     }
     return { changed, deaths, damageBySrc, kills };

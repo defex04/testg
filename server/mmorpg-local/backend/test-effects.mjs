@@ -8,10 +8,13 @@ const mk = () => new Engine({
   right: [{ id: 'B', name: 'B', hp: 1000, damage: [100, 100], crit: 0, dodge: 0 }],
 }, { turnTime: 20 });
 
-// 1. Лечение по времени (HoT): дробно за тики, доигрывает до total
+// Эффекты применяются ДИСКРЕТНЫМИ равными шагами каждые periodMs (по умолч. 5000),
+// длительность делится на целое число тиков. Поэтому в тестах период задаём явно.
+
+// 1. Лечение по времени (HoT): дробно по тикам, доигрывает до total
 {
   const e = mk(); const A = e.fighter('A'); A.hp = 500;
-  e.addOverTime('A', 'health', 300, 6000);
+  e.addOverTime('A', 'health', 300, 6000, null, false, 0, 3000); // 2 тика по 150
   e.tickEffects(3000);
   assert(Math.abs(A.hp - 650) < 1, 'HoT половина: ' + A.hp);
   e.tickEffects(3000);
@@ -22,7 +25,7 @@ const mk = () => new Engine({
 // 2. HoT не выше maxHp
 {
   const e = mk(); const A = e.fighter('A'); A.hp = 950;
-  e.addOverTime('A', 'health', 300, 3000);
+  e.addOverTime('A', 'health', 300, 3000, null, false, 0, 3000);
   e.tickEffects(3000);
   assert(A.hp === 1000, 'HoT не превышает maxHp: ' + A.hp);
 }
@@ -30,10 +33,20 @@ const mk = () => new Engine({
 // 3. Яд (DoT) снимает % и может убить, смерть рапортуется
 {
   const e = mk(); const B = e.fighter('B'); B.hp = 100;
-  e.addOverTime('B', 'poison', 300, 3000);
-  const r = e.tickEffects(1500);          // −150 → 0
+  e.addOverTime('B', 'poison', 300, 3000, null, false, 0, 1500); // 2 тика по 150
+  const r = e.tickEffects(1500);          // первый тик −150 → 0
   assert(!B.alive, 'яд убивает');
   assert(r.deaths.includes('B'), 'смерть от яда в списке');
+}
+
+// 3b. Дискретные тики «как часы»: между тиками HP не меняется (#3)
+{
+  const e = mk(); const A = e.fighter('A'); A.hp = 100;
+  e.addOverTime('A', 'health', 400, 20000, null, false, 0, 5000); // 4 тика по 100
+  e.tickEffects(5000); assert(A.hp === 200, 'тик 1: ' + A.hp);
+  e.tickEffects(2000); assert(A.hp === 200, 'между тиками без изменений: ' + A.hp);
+  e.tickEffects(3000); assert(A.hp === 300, 'тик 2 на 10с: ' + A.hp);
+  e.tickEffects(10000); assert(A.hp === 500 && A.effects.length === 0, 'добор до конца: ' + A.hp);
 }
 
 // 4. Восстановление маны по времени
@@ -71,9 +84,9 @@ const mk = () => new Engine({
 // 7. Тот же вид эффекта рефрешится (без стопок)
 {
   const e = mk(); const A = e.fighter('A'); A.hp = 500;
-  e.addOverTime('A', 'health', 100, 4000);
+  e.addOverTime('A', 'health', 100, 4000, null, false, 0, 2000);
   e.tickEffects(2000);                    // +50
-  e.addOverTime('A', 'health', 200, 4000); // рефреш: новый эффект 200/4000
+  e.addOverTime('A', 'health', 200, 4000, null, false, 0, 2000); // рефреш: новый эффект 200/4000
   assert(A.effects.filter((x) => x.kind === 'health').length === 1, 'health не дублируется');
 }
 
@@ -95,7 +108,7 @@ const mk = () => new Engine({
 // 9. Атрибуция яда: урон и скальп засчитываются ИСТОЧНИКУ (srcId), #1
 {
   const e = mk(); const B = e.fighter('B'); B.hp = 100;
-  e.addOverTime('B', 'poison', 300, 3000, 'A', true);   // источник — A
+  e.addOverTime('B', 'poison', 300, 3000, 'A', true, 0, 1500); // источник — A, 2 тика по 150
   const r = e.tickEffects(1500);                          // 150, но HP только 100 → dealt=100
   assert(r.damageBySrc.get('A') === 100, 'урон ядом засчитан A: ' + r.damageBySrc.get('A'));
   assert(r.kills.length === 1 && r.kills[0].killerId === 'A' && r.kills[0].victimId === 'B',
@@ -115,7 +128,7 @@ const mk = () => new Engine({
 // 11. dHp — чистое изменение HP от эффекта за тик (для всплывашек, #2)
 {
   const e = mk(); const A = e.fighter('A'); A.hp = 500;
-  e.addOverTime('A', 'health', 300, 6000, 'A', false);
+  e.addOverTime('A', 'health', 300, 6000, 'A', false, 0, 3000); // 2 тика по 150
   const r = e.tickEffects(3000);
   const me = r.changed.find((f) => f.id === 'A');
   assert(Math.abs(me._effDelta - 150) < 1, 'dHp лечения за тик ≈ +150: ' + me._effDelta);
@@ -126,4 +139,4 @@ const mk = () => new Engine({
   assert(me2._effDelta > 0 && me2._effDelta <= 160, 'dHp учитывает только эффект, не удар: ' + me2._effDelta);
 }
 
-console.log('test-effects: ВСЕ ПРОВЕРКИ ПРОЙДЕНЫ (11/11)');
+console.log('test-effects: ВСЕ ПРОВЕРКИ ПРОЙДЕНЫ (12/12)');

@@ -120,6 +120,65 @@
   .sim-feed .fl .tn{color:var(--brass)}
   #sp-speed{vertical-align:middle}
   @media (max-width:640px){.sim-stage{grid-template-columns:1fr}}
+
+  /* ===== Живой бой (интерактивный движок боя прямо в админке) ===== */
+  .ls-setup{display:flex;flex-wrap:wrap;gap:14px;align-items:flex-end;margin-bottom:12px}
+  .ls-setup .fld{display:flex;flex-direction:column;gap:3px}
+  .ls-setup label{margin:0}
+  .ls-setup input,.ls-setup select{width:96px}
+  .ls-banner{margin:8px 0;padding:8px 12px;border:1px solid var(--brass);border-radius:4px;
+    background:rgba(201,149,63,.08);font:13px var(--mono);color:var(--brass2)}
+  .ls-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+  @media (max-width:1100px){.ls-grid{grid-template-columns:1fr}}
+  .ls-panel{border:1px solid var(--line);border-radius:6px;background:var(--ink2);
+    padding:10px 12px;display:flex;flex-direction:column;gap:8px}
+  .ls-panel.left{border-top:3px solid #5a8fd0}
+  .ls-panel.right{border-top:3px solid #d07a6a}
+  .ls-panel.active{box-shadow:0 0 0 2px var(--brass2);border-color:var(--brass2)}
+  .ls-panel.dead{opacity:.5;filter:grayscale(.6)}
+  .ls-head{display:flex;align-items:center;gap:8px}
+  .ls-name{font:600 14px var(--mono);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1}
+  .ls-tag{font:10px var(--mono);letter-spacing:.08em;color:var(--dim);
+    border:1px solid var(--line);border-radius:3px;padding:1px 5px}
+  .ls-auto{display:flex;align-items:center;gap:4px;font-size:12px;color:var(--dim)}
+  .ls-auto input{width:auto}
+  .ls-bars{display:flex;flex-direction:column;gap:4px}
+  .ls-bar{height:14px;background:#10141c;border-radius:4px;overflow:hidden;position:relative}
+  .ls-bar i{display:block;height:100%;transition:width .25s}
+  .ls-bar.hp i{background:linear-gradient(90deg,#5fa85a,#8fd089)}
+  .ls-bar.hp i.low{background:linear-gradient(90deg,#c0533f,#e07a6a)}
+  .ls-bar.mp i{background:linear-gradient(90deg,#3f6fb0,#6f9fd9)}
+  .ls-bar span{position:absolute;inset:0;text-align:center;font:10px/14px var(--mono);
+    color:#fff;text-shadow:0 1px 2px #000}
+  .ls-fx{display:flex;flex-wrap:wrap;gap:4px;min-height:22px}
+  .ls-chip{font:11px var(--mono);padding:1px 6px;border-radius:10px;border:1px solid var(--line);
+    background:var(--panel)}
+  .ls-chip.buff{border-color:#5fa85a;color:#9fe0a0}
+  .ls-chip.debuff{border-color:#d07a6a;color:#f0a99a}
+  .ls-zones{display:flex;gap:10px;flex-wrap:wrap}
+  .ls-zrow{display:flex;flex-direction:column;gap:3px}
+  .ls-zrow b{font:10px var(--mono);letter-spacing:.08em;color:var(--dim);text-transform:uppercase}
+  .ls-zbtns{display:flex;gap:4px}
+  .ls-zbtns button{padding:4px 9px;font-size:12px}
+  .ls-zbtns button.on{background:var(--brass);border-color:var(--brass);color:#1a1407;font-weight:600}
+  .ls-act{display:flex;gap:6px;flex-wrap:wrap}
+  .ls-act .strike{background:#7a3a30;border-color:#a04a3a;color:#ffd9d0}
+  .ls-belt{display:flex;flex-wrap:wrap;gap:4px}
+  .ls-belt button{padding:3px 7px;font-size:11px;position:relative}
+  .ls-belt button:disabled{opacity:.4;cursor:default}
+  .ls-belt button .q{font-size:9px;color:var(--dim);margin-left:3px}
+  .ls-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;
+    border-top:1px dashed var(--line);padding-top:6px}
+  .ls-stats .s{display:flex;flex-direction:column;gap:1px}
+  .ls-stats label{margin:0;font-size:10px}
+  .ls-stats input{width:100%;padding:3px 5px;font-size:12px}
+  .ls-feed{margin-top:12px;border:1px solid var(--line);border-radius:4px;background:var(--ink2);
+    font-family:var(--mono);font-size:12px;padding:8px 10px;max-height:200px;overflow:auto}
+  .ls-feed .fl{padding:2px 0;border-bottom:1px dashed var(--line)}
+  .ls-feed .fl.crit{color:var(--brass2)} .ls-feed .fl.kill{color:var(--debit)}
+  .ls-feed .fl.fx{color:#9fbf9f} .ls-feed .fl.sys{color:var(--dim)}
+  .ls-timer{font:600 22px var(--mono);color:var(--brass2);text-align:center;
+    font-variant-numeric:tabular-nums}
   @media (max-width:900px){#app{grid-template-columns:64px 1fr}
     .wordmark{font-size:13px;padding:12px 8px}.wordmark small{display:none}
     nav button{padding:8px 10px;font-size:12px}
@@ -535,6 +594,7 @@ function barChart(rows, labelKey, valueKey){
 const SECTIONS = [
   ['stats','Общая статистика'],['chars','Персонажи'],['accounts','Аккаунты'],
   ['battles','Бои'],['battlecfg','Настройки боёв'],['simulate','Симуляция боёв'],
+  ['livesim','Живой бой'],
   ['ledger','Гроссбух'],['items','Предметы'],['quests','Задания'],
   ['market','Аукцион'],['mail','Почта'],['chat','Чат'],['config','Конфиг'],['audit','Аудит'],
 ];
@@ -1268,6 +1328,410 @@ function initSimPlayer(timelines){
   load(0);
 }
 
+/* ================= Живой бой (интерактивный движок) ================= *
+ * Гоняет НАСТОЯЩИЙ engine.js (импорт с /battle-src) прямо в браузере: тот же
+ * код, что в реальном бою (легаси-путь — зоны/блок ×0.12/крит ×1.8, как PvP).
+ * До 4 управляемых окон (1×1/1×2/1×3/2×2), тикающий таймер, пояс эликсиров,
+ * автоудар у каждого бойца, правка статов в реальном времени. Цель — ловить
+ * баги боя/эффектов, играя за всех. См. ТЗ #12.
+ * ===================================================================== */
+let LS = null;
+
+// Пояс расходников живого боя (параметры как в migrate.js/belt.js). Заряды в
+// песочнице не кончаются — но свитки уважают тайм-аут (тестируем перезарядку).
+const LS_BELT = [
+  { kind:'power',       name:'Мощь',    mult:1.4,  turns:3 },
+  { kind:'health',      name:'Жизнь',   heal_pct:0.35, secs:25, tick:5 },
+  { kind:'blood',       name:'Кровь',   crit_add:0.3, turns:1 },
+  { kind:'mana',        name:'Мана',    mana_pct:0.5, secs:25, tick:5 },
+  { kind:'poison',      name:'Яд',      dmg_pct:0.25, secs:25, cooldown:35, tick:5 },
+  { kind:'heal_scroll', name:'Исцел.',  heal_pct:0.25, secs:25, cooldown:35, tick:5 },
+  { kind:'cleanse',     name:'Очищ.',   cooldown:30 },
+];
+const LS_SCROLL = (k) => k === 'poison' || k === 'heal_scroll' || k === 'cleanse';
+const LS_ZONES = ['high','mid','low'];
+const LS_ZL = { high:'голова', mid:'корпус', low:'ноги' };
+
+R.livesim = async () => `
+  <p class="muted">Реальный движок боя в браузере: играй за всех бойцов, включай
+    «Авто», правь статы на лету — и лови баги. 1×1 / 1×2 / 1×3 / 2×2.</p>
+  <div class="ls-setup">
+    <div class="fld"><label>Слева бойцов</label>
+      <select id="ls-nl">${[1,2].map(n=>`<option ${n===1?'selected':''}>${n}</option>`).join('')}</select></div>
+    <div class="fld"><label>Справа бойцов</label>
+      <select id="ls-nr">${[1,2,3].map(n=>`<option ${n===1?'selected':''}>${n}</option>`).join('')}</select></div>
+    <div class="fld"><label>Время хода, c</label><input id="ls-tt" type="number" value="20" min="3"></div>
+    <button class="brass" onclick="LS_start()">Начать бой</button>
+    <span class="muted">Пресет:</span>
+    <button class="sm" onclick="LS_preset(1,1)">1×1</button>
+    <button class="sm" onclick="LS_preset(1,2)">1×2</button>
+    <button class="sm" onclick="LS_preset(1,3)">1×3</button>
+    <button class="sm" onclick="LS_preset(2,2)">2×2</button>
+  </div>
+  <div id="ls-banner" class="ls-banner" style="display:none"></div>
+  <div id="ls-timer" class="ls-timer"></div>
+  <div id="ls-grid" class="ls-grid"></div>
+  <div id="ls-feed" class="ls-feed"></div>`;
+
+window.LS_preset = (l, r) => { $('#ls-nl').value = l; $('#ls-nr').value = r; LS_start(); };
+window.LS_start = async () => {
+  if (LS){ LS.destroy(); LS = null; }
+  const nl = +$('#ls-nl').value || 1, nr = +$('#ls-nr').value || 1;
+  const tt = Math.max(3, +$('#ls-tt').value || 20);
+  try {
+    const { Engine } = await import('/battle-src/engine.js');
+    LS = new LiveSim(Engine, nl, nr, tt);
+    LS.begin();
+  } catch (e){ fail(e); }
+};
+
+class LiveSim {
+  constructor(Engine, nl, nr, turnTime){
+    this.turnTime = turnTime;
+    this.over = false;
+    this.step = 0;
+    this.sel = {};            // id -> { attack, block } (выбор зон в окне)
+    this.cd = {};             // id -> { kind -> ts } тайм-аут свитков
+    this.refs = {};           // id -> ссылки на DOM окна
+    const mk = (side, i) => ({
+      id: `${side[0]}${i+1}`, name: `${side==='left'?'Альфа':'Бета'} ${i+1}`,
+      level: 1, isAI: false, hp: 2330, maxHp: 2330,
+      damage: [160, 240], crit: 0.14, dodge: 0.07,
+      initiative: 10 - i + Math.random(), mp: 40, maxMp: 100,
+    });
+    const left = Array.from({ length: nl }, (_, i) => mk('left', i));
+    const right = Array.from({ length: nr }, (_, i) => mk('right', i));
+    this.engine = new Engine({ left, right }, { turnTime });
+    for (const f of this.engine.fighters.values()){
+      this.sel[f.id] = { attack: 'mid', block: 'mid' };
+      this.cd[f.id] = {};
+    }
+    this.auto = new Set();    // id бойцов на автоударе
+  }
+
+  fighter(id){ return this.engine.fighter(id); }
+  order(){ return [...this.engine.teams.left, ...this.engine.teams.right]; }
+
+  begin(){
+    this.buildPanels();
+    this.lastEff = Date.now();
+    this.effTimer = setInterval(() => this.onEffectTick(), 1000);
+    this.feed('Бой начался.', 'sys');
+    this.beginRound();
+  }
+
+  destroy(){
+    this.over = true;
+    clearInterval(this.timer); clearInterval(this.effTimer);
+    const g = $('#ls-grid'); if (g) g.innerHTML = '';
+  }
+
+  /* ---- цикл хода (зеркало manager.js, но в браузере) ---- */
+  beginRound(){
+    const t = this.engine.startRound();
+    if (!t){ if (this.engine.finished()) return this.end(); return; }
+    this.enterActor();
+  }
+  enterActor(){
+    this.step += 1;
+    let af = this.engine.currentActor();
+    if (!af){
+      const next = this.engine.advance();
+      if (!next){ if (this.engine.finished()) return this.end(); return this.beginRound(); }
+      af = this.engine.currentActor();
+    }
+    if (!af) return;
+    this.activeId = af.id;
+    this.turnEndsAt = Date.now() + this.turnTime * 1000;
+    this.refresh();
+    this.startTimer();
+    if (this.auto.has(af.id)){
+      const step = this.step;
+      setTimeout(() => {
+        if (!this.over && this.step === step && this.auto.has(af.id)) this.autoAct(af.id);
+      }, 550);
+    }
+  }
+  startTimer(){
+    clearInterval(this.timer);
+    this.timer = setInterval(() => {
+      if (this.over) return clearInterval(this.timer);
+      const left = Math.max(0, Math.ceil((this.turnEndsAt - Date.now()) / 1000));
+      this.setTimer(left);
+      if (left <= 0){ clearInterval(this.timer); this.onTimeout(); }
+    }, 250);
+  }
+  onTimeout(){
+    if (this.over || this.engine.phase !== 'choose') return;
+    const af = this.engine.currentActor();
+    if (!af){ const n = this.engine.advance(); return n ? this.enterActor() : this.beginRound(); }
+    if (this.auto.has(af.id)) return this.autoAct(af.id);
+    this.feed(`<b>${esc(af.name)}</b> прозевал ход (тайм-аут).`, 'sys');
+    this.engine.submit(af.id, { pass: true });
+    this.resolveCurrent();
+  }
+  autoAct(id){
+    if (this.over || this.engine.phase !== 'choose' || this.engine.currentActorId() !== id) return;
+    const af = this.fighter(id);
+    if (!af || !af.alive) return;
+    // эликсиры как ИИ: мощь — если буффа нет; жизнь — если HP низкое
+    if (af.buffTurns <= 0) this.useElixir(id, 0, true);
+    if (af.hp <= af.maxHp * 0.5) this.useElixir(id, 1, true);
+    this.engine.submit(id, this.engine.aiMove());
+    this.resolveCurrent();
+  }
+  submitHuman(id){
+    if (this.over || this.engine.phase !== 'choose' || this.engine.currentActorId() !== id) return;
+    const s = this.sel[id] || { attack:'mid', block:'mid' };
+    if (!this.engine.submit(id, { attack: s.attack, block: s.block })) return stamp('Ход отклонён движком', true);
+    this.resolveCurrent();
+  }
+  passHuman(id){
+    if (this.over || this.engine.phase !== 'choose' || this.engine.currentActorId() !== id) return;
+    this.engine.submit(id, { pass: true });
+    this.resolveCurrent();
+  }
+  resolveCurrent(){
+    if (this.engine.phase !== 'choose') return;
+    clearInterval(this.timer);
+    const r = this.engine.resolveActive();
+    for (const st of r.strikes){
+      const a = this.fighter(st.attackerId), d = this.fighter(st.defenderId);
+      const cls = st.killed ? 'kill' : st.crit ? 'crit' : '';
+      let txt;
+      if (st.dodged) txt = `<b>${esc(d.name)}</b> уклонился от удара <b>${esc(a.name)}</b>`;
+      else if (st.blocked) txt = `<b>${esc(a.name)}</b> → ${LS_ZL[st.zone]}: блок −${st.damage}`;
+      else txt = `<b>${esc(a.name)}</b> → ${LS_ZL[st.zone]}${st.crit?' КРИТ':''}: −${st.damage}`;
+      if (st.counter) txt = '↩ ' + txt;
+      this.feed(txt + (st.killed ? ` — <b>${esc(d.name)}</b> повержен!` : ''), cls);
+    }
+    for (const id of r.passed) this.feed(`<b>${esc(this.fighter(id).name)}</b> пропускает ход.`, 'sys');
+    this.refresh();
+    const step = this.step;
+    setTimeout(() => { if (!this.over && this.step === step) this.advance(); }, 650);
+  }
+  advance(){
+    if (this.engine.phase !== 'resolving') return;
+    if (this.engine.finished()) return this.end();
+    const next = this.engine.advance();
+    if (next) this.enterActor(); else this.beginRound();
+  }
+
+  /* ---- эффекты по времени (тот же engine.tickEffects) ---- */
+  onEffectTick(){
+    if (this.over) return;
+    const now = Date.now();
+    const dt = now - this.lastEff; this.lastEff = now;
+    const res = this.engine.tickEffects(dt);
+    for (const f of res.changed){
+      const d = Math.round(f._effDelta || 0);
+      if (d) this.feed(`<b>${esc(f.name)}</b> ${d>0?'+':''}${d} HP (эффект)`, 'fx');
+    }
+    for (const k of res.kills){
+      const v = this.fighter(k.victimId);
+      if (v) this.feed(`<b>${esc(v.name)}</b> погиб от яда.`, 'kill');
+    }
+    this.refresh();
+    if (res.deaths.length){
+      if (this.engine.finished()) return this.end();
+      if (this.engine.phase === 'choose' && !this.engine.currentActor()){
+        const n = this.engine.advance(); n ? this.enterActor() : this.beginRound();
+      }
+    }
+  }
+
+  /* ---- использование расходника (любым бойцом, в любой ход) ---- */
+  useElixir(id, idx, silent){
+    const f = this.fighter(id); if (!f || !f.alive) return;
+    const e = LS_BELT[idx]; if (!e) return;
+    const now = Date.now();
+    if (LS_SCROLL(e.kind) && (this.cd[id][e.kind] || 0) > now){
+      if (!silent) stamp('Свиток на перезарядке', true); return;
+    }
+    const eng = this.engine, q = idx + 1;
+    let tgt = f;
+    if (e.kind === 'poison' || e.kind === 'cleanse')
+      tgt = eng.opponentOf(id) || eng.enemiesOf(id)[0] || null;
+    if (!tgt){ if (!silent) stamp('Нет цели', true); return; }
+    if (e.kind === 'power') eng.addBuff(id, e.mult, e.turns, q);
+    else if (e.kind === 'blood') eng.addCritBuff(id, e.crit_add, e.turns, q);
+    else if (e.kind === 'health' || e.kind === 'heal_scroll')
+      eng.addOverTime(id, e.kind, Math.round(f.maxHp * e.heal_pct), e.secs*1000, id, e.kind==='heal_scroll', q, e.tick*1000);
+    else if (e.kind === 'mana')
+      eng.addOverTime(id, 'mana', Math.round(f.maxMp * e.mana_pct), e.secs*1000, id, false, q, e.tick*1000);
+    else if (e.kind === 'poison')
+      eng.addOverTime(tgt.id, 'poison', Math.round(tgt.maxHp * e.dmg_pct), e.secs*1000, id, true, q, e.tick*1000);
+    else if (e.kind === 'cleanse') eng.cleanse(tgt.id, ['poison','heal_scroll']);
+    if (LS_SCROLL(e.kind)) this.cd[id][e.kind] = now + (e.cooldown||30)*1000;
+    const tn = tgt !== f ? ` → <b>${esc(tgt.name)}</b>` : '';
+    this.feed(`<b>${esc(f.name)}</b>: ${e.name}${tn}`, 'fx');
+    this.refresh();
+  }
+
+  end(){
+    if (this.over) return;
+    this.over = true;
+    clearInterval(this.timer); clearInterval(this.effTimer);
+    const w = this.engine.winner();
+    const ban = $('#ls-banner');
+    if (ban){ ban.style.display = ''; ban.textContent = w
+      ? `Победа стороны: ${w==='left'?'СЛЕВА':'СПРАВА'}` : 'Ничья'; }
+    this.setTimer(0);
+    this.refresh();
+    this.feed('Бой завершён.', 'sys');
+  }
+
+  /* ---- DOM: окна строятся ОДИН раз, дальше точечно обновляются ---- */
+  buildPanels(){
+    const grid = $('#ls-grid'); if (!grid) return;
+    grid.innerHTML = '';
+    this.refs = {};
+    for (const id of this.order()){
+      const f = this.fighter(id);
+      const side = f.side;
+      const panel = document.createElement('div');
+      panel.className = 'ls-panel ' + side;
+      panel.innerHTML = `
+        <div class="ls-head">
+          <span class="ls-name">${esc(f.name)}</span>
+          <span class="ls-tag">${side==='left'?'СЛЕВА':'СПРАВА'}</span>
+          <label class="ls-auto"><input type="checkbox" data-auto> Авто</label>
+        </div>
+        <div class="ls-bars">
+          <div class="ls-bar hp"><i></i><span data-hp></span></div>
+          <div class="ls-bar mp"><i></i><span data-mp></span></div>
+        </div>
+        <div class="ls-fx" data-fx></div>
+        <div class="ls-zones" data-zones>
+          <div class="ls-zrow"><b>Удар</b><div class="ls-zbtns" data-atk></div></div>
+          <div class="ls-zrow"><b>Блок</b><div class="ls-zbtns" data-blk></div></div>
+        </div>
+        <div class="ls-act">
+          <button class="strike" data-strike>Удар</button>
+          <button data-pass>Пропуск</button>
+        </div>
+        <div class="ls-belt" data-belt></div>
+        <div class="ls-stats" data-stats></div>`;
+      grid.appendChild(panel);
+      const q = (s) => panel.querySelector(s);
+      const ref = { panel, hpI: q('.hp i'), hpT: q('[data-hp]'), mpI: q('.mp i'),
+        mpT: q('[data-mp]'), fx: q('[data-fx]'), atk: q('[data-atk]'),
+        blk: q('[data-blk]'), strike: q('[data-strike]'), pass: q('[data-pass]'),
+        belt: q('[data-belt]'), auto: q('[data-auto]'), zones: q('[data-zones]') };
+      // зоны удара/блока
+      for (const z of LS_ZONES){
+        const ab = document.createElement('button'); ab.textContent = LS_ZL[z];
+        ab.onclick = () => { this.sel[id].attack = z; this.refresh(); };
+        ref.atk.appendChild(ab);
+        const bb = document.createElement('button'); bb.textContent = LS_ZL[z];
+        bb.onclick = () => { this.sel[id].block = z; this.refresh(); };
+        ref.blk.appendChild(bb);
+      }
+      ref.strike.onclick = () => this.submitHuman(id);
+      ref.pass.onclick = () => this.passHuman(id);
+      ref.auto.onchange = (ev) => {
+        if (ev.target.checked) this.auto.add(id); else this.auto.delete(id);
+        // если включили авто на активном бойце — пусть сразу ходит
+        if (ev.target.checked && this.engine.currentActorId() === id && this.engine.phase === 'choose')
+          this.autoAct(id);
+        this.refresh();
+      };
+      // пояс
+      LS_BELT.forEach((e, i) => {
+        const b = document.createElement('button');
+        b.innerHTML = `${esc(e.name)}<span class="q">Q${i+1}</span>`;
+        b.onclick = () => this.useElixir(id, i);
+        ref.belt.appendChild(b);
+      });
+      ref._belt = [...ref.belt.children];
+      // правка статов в реальном времени
+      this.buildStats(panel.querySelector('[data-stats]'), id);
+      this.refs[id] = ref;
+    }
+    this.refresh();
+  }
+
+  buildStats(host, id){
+    const f = this.fighter(id);
+    const row = (label, val, on) => {
+      const w = document.createElement('div'); w.className = 's';
+      const l = document.createElement('label'); l.textContent = label;
+      const inp = document.createElement('input'); inp.type = 'number'; inp.value = val;
+      inp.onchange = () => on(parseFloat(inp.value));
+      w.append(l, inp); return w;
+    };
+    host.append(
+      row('Макс.HP', f.maxHp, (v) => { f.maxHp = Math.max(1, v|0); f.hp = Math.min(f.hp, f.maxHp); this.refresh(); }),
+      row('Урон min', f.damage[0], (v) => { f.damage[0] = Math.max(1, v|0); }),
+      row('Урон max', f.damage[1], (v) => { f.damage[1] = Math.max(f.damage[0], v|0); }),
+      row('Крит %', Math.round(f.crit*100), (v) => { f.crit = Math.max(0, Math.min(100, v))/100; }),
+      row('Уворот %', Math.round(f.dodge*100), (v) => { f.dodge = Math.max(0, Math.min(100, v))/100; }),
+      row('Макс.мана', f.maxMp, (v) => { f.maxMp = Math.max(0, v|0); f.mp = Math.min(f.mp, f.maxMp); this.refresh(); }),
+      row('Уровень', f.level, (v) => { f.level = Math.max(1, v|0); }),
+      row('Иниц.', Math.round(f.initiative), (v) => { f.initiative = v; }),
+    );
+  }
+
+  fxChips(f){
+    const out = [];
+    if (f.buffTurns > 0) out.push({ t:`Мощь +${Math.round((f.buffMult-1)*100)}% (${f.buffTurns})`, k:'buff' });
+    if (f.critBuffTurns > 0) out.push({ t:`Крит +${Math.round(f.critBuffAdd*100)}% (${f.critBuffTurns})`, k:'buff' });
+    const lab = { health:'Лечение', heal_scroll:'Исцел.', mana:'Мана', poison:'Яд' };
+    for (const e of f.effects || []){
+      const rem = Math.ceil((e.durationMs - e.elapsedMs) / 1000);
+      const every = Math.round((e.stepMs || 5000) / 1000);
+      out.push({ t:`${lab[e.kind]||e.kind} ${rem}c·каждые ${every}c`, k: e.kind==='poison'?'debuff':'buff' });
+    }
+    return out;
+  }
+
+  refresh(){
+    const activeId = this.engine.phase === 'choose' ? this.engine.currentActorId() : null;
+    for (const id of this.order()){
+      const f = this.fighter(id), r = this.refs[id]; if (!r) continue;
+      const hpPct = f.maxHp ? Math.max(0, f.hp/f.maxHp*100) : 0;
+      r.hpI.style.width = hpPct + '%'; r.hpI.classList.toggle('low', hpPct < 25);
+      r.hpT.textContent = `${Math.max(0,Math.round(f.hp))} / ${f.maxHp}`;
+      const mpPct = f.maxMp ? Math.max(0, f.mp/f.maxMp*100) : 0;
+      r.mpI.style.width = mpPct + '%';
+      r.mpT.textContent = f.maxMp ? `${Math.round(f.mp)} / ${f.maxMp} маны` : '—';
+      r.fx.innerHTML = this.fxChips(f).map((c) =>
+        `<span class="ls-chip ${c.k}">${esc(c.t)}</span>`).join('');
+      const isActive = id === activeId, dead = !f.alive, auto = this.auto.has(id);
+      r.panel.classList.toggle('active', isActive);
+      r.panel.classList.toggle('dead', dead);
+      r.auto.checked = auto;
+      // зоны/кнопки активны только в свой ход и не на авто
+      const canAct = isActive && !dead && !auto && !this.over;
+      r.zones.style.opacity = canAct ? '1' : '.45';
+      [...r.atk.children].forEach((b, i) => b.classList.toggle('on', this.sel[id].attack === LS_ZONES[i]));
+      [...r.blk.children].forEach((b, i) => b.classList.toggle('on', this.sel[id].block === LS_ZONES[i]));
+      r.strike.disabled = !canAct; r.pass.disabled = !canAct;
+      const now = Date.now();
+      r._belt.forEach((b, i) => {
+        const e = LS_BELT[i];
+        const cd = LS_SCROLL(e.kind) && (this.cd[id][e.kind] || 0) > now;
+        b.disabled = dead || this.over || cd;
+        b.title = cd ? `Перезарядка ${Math.ceil(((this.cd[id][e.kind])-now)/1000)} c` : '';
+      });
+    }
+  }
+
+  setTimer(left){
+    const t = $('#ls-timer'); if (!t) return;
+    const af = this.engine.phase === 'choose' ? this.fighter(this.engine.currentActorId()) : null;
+    const mmss = `${Math.floor(left/60)}:${String(left%60).padStart(2,'0')}`;
+    t.textContent = this.over ? '' : af ? `Ход: ${af.name} — ${mmss}` : '';
+  }
+
+  feed(html, cls){
+    const f = $('#ls-feed'); if (!f) return;
+    const d = document.createElement('div'); d.className = 'fl ' + (cls||'');
+    d.innerHTML = html; f.prepend(d);
+    while (f.children.length > 140) f.lastChild.remove();
+  }
+}
+
 /* ================= Гроссбух ================= */
 R.ledger = async (mode = 'currency') => {
   const rows = await api(mode === 'currency' ? '/ledger' : '/item-ledger');
@@ -1626,6 +2090,7 @@ window.show = async (name, arg) => {
   current = name;
   disposePreview();   // уходим со страницы предмета — гасим 3D-цикл превью
   if (SP){ SP.destroy(); SP = null; }   // и таймер 2D-проигрывателя симуляции
+  if (LS){ LS.destroy(); LS = null; }   // и живой бой (таймеры/тикеры)
   document.querySelectorAll('#nav button').forEach((b) =>
     b.classList.toggle('active', b.dataset.s === name));
   $('#hdr-title').textContent = SECTIONS.find(([k]) => k === name)[1];

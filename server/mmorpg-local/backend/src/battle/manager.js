@@ -36,6 +36,7 @@ function makeBattle(id, kind, locationId, policy, engine) {
   return { id, kind, locationId, engine, policy,
     players: new Map(), timer: null, finishTimer: null, turnEndsAt: 0,
     effectTimer: null, lastEffectAt: 0,   // тикер эффектов по времени (HoT/DoT/мана)
+    watchdog: null, resolveAt: 0,         // сторож зависаний + время входа в розыгрыш (#1)
     step: 0 };   // токен sub-turn: отложенные колбэки устаревают при смене (анти-двойной-advance)
 }
 function addPlayer(b, charId, send, side) {
@@ -59,7 +60,8 @@ const pub = (f) => f && ({ id: f.id, name: f.name, level: f.level,
   critBuffTurns: f.critBuffTurns || 0, critBuffAdd: f.critBuffAdd || 0,
   critBuffQuality: f.critBuffQuality || 0,
   effects: (f.effects || []).map((e) => ({ kind: e.kind, q: e.quality || 0,
-    remainSec: Math.max(0, Math.ceil((e.durationMs - e.elapsedMs) / 1000)) })) });
+    remainSec: Math.max(0, Math.ceil((e.durationMs - e.elapsedMs) / 1000)),
+    everySec: Math.max(1, Math.round((e.stepMs || 5000) / 1000)) })) });
 const rosterFor = (b, vSide) => ({
   left:  b.engine.teams[vSide].map((id) => pub(b.engine.fighter(id))),
   right: b.engine.teams[other(vSide)].map((id) => pub(b.engine.fighter(id))),
@@ -162,6 +164,7 @@ function elixirEventFor(b, q, actor, target, data) {
     mult: data.mult || 1,
     turns: data.turns || 0,
     secs: data.secs || 0,             // длительность эффекта по времени (HoT/DoT/мана)
+    everySec: data.everySec || 0,     // период дискретного тика (сек), для подписи «каждые N c»
     amount: data.amount || 0,         // суммарная величина эффекта (HP/MP)
     critAdd: data.critAdd || 0,       // прибавка к криту («Эликсир крови»)
     removed: data.removed || null,    // снятые виды («Свиток очищения»)
@@ -606,6 +609,39 @@ function startEffectTicker(b) {
   if (b.effectTimer) return;
   b.lastEffectAt = Date.now();
   b.effectTimer = setInterval(() => onEffectTick(b), 1000);
+  startWatchdog(b);
+}
+
+// Сторож зависаний (#1, #4): независимый от пер-секундного таймера и finishTimer
+// бэкстоп. Если по какой-то причине (потерянный таймер, не пришедший turnDone,
+// сбой анимации у клиента) ход «застрял» — принудительно двигаем бой дальше,
+// чтобы он НИКОГДА не висел. Срабатывает только с запасом за обычными сроками,
+// поэтому в здоровом бою не вмешивается.
+const WATCHDOG_MS = 2000;
+const CHOOSE_GRACE_MS = 3000;     // запас сверх turnEndsAt (обычный таймер уже должен был сработать)
+const RESOLVE_MAX_MS = 9000;      // максимум на розыгрыш sub-turn'а (finishTimer ≤ 6c)
+function startWatchdog(b) {
+  if (b.watchdog) return;
+  b.watchdog = setInterval(() => {
+    try {
+      const e = b.engine;
+      if (!e || e.phase === 'ended') return;
+      const now = Date.now();
+      if (e.phase === 'choose') {
+        if (b.turnEndsAt > 0 && now > b.turnEndsAt + CHOOSE_GRACE_MS) {
+          console.warn(`Бой ${b.id}: сторож — застрял выбор хода, форсируем тайм-аут`);
+          onTurnTimeout(b);
+        }
+      } else if (e.phase === 'resolving') {
+        if (b.resolveAt > 0 && now > b.resolveAt + RESOLVE_MAX_MS) {
+          console.warn(`Бой ${b.id}: сторож — застрял розыгрыш, форсируем переход хода`);
+          advance(b);
+        }
+      }
+    } catch (err) {
+      console.error(`Бой ${b.id}: ошибка сторожа`, err);
+    }
+  }, WATCHDOG_MS);
 }
 
 function onEffectTick(b) {
@@ -809,23 +845,31 @@ export async function useElixir(charId, msg = {}) {
   // применяем эффект (значения из шаблона зажаты — анти-чит). Лечение/урон/мана по
   // времени — через тикер (addOverTime); мощь/кровь — на ходы; очищение — снятие.
   const out = { kind, slot, slotQty, itemName };
+  // период дискретного тика (сек): из шаблона, в окне [1c..длительность] (#3)
+  const tickSec = (secs) => clampNum(params.tick, 1, secs, 5);
   if (kind === 'health' || kind === 'heal_scroll') {
     const secs = clampNum(params.secs, 1, 600, 60);
     out.secs = secs;
+    out.everySec = tickSec(secs);
     out.amount = Math.round(tf.maxHp * clampNum(params.heal_pct, 0.01, 1, 0.2));
     // свиток исцеления стакается (несколько лекарей на одну цель), эликсир жизни — нет
-    b.engine.addOverTime(tf.id, kind, out.amount, secs * 1000, me.id, kind === 'heal_scroll', itemQ);
+    b.engine.addOverTime(tf.id, kind, out.amount, secs * 1000, me.id,
+      kind === 'heal_scroll', itemQ, out.everySec * 1000);
   } else if (kind === 'mana') {
     const secs = clampNum(params.secs, 1, 600, 60);
     out.secs = secs;
+    out.everySec = tickSec(secs);
     out.amount = Math.round((tf.maxMp || 0) * clampNum(params.mana_pct, 0.01, 1, 0.2));
-    b.engine.addOverTime(tf.id, 'mana', out.amount, secs * 1000, me.id, false, itemQ);
+    b.engine.addOverTime(tf.id, 'mana', out.amount, secs * 1000, me.id, false,
+      itemQ, out.everySec * 1000);
   } else if (kind === 'poison') {
     const secs = clampNum(params.secs, 1, 600, 120);
     out.secs = secs;
+    out.everySec = tickSec(secs);
     out.amount = Math.round(tf.maxHp * clampNum(params.dmg_pct, 0.01, 1, 0.15));
     // свиток отравления стакается: несколько источников яда на одной цели
-    b.engine.addOverTime(tf.id, 'poison', out.amount, secs * 1000, me.id, true, itemQ);
+    b.engine.addOverTime(tf.id, 'poison', out.amount, secs * 1000, me.id, true,
+      itemQ, out.everySec * 1000);
   } else if (kind === 'power') {
     out.mult = clampNum(params.mult, 1, 2, 1.3);
     out.turns = clampNum(params.turns, 1, 5, 3);
@@ -852,6 +896,7 @@ export async function useElixir(charId, msg = {}) {
 async function resolveCurrent(b) {
   if (b.engine.phase !== 'choose') return;
   clearInterval(b.timer);
+  b.resolveAt = Date.now();          // отметка для сторожа зависаний (#1)
   const r = b.engine.resolveActive();
   for (const s of r.strikes) {
     s.actorId  = b.engine.fighter(s.attackerId)?.charId ?? null;
@@ -897,6 +942,7 @@ function advance(b) {
 // ============================================================
 function dropLive(b) {
   clearInterval(b.timer); clearTimeout(b.finishTimer); clearInterval(b.effectTimer);
+  clearInterval(b.watchdog);
   live.delete(b.id);
   for (const p of b.players.values()) byChar.delete(p.charId);
 }

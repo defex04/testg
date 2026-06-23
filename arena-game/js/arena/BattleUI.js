@@ -509,8 +509,10 @@ export class BattleUI {
     const q = String(f0.search || '').trim().toLowerCase();
     const sortKey = f0.sortKey || null;       // 'hp' | 'en' | null
     const sortDir = f0.sortDir ?? 1;          // 1 — по возрастанию доли
+    // энергия участника — это мана (mp/maxMp) с сервера; «en» осталось как имя
+    // полоски в DOM, но данные берём из mp (ТЗ #8)
     const frac = (f) => sortKey === 'en'
-      ? (f.maxEn ? f.en / f.maxEn : 0)
+      ? (f.maxMp ? f.mp / f.maxMp : 0)
       : (f.maxHp ? f.hp / f.maxHp : 0);
 
     // Отфильтрованные/отсортированные списки + «подпись» состава (порядок id).
@@ -538,7 +540,7 @@ export class BattleUI {
           const row = rows[i];
           if (!row) continue;
           row.hp.style.width = (f.maxHp ? Math.max(0, (f.hp / f.maxHp) * 100) : 0) + '%';
-          row.en.style.width = (f.maxEn ? Math.max(0, (f.en / f.maxEn) * 100) : 0) + '%';
+          row.en.style.width = (f.maxMp ? Math.max(0, (f.mp / f.maxMp) * 100) : 0) + '%';
           if (row.eff) row.eff.innerHTML = miniEffectsHtml(fighterEffects(f));
           row.el.classList.toggle('dead', f.alive === false || f.hp <= 0);
         }
@@ -556,7 +558,7 @@ export class BattleUI {
       host.innerHTML = '';
       for (const f of lists[side]) {
         const pct = f.maxHp ? Math.max(0, (f.hp / f.maxHp) * 100) : 0;
-        const enPct = f.maxEn ? Math.max(0, (f.en / f.maxEn) * 100) : 0;
+        const enPct = f.maxMp ? Math.max(0, (f.mp / f.maxMp) * 100) : 0;
         const dead = f.alive === false || f.hp <= 0;
         const isSelf = this.selfId != null && String(f.id) === String(this.selfId);
         const m = document.createElement('div');
