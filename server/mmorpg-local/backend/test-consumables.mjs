@@ -76,12 +76,18 @@ await rest('/api/belt/equip', { templateId: 250 }, token);
 const belt = (await rest('/api/belt', undefined, token)).json;
 const poisonSlots = belt.map((c, i) => (c && c.templateId === 250 ? i : -1)).filter((i) => i >= 0);
 ok(poisonSlots.length >= 2, 'два заряда свитка яда в поясе', 'слоты=' + poisonSlots.join(','));
+// эликсир жизни в пояс (2 заряда: первый выпьем, второй упрётся в elixir_active)
+await rest('/api/belt/equip', { templateId: 202 }, token);
+await rest('/api/belt/equip', { templateId: 202 }, token);
+const belt2 = (await rest('/api/belt', undefined, token)).json;
+const healthSlot = belt2.findIndex((c) => c && c.templateId === 202);
 
 const a = await connect(token); await a.wait(['hello']).catch(() => null);
 a.send({ type: 'hunt' });
 await a.wait(['battleStart']);
 
-let cast = null, cooldownErr = null, npcStartHp = null, npcMinHp = Infinity;
+let cast = null, cooldownErr = null, healCast = null, elixActive = null;
+let npcStartHp = null, npcMinHp = Infinity;
 for (let i = 0; i < 16 && !cast; i++) {
   const ev = await a.wait(['turnStart', 'resolve', 'battleEnd'], 22000).catch(() => null);
   if (!ev || ev.type === 'battleEnd') break;
@@ -89,6 +95,11 @@ for (let i = 0; i < 16 && !cast; i++) {
   if (!ev.canAct) continue;
   const foe = (ev.targets && ev.targets[0]) || ev.focus;
   npcStartHp = foe && foe.hp;
+  // эликсир жизни на себя — применяется; повторно сразу — нельзя (эффект уже активен)
+  a.send({ type: 'elixir', slot: healthSlot });
+  healCast = await a.wait(['elixir', 'error'], 9000).catch(() => null);
+  a.send({ type: 'elixir', slot: healthSlot });
+  elixActive = await a.wait(['error', 'elixir'], 9000).catch(() => null);
   // 1-й свиток — на врага: должен примениться (яд)
   a.send({ type: 'elixir', slot: poisonSlots[0], target: foe && foe.id });
   cast = await a.wait(['elixir', 'error'], 9000).catch(() => null);
@@ -107,6 +118,10 @@ for (let i = 0; i < 16 && !cast; i++) {
   }
 }
 
+ok(healCast && healCast.type === 'elixir' && healCast.kind === 'health',
+  'эликсир жизни применён', healCast && (healCast.kind || healCast.error));
+ok(elixActive && elixActive.type === 'error' && elixActive.error === 'elixir_active',
+  'повторный эликсир того же вида отклонён (elixir_active)', elixActive && (elixActive.error || elixActive.type));
 ok(cast && cast.type === 'elixir' && cast.kind === 'poison',
   'свиток отравления применён на врага', cast && (cast.kind || cast.error));
 ok(cast && cast.targetSide === 'right',

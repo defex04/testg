@@ -73,7 +73,7 @@ function wedgePath(a0, a1, ri, ro) {
 
 function miniEffectsHtml(list = []) {
   return list.map((e) => {
-    const cls = e.kind === 'debuff' ? 'debuff' : 'buff';
+    const cls = (e.kind === 'debuff' ? 'debuff' : 'buff') + (e.q ? ' q' + e.q : '');
     const label = e.label ? ` title="${esc(e.label)}"` : '';
     const time = e.time != null && e.time !== '' ? `<b>${esc(e.time)}</b>` : '';
     return `<span class="nick-effect ${cls}"${label}>${esc(e.icon || '✦')}${time}</span>`;
@@ -93,17 +93,18 @@ function fighterEffects(f = {}) {
   if (turns > 0) {
     const pct = Math.round(((Number(f.buffMult) || 1.5) - 1) * 100);
     out.push({ icon: '💪', time: turns, kind: 'buff',
-      label: `Эликсир мощи: урон +${pct}%` });
+      label: `Эликсир мощи: урон +${pct}%`, q: f.buffQuality || 0 });
   }
   const critT = Number(f.critBuffTurns || 0);
   if (critT > 0) {
     const pct = Math.round((Number(f.critBuffAdd) || 0) * 100);
-    out.push({ icon: '🩸', time: critT, kind: 'buff', label: `Эликсир крови: крит +${pct}%` });
+    out.push({ icon: '🩸', time: critT, kind: 'buff',
+      label: `Эликсир крови: крит +${pct}%`, q: f.critBuffQuality || 0 });
   }
   for (const e of f.effects || []) {
     const m = OT_CHIP[e.kind] || { icon: '✦', kind: 'buff', label: 'Эффект' };
     out.push({ icon: m.icon, time: e.remainSec, kind: m.kind,
-      label: `${m.label} (${e.remainSec} c)` });
+      label: `${m.label} (${e.remainSec} c)`, q: e.q || 0 });
   }
   return out;
 }
@@ -465,7 +466,8 @@ export class BattleUI {
     for (const e of list) {
       const chip = document.createElement('button');
       chip.type = 'button';
-      chip.className = 'effect-chip ' + (e.kind === 'debuff' ? 'debuff' : 'buff');
+      chip.className = 'effect-chip ' + (e.kind === 'debuff' ? 'debuff' : 'buff')
+        + (e.q ? ' q' + e.q : '');     // рамка чипа = качество расходника (ТЗ #3)
       if (e.label) chip.title = e.label;
       const ico = document.createElement('span');
       ico.className = 'effect-ico';

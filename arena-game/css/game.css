@@ -1331,6 +1331,28 @@ body.loc-castle.in-battle .sprite-main .sm-ico {
 /* эликсир мощи на «перезарядке», пока его усиление действует (#3) */
 .combat-slot.elixir.cooldown { opacity: .5; filter: grayscale(.45); cursor: default; }
 
+/* недоступный расходник: серая «вуаль» (постепенно осветляется) + таймер с числом */
+.combat-slot.elixir.cooling { cursor: default; filter: grayscale(.4); }
+.combat-slot .cd-veil {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: #1a1f15;
+  pointer-events: none;
+  transition: opacity .22s linear;
+}
+.combat-slot .cd-num {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font: 700 15px var(--font-display);
+  color: #f3ead0;
+  text-shadow: 0 1px 3px #000, 0 0 6px rgba(0, 0, 0, .8);
+  pointer-events: none;
+}
+
 /* счётчик зарядов в уголке ячейки (#1): мощь — стопкой ×N, жизнь — 1 */
 .combat-slot .bs-qty {
   position: absolute;
@@ -1684,6 +1706,52 @@ body.loc-castle.in-battle .sprite-main .sm-ico {
 }
 .shop-buy:disabled { opacity: .58; cursor: default; }
 
+/* инструменты магазина: поиск + фильтр доступности (ТЗ #2) */
+.shop-tools { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.shop-search {
+  flex: 1; min-width: 0; height: 32px; padding: 0 10px;
+  color: #f2e7bf; background: rgba(8, 11, 6, .7);
+  border: 1px solid rgba(138, 111, 60, .5); border-radius: 8px; font-size: 13px;
+}
+.shop-avail {
+  display: flex; align-items: center; gap: 5px; flex: 0 0 auto;
+  color: #cdbf94; font-size: 12px; cursor: pointer; white-space: nowrap;
+}
+.shop-avail input { accent-color: #bf842d; }
+
+/* вкладки-категории (ТЗ #3, #5) — переносятся на новую строку, видны все сразу */
+.shop-tabs {
+  display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px;
+}
+.shop-tab {
+  flex: 1 1 auto; padding: 6px 8px; color: #cdbf94; text-align: center;
+  font-family: var(--font-display); font-size: 12.5px; white-space: nowrap; cursor: pointer;
+  background: linear-gradient(180deg, rgba(40, 48, 24, .7), rgba(18, 24, 11, .7));
+  border: 1px solid rgba(138, 111, 60, .42); border-radius: 8px;
+}
+.shop-tab.active {
+  color: #2a1f0a; background: linear-gradient(180deg, #f3d079, #c08a32); border-color: #6e5019;
+}
+
+/* степпер количества: − поле + (ТЗ #1) */
+.shop-stepper {
+  display: flex; align-items: stretch; overflow: hidden; border-radius: 7px;
+  border: 1px solid rgba(138, 111, 60, .5); background: rgba(8, 11, 6, .72);
+}
+.shop-stepper .shop-qm, .shop-stepper .shop-qp {
+  width: 26px; border: none; background: rgba(40, 48, 24, .6); color: #f2e7bf;
+  font: 700 16px var(--font-display); cursor: pointer;
+}
+.shop-stepper .shop-qm:disabled, .shop-stepper .shop-qp:disabled { opacity: .5; cursor: default; }
+.shop-stepper .shop-qty {
+  width: 38px; height: 30px; padding: 0; text-align: center; color: #f2e7bf;
+  background: transparent; border: none;
+  border-left: 1px solid rgba(138, 111, 60, .4); border-right: 1px solid rgba(138, 111, 60, .4);
+  -moz-appearance: textfield;
+}
+.shop-stepper .shop-qty::-webkit-outer-spin-button,
+.shop-stepper .shop-qty::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+
 /* бейдж требуемого уровня в строке цены; lock — недоступно по уровню */
 .shop-lvl {
   margin-left: 6px;
@@ -1707,17 +1775,25 @@ body.loc-castle.in-battle .sprite-main .sm-ico {
 .q5 { --qc: 255, 154, 77; }
 
 .inv-cell.q1, .inv-cell.q2, .inv-cell.q3, .inv-cell.q4, .inv-cell.q5 {
-  border-color: rgba(var(--qc), .7);
-  background: radial-gradient(120% 120% at 50% 14%, rgba(var(--qc), .24), transparent 72%),
+  border-color: rgba(var(--qc), .9);
+  background: radial-gradient(120% 120% at 50% 18%, rgba(var(--qc), .55), rgba(var(--qc), .14) 70%),
               linear-gradient(180deg, #1b2210, #12170a);
-  box-shadow: inset 0 1px 0 rgba(255, 240, 200, .05), 0 0 10px rgba(var(--qc), .18);
+  box-shadow: inset 0 0 12px rgba(var(--qc), .3), 0 0 12px rgba(var(--qc), .35);
 }
 .shop-ico.q1, .shop-ico.q2, .shop-ico.q3, .shop-ico.q4, .shop-ico.q5 {
-  border-color: rgba(var(--qc), .65);
-  box-shadow: 0 0 9px rgba(var(--qc), .28), inset 0 1px 0 rgba(255, 240, 200, .08);
+  border-color: rgba(var(--qc), .9);
+  background: radial-gradient(circle at 38% 26%, rgba(var(--qc), .65), rgba(var(--qc), .2) 60%, rgba(0, 0, 0, .25));
+  box-shadow: 0 0 11px rgba(var(--qc), .45), inset 0 1px 0 rgba(255, 240, 200, .08);
+}
+/* строка магазина окрашена под качество: тонировка фона + цветной торец слева */
+.shop-item.q1, .shop-item.q2, .shop-item.q3, .shop-item.q4, .shop-item.q5 {
+  border-color: rgba(var(--qc), .55);
+  border-left: 4px solid rgba(var(--qc), .95);
+  background: linear-gradient(180deg, rgba(var(--qc), .18), rgba(var(--qc), .06)),
+              linear-gradient(180deg, rgba(32, 39, 19, .9), rgba(15, 20, 9, .9));
 }
 .ip-ico.q1, .ip-ico.q2, .ip-ico.q3, .ip-ico.q4, .ip-ico.q5 {
-  filter: drop-shadow(0 0 5px rgba(var(--qc), .55));
+  filter: drop-shadow(0 0 6px rgba(var(--qc), .8));
 }
 /* боевой пояс и пояс примерочной: рамка/свечение ячейки = качество (перебивает kind-*) */
 .combat-slot.elixir.filled.q1, .combat-slot.elixir.filled.q2,
@@ -1726,8 +1802,10 @@ body.loc-castle.in-battle .sprite-main .sm-ico {
 .belt-slot.elixir.filled.q1, .belt-slot.elixir.filled.q2,
 .belt-slot.elixir.filled.q3, .belt-slot.elixir.filled.q4,
 .belt-slot.elixir.filled.q5 {
-  border-color: rgba(var(--qc), .72);
-  box-shadow: 0 0 10px rgba(var(--qc), .26), inset 0 1px 0 rgba(244, 205, 111, .07);
+  border-color: rgba(var(--qc), .92);
+  background: radial-gradient(120% 120% at 50% 22%, rgba(var(--qc), .5), rgba(var(--qc), .12) 70%),
+              linear-gradient(180deg, #232a16, #11160a);
+  box-shadow: 0 0 11px rgba(var(--qc), .4), inset 0 0 9px rgba(var(--qc), .22);
 }
 
 @media (max-width: 520px) {
@@ -2068,10 +2146,10 @@ body.loc-castle.in-battle .sprite-main .sm-ico {
 .effect-chip {
   position: relative;
   flex: 0 0 auto;
-  width: 26px;
-  height: 26px;
+  width: 32px;
+  height: 32px;
   padding: 0;                       /* сброс кнопки: чип — тап-цель превью эффекта (#8) */
-  border-radius: 7px;
+  border-radius: 8px;
   background: radial-gradient(circle at 50% 35%, rgba(201, 168, 76, .16), rgba(10, 13, 6, .65));
   border: 1px solid rgba(201, 168, 76, .35);
   box-shadow: inset 0 1px 0 rgba(255, 240, 190, .12), 0 2px 5px rgba(0, 0, 0, .4);
@@ -2083,13 +2161,18 @@ body.loc-castle.in-battle .sprite-main .sm-ico {
 button.effect-chip:hover { border-color: var(--gold); }
 .effect-chip.buff { border-color: rgba(109, 219, 142, .5); box-shadow: inset 0 0 0 1px rgba(109, 219, 142, .12), 0 2px 5px rgba(0, 0, 0, .4); }
 .effect-chip.debuff { border-color: rgba(232, 102, 90, .5); box-shadow: inset 0 0 0 1px rgba(232, 102, 90, .12), 0 2px 5px rgba(0, 0, 0, .4); }
+/* рамка чипа = качество расходника (ТЗ #3) — перебивает buff/debuff */
+.effect-chip.q1, .effect-chip.q2, .effect-chip.q3, .effect-chip.q4, .effect-chip.q5 {
+  border-color: rgba(var(--qc), .9);
+  box-shadow: inset 0 0 0 1px rgba(var(--qc), .28), 0 0 7px rgba(var(--qc), .32);
+}
 .effect-ico {
   position: absolute;
   inset: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 14px;
+  font-size: 18px;
   line-height: 1;
 }
 .effect-ico img { width: 100%; height: 100%; object-fit: contain; display: block; }
@@ -2098,12 +2181,12 @@ button.effect-chip:hover { border-color: var(--gold); }
   position: absolute;
   right: 0;
   bottom: 0;
-  min-width: 12px;
+  min-width: 14px;
   padding: 0 2px;
   font-family: var(--font-display);
-  font-size: 8.5px;
+  font-size: 10px;
   font-weight: 700;
-  line-height: 12px;
+  line-height: 14px;
   text-align: center;
   color: #fff;
   background: rgba(8, 10, 5, .82);
@@ -2648,6 +2731,16 @@ body.hints-off .strike-wheel.hint-attack .sw-sprite.sword:not(.thrust):not(.clan
   color: #aee8ff;
   text-shadow: 0 2px 4px #000, 0 0 14px rgba(90, 210, 255, .68);
 }
+/* всплывашка-НАЗВАНИЕ расходника (ТЗ #4): компактно, переносится, не вылезает за сцену */
+.bui-popup.name, .bui-popup.name-bad {
+  font-size: 15px;
+  max-width: 152px;
+  white-space: normal;
+  text-align: center;
+  line-height: 1.05;
+}
+.bui-popup.name { color: #ffe6a8; text-shadow: 0 2px 4px #000, 0 0 8px rgba(255, 210, 120, .5); }
+.bui-popup.name-bad { color: #ff9a8a; text-shadow: 0 2px 4px #000, 0 0 8px rgba(255, 90, 70, .5); }
 @keyframes popup-rise {
   0%   { opacity: 0; margin-top: 0; transform: translate(-50%, -50%) scale(.4); }
   12%  { opacity: 1; transform: translate(-50%, -50%) scale(1.15); }
@@ -3776,8 +3869,8 @@ button.belt-slot { padding: 0; font: inherit; color: inherit; -webkit-tap-highli
   .bar-icon { width: 13px; height: 13px; }
   .bh-damage { font-size: 10.5px; }
   .bh-timer { font-size: 15px; }
-  .effect-chip { width: 24px; height: 24px; }
-  .effect-ico { font-size: 13px; }
+  .effect-chip { width: 29px; height: 29px; }
+  .effect-ico { font-size: 16px; }
 
   .sw-skip { padding: 5px 11px; font-size: 11px; }
   .sw-status { font-size: 11px; margin-top: 34px; }

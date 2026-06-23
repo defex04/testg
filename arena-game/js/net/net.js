@@ -313,13 +313,10 @@ function wireBattleHandlers() {
   socketHandlers.set('rosterUpdate', (m) =>
     currentBattle && currentBattle._on('rosterUpdate', { roster: m.roster }));
   socketHandlers.set('elixir', (m) =>
+    // пробрасываем ВСЕ поля события (itemName/amount/secs/critAdd/cooldownUntil/
+    // removed/mp/maxMp и т.д.), приводим только флаги к boolean
     currentBattle && currentBattle._on('elixir',
-      { byId: m.byId, onSelf: !!m.onSelf, isUser: !!m.isUser,
-        byName: m.byName, targetId: m.targetId, targetName: m.targetName,
-        targetSide: m.targetSide, target: m.target,
-        kind: m.kind, heal: m.heal, mult: m.mult, turns: m.turns,
-        buffTurns: m.buffTurns, hp: m.hp, maxHp: m.maxHp,
-        slot: m.slot, slotQty: m.slotQty, roster: m.roster }));
+      { ...m, onSelf: !!m.onSelf, isUser: !!m.isUser }));
   socketHandlers.set('effectTick', (m) =>
     currentBattle && currentBattle._on('effectTick',
       { self: m.self, changed: m.changed || [], deaths: m.deaths || [], roster: m.roster }));
@@ -412,6 +409,9 @@ export class ServerBattle extends EventTarget {
       detail.sides = this.sides;
     }
     if (type === 'elixir' && detail.onSelf) {   // эффект пришёлся мне — обновить плашку
+      // target = pub(me): несёт hp/mp/effects/critBuffTurns — подмешиваем целиком,
+      // чтобы чипы и «серая зона» слота появились сразу, не дожидаясь тика эффектов
+      if (detail.target) this.sides.left = { ...this.sides.left, ...detail.target };
       this.sides.left.hp = detail.hp;
       if (detail.maxHp != null) this.sides.left.maxHp = detail.maxHp;
       if (detail.buffTurns != null) this.sides.left.buffTurns = detail.buffTurns;

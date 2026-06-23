@@ -77,4 +77,53 @@ const mk = () => new Engine({
   assert(A.effects.filter((x) => x.kind === 'health').length === 1, 'health не дублируется');
 }
 
-console.log('test-effects: ВСЕ ПРОВЕРКИ ПРОЙДЕНЫ (7/7)');
+// 8. Свитки СТАКАЮТСЯ (stack=true), эликсиры — нет (stack=false)
+{
+  const e = mk(); const B = e.fighter('B'); B.hp = 1000;
+  e.addOverTime('B', 'poison', 100, 5000, 'A', true);
+  e.addOverTime('B', 'poison', 100, 5000, 'C', true);   // второй источник яда
+  assert(B.effects.filter((x) => x.kind === 'poison').length === 2, 'два яда стакаются');
+  e.tickEffects(5000);
+  assert(Math.abs(B.hp - 800) < 1, 'оба яда сняли по 100 (итого 200): ' + B.hp);
+  // health (эликсир) НЕ стакается
+  const A = e.fighter('A');
+  e.addOverTime('A', 'health', 100, 5000, 'A', false);
+  e.addOverTime('A', 'health', 100, 5000, 'A', false);
+  assert(A.effects.filter((x) => x.kind === 'health').length === 1, 'эликсир жизни не стакается');
+}
+
+// 9. Атрибуция яда: урон и скальп засчитываются ИСТОЧНИКУ (srcId), #1
+{
+  const e = mk(); const B = e.fighter('B'); B.hp = 100;
+  e.addOverTime('B', 'poison', 300, 3000, 'A', true);   // источник — A
+  const r = e.tickEffects(1500);                          // 150, но HP только 100 → dealt=100
+  assert(r.damageBySrc.get('A') === 100, 'урон ядом засчитан A: ' + r.damageBySrc.get('A'));
+  assert(r.kills.length === 1 && r.kills[0].killerId === 'A' && r.kills[0].victimId === 'B',
+    'скальп B за A');
+}
+
+// 10. Два источника яда — каждому свой урон в статистику
+{
+  const e = mk(); const B = e.fighter('B'); B.hp = 1000;
+  e.addOverTime('B', 'poison', 100, 5000, 'A', true);
+  e.addOverTime('B', 'poison', 100, 5000, 'C', true);
+  const r = e.tickEffects(5000);
+  assert(r.damageBySrc.get('A') === 100 && r.damageBySrc.get('C') === 100,
+    'оба источника по 100: A=' + r.damageBySrc.get('A') + ' C=' + r.damageBySrc.get('C'));
+}
+
+// 11. dHp — чистое изменение HP от эффекта за тик (для всплывашек, #2)
+{
+  const e = mk(); const A = e.fighter('A'); A.hp = 500;
+  e.addOverTime('A', 'health', 300, 6000, 'A', false);
+  const r = e.tickEffects(3000);
+  const me = r.changed.find((f) => f.id === 'A');
+  assert(Math.abs(me._effDelta - 150) < 1, 'dHp лечения за тик ≈ +150: ' + me._effDelta);
+  // удар (минус HP вне эффектов) НЕ должен попасть в dHp следующего тика
+  A.hp -= 200;                                            // имитируем удар между тиками
+  const r2 = e.tickEffects(3000);                         // долечивает оставшиеся 150
+  const me2 = r2.changed.find((f) => f.id === 'A');
+  assert(me2._effDelta > 0 && me2._effDelta <= 160, 'dHp учитывает только эффект, не удар: ' + me2._effDelta);
+}
+
+console.log('test-effects: ВСЕ ПРОВЕРКИ ПРОЙДЕНЫ (11/11)');

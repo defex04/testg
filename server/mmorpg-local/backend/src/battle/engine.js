@@ -394,20 +394,22 @@ export class Engine {
   }
 
   /** Наложить усиление урона (Эликсир мощи) на N своих ударов. */
-  addBuff(id, mult, turns) {
+  addBuff(id, mult, turns, quality = 0) {
     const f = this.fighter(id);
     if (!f || !f.alive) return false;
     f.buffMult = mult;
     f.buffTurns = Math.max(0, Math.round(turns));
+    f.buffQuality = quality;             // цвет чипа эффекта = качество эликсира (#3)
     return true;
   }
 
   /** Прибавка к шансу крита («Эликсир крови») на N своих ходов. */
-  addCritBuff(id, add, turns) {
+  addCritBuff(id, add, turns, quality = 0) {
     const f = this.fighter(id);
     if (!f || !f.alive) return false;
     f.critBuffAdd = Math.max(0, Number(add) || 0);
     f.critBuffTurns = Math.max(0, Math.round(turns));
+    f.critBuffQuality = quality;
     return true;
   }
 
@@ -419,28 +421,34 @@ export class Engine {
    * stack=true  → ДОБАВЛЯЕТСЯ к идущим (свитки яда/исцеления копятся от нескольких
    * источников на одну цель). См. tickEffects.
    */
-  addOverTime(id, kind, total, durationMs, srcId = null, stack = false) {
+  addOverTime(id, kind, total, durationMs, srcId = null, stack = false, quality = 0) {
     const f = this.fighter(id);
     if (!f || !f.alive) return false;
     if (!stack) f.effects = f.effects.filter((e) => e.kind !== kind);
     f.effects.push({ kind, total: Math.max(0, Number(total) || 0),
       applied: 0, durationMs: Math.max(1, Number(durationMs) || 1),
-      elapsedMs: 0, srcId });
+      elapsedMs: 0, srcId, quality });
     return true;
   }
 
   /**
    * Тик эффектов по времени: dtMs — прошедшее реальное время. Применяет дробную
-   * долю каждого эффекта (по доле прошедшего времени), снимает доигравшие.
-   * Возвращает { changed: [бойцы с изменением], deaths: [id умерших от яда] }.
+   * долю каждого эффекта. Кладёт на бойца `_effDelta` — ЧИСТОЕ изменение HP именно
+   * от эффектов за этот тик (для всплывашек: полоса HP двигается и от ударов, а
+   * число должно показывать ровно эффект, #2). Возвращает:
+   *  - changed: бойцы, у кого что-то поменялось;
+   *  - deaths:  id умерших от яда;
+   *  - damageBySrc: Map(srcId → суммарный урон ядом) — для статистики (#1);
+   *  - kills: [{killerId, victimId}] — кому засчитать скальп от яда (#1).
    */
   tickEffects(dtMs) {
     const dt = Math.max(0, Number(dtMs) || 0);
     const changed = [], deaths = [];
-    if (!dt) return { changed, deaths };
+    const damageBySrc = new Map(), kills = [];
+    if (!dt) return { changed, deaths, damageBySrc, kills };
     for (const f of this.fighters.values()) {
       if (!f.alive || !f.effects.length) continue;
-      let touched = false;
+      let touched = false, effDelta = 0;
       for (const e of f.effects) {
         const step = Math.min(dt, e.durationMs - e.elapsedMs);
         if (step <= 0) continue;
@@ -453,16 +461,25 @@ export class Engine {
         if (e.kind === 'mana') {
           f.mp = Math.max(0, Math.min(f.maxMp, f.mp + delta));
         } else if (e.kind === 'poison') {
+          const before = f.hp;
           f.hp = Math.max(0, f.hp - delta);
-          if (f.hp <= 0) f.alive = false;
+          const dealt = before - f.hp;         // реально снятый HP (не ниже 0)
+          effDelta -= dealt;
+          if (e.srcId != null) damageBySrc.set(e.srcId, (damageBySrc.get(e.srcId) || 0) + dealt);
+          if (before > 0 && f.hp <= 0) {        // именно этот яд добил — ему скальп
+            f.alive = false;
+            kills.push({ killerId: e.srcId, victimId: f.id });
+          }
         } else {                               // health / heal_scroll — лечение
+          const before = f.hp;
           f.hp = Math.min(f.maxHp, f.hp + delta);
+          effDelta += f.hp - before;
         }
       }
       f.effects = f.effects.filter((e) => e.elapsedMs < e.durationMs - 0.5);
-      if (touched) { changed.push(f); if (!f.alive) deaths.push(f.id); }
+      if (touched) { f._effDelta = effDelta; changed.push(f); if (!f.alive) deaths.push(f.id); }
     }
-    return { changed, deaths };
+    return { changed, deaths, damageBySrc, kills };
   }
 
   /** Снять эффекты указанных видов («Свиток очищения»). Возвращает снятые виды. */

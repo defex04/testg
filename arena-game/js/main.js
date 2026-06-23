@@ -768,7 +768,31 @@ async function openShop() {
   }
 }
 
+// Вкладки магазина по категориям (ТЗ #3); свитки сгруппированы в одну вкладку.
+const SHOP_TABS = [
+  { id: 'health', name: 'Жизнь',  kinds: ['health'] },
+  { id: 'power',  name: 'Мощь',   kinds: ['power'] },
+  { id: 'mana',   name: 'Мана',   kinds: ['mana'] },
+  { id: 'blood',  name: 'Кровь',  kinds: ['blood'] },
+  { id: 'scroll', name: 'Свитки', kinds: ['poison', 'heal_scroll', 'cleanse'] },
+  { id: 'escape', name: 'Побег',  kinds: ['escape'] },
+];
+let shopItems = [];
+let shopTab = 'health';
+let shopSearch = '';
+let shopAvailOnly = false;
+let shopListEl = null;
+const tabKinds = (id) => (SHOP_TABS.find((t) => t.id === id) || { kinds: [] }).kinds;
+
 function renderShop(items) {
+  shopItems = items || [];
+  shopSearch = '';
+  shopAvailOnly = false;
+  // активная вкладка пуста (нет таких товаров) → берём первую непустую
+  if (!shopItems.some((it) => tabKinds(shopTab).includes(it.kind))) {
+    const first = SHOP_TABS.find((t) => shopItems.some((it) => t.kinds.includes(it.kind)));
+    shopTab = first ? first.id : 'health';
+  }
   locActions.innerHTML = '';
   const panel = document.createElement('div');
   panel.className = 'shop-panel';
@@ -776,42 +800,91 @@ function renderShop(items) {
     `<span class="lc-ico">${ICON_GO}</span><span>Назад</span>`,
     () => renderLocationActions(LOCATIONS[currentLoc])));
 
-  const list = document.createElement('div');
-  list.className = 'shop-list';
-  if (!items.length) {
+  // поиск по названию + фильтр «только доступные мне» (ТЗ #2)
+  const tools = document.createElement('div');
+  tools.className = 'shop-tools';
+  tools.innerHTML = `
+    <input class="shop-search" type="search" placeholder="Поиск по названию…" aria-label="Поиск">
+    <label class="shop-avail"><input type="checkbox" class="shop-avail-cb"> Доступные</label>`;
+  const search = tools.querySelector('.shop-search');
+  search.addEventListener('input', () => { shopSearch = search.value.trim().toLowerCase(); renderShopList(); });
+  tools.querySelector('.shop-avail-cb').addEventListener('change', (e) => {
+    shopAvailOnly = e.target.checked; renderShopList();
+  });
+  panel.appendChild(tools);
+
+  // вкладки-категории (ТЗ #3)
+  const tabs = document.createElement('div');
+  tabs.className = 'shop-tabs';
+  for (const t of SHOP_TABS) {
+    if (!shopItems.some((it) => t.kinds.includes(it.kind))) continue;
+    const b = makeButton('shop-tab' + (t.id === shopTab ? ' active' : ''), esc(t.name), () => {
+      shopTab = t.id;
+      tabs.querySelectorAll('.shop-tab').forEach((x) => x.classList.toggle('active', x === b));
+      renderShopList();
+    });
+    tabs.appendChild(b);
+  }
+  panel.appendChild(tabs);
+
+  shopListEl = document.createElement('div');
+  shopListEl.className = 'shop-list';
+  panel.appendChild(shopListEl);
+  locActions.appendChild(panel);
+  renderShopList();
+}
+
+/** Перерисовать только список товаров под активную вкладку/поиск/фильтр. */
+function renderShopList() {
+  if (!shopListEl) return;
+  let list = shopItems.filter((it) => tabKinds(shopTab).includes(it.kind));
+  if (shopSearch) list = list.filter((it) => (it.name || '').toLowerCase().includes(shopSearch));
+  if (shopAvailOnly) list = list.filter((it) => shopCharLevel >= (it.levelReq || 1));
+  shopListEl.innerHTML = '';
+  if (!list.length) {
     const empty = document.createElement('div');
     empty.className = 'shop-loading';
-    empty.textContent = 'Товары пока закончились';
-    list.appendChild(empty);
+    empty.textContent = 'Ничего не найдено';
+    shopListEl.appendChild(empty);
+    return;
   }
+  for (const it of list) shopListEl.appendChild(shopItemRow(it));
+}
 
-  for (const it of items) {
-    const q = it.quality || 1;
-    const levelReq = it.levelReq || 1;
-    const locked = shopCharLevel < levelReq;   // купить можно только по уровню
-    const row = document.createElement('div');
-    row.className = 'shop-item q' + q + (locked ? ' locked' : '');
-    row.innerHTML = `
-      <div class="shop-ico q${q}">${esc(shopIcon(it.kind))}</div>
-      <div class="shop-info">
-        <div class="shop-name">${esc(it.name)}</div>
-        <div class="shop-desc">${esc(it.description || '')}</div>
-        <div class="shop-price">${Number(it.price) || 0} меди
-          <span class="shop-lvl${locked ? ' lock' : ''}">ур. ${levelReq}</span></div>
-      </div>
-      <div class="shop-buy-row">
+/** Строка товара: иконка/инфо + степпер количества (− N +) и кнопка покупки (ТЗ #1). */
+function shopItemRow(it) {
+  const q = it.quality || 1;
+  const levelReq = it.levelReq || 1;
+  const locked = shopCharLevel < levelReq;     // купить можно только по уровню
+  const row = document.createElement('div');
+  row.className = 'shop-item q' + q + (locked ? ' locked' : '');
+  row.innerHTML = `
+    <div class="shop-ico q${q}">${esc(shopIcon(it.kind))}</div>
+    <div class="shop-info">
+      <div class="shop-name">${esc(it.name)}</div>
+      <div class="shop-desc">${esc(it.description || '')}</div>
+      <div class="shop-price">${Number(it.price) || 0} меди
+        <span class="shop-lvl${locked ? ' lock' : ''}">ур. ${levelReq}</span></div>
+    </div>
+    <div class="shop-buy-row">
+      <div class="shop-stepper">
+        <button type="button" class="shop-qm" aria-label="Меньше">−</button>
         <input class="shop-qty" type="number" min="1" max="99" value="1" inputmode="numeric" aria-label="Количество">
-        <button class="shop-buy" type="button"${locked ? ' disabled' : ''}>${locked ? 'Ур. ' + levelReq : 'Купить'}</button>
-      </div>`;
-    const qty = row.querySelector('.shop-qty');
-    const btn = row.querySelector('.shop-buy');
-    if (locked) { qty.disabled = true; btn.title = `Требуется уровень ${levelReq}`; }
-    else btn.addEventListener('click', () => buyShopItem(it, qty, btn));
-    list.appendChild(row);
-  }
-
-  panel.appendChild(list);
-  locActions.appendChild(panel);
+        <button type="button" class="shop-qp" aria-label="Больше">+</button>
+      </div>
+      <button class="shop-buy" type="button"${locked ? ' disabled' : ''}>${locked ? 'Ур. ' + levelReq : 'Купить'}</button>
+    </div>`;
+  const qty = row.querySelector('.shop-qty');
+  const btn = row.querySelector('.shop-buy');
+  const qm = row.querySelector('.shop-qm');
+  const qp = row.querySelector('.shop-qp');
+  const cur = () => Math.trunc(Number(qty.value)) || 1;
+  qm.addEventListener('click', () => { qty.value = Math.max(1, cur() - 1); });
+  qp.addEventListener('click', () => { qty.value = Math.min(99, cur() + 1); });
+  qty.addEventListener('change', () => { qty.value = Math.max(1, Math.min(99, cur())); });
+  if (locked) { qty.disabled = qm.disabled = qp.disabled = true; btn.title = `Требуется уровень ${levelReq}`; }
+  else btn.addEventListener('click', () => buyShopItem(it, qty, btn));
+  return row;
 }
 
 async function buyShopItem(it, qtyEl, btn) {
@@ -994,8 +1067,7 @@ async function initBattle(resumedBattle = null, starter = null, pvpTarget = null
              level: battle.sides.right.level ?? '?' },
     selfId: PLAYER.id ?? battle.sides.left.id,   // себя не прячем при смерти (#2)
     onStrike: (move) => {
-      ui.hideControls();
-      setBeltLive(false);          // удар завершает ввод хода — пояс блокируется
+      ui.hideControls();           // удар выбран — прячем колесо; пояс остаётся доступен
       battle.submitMove('left', move);
     },
     onInfo: (side) => showFighterInfo(side),
@@ -1005,6 +1077,7 @@ async function initBattle(resumedBattle = null, starter = null, pvpTarget = null
   await loadBelt();                // состав пояса с сервера (он его помнит)
   beltSnapshot = snapshotBelt();   // запомнить состав — для автозаполнения после боя (#2)
   resetElixirBattle();             // эффекты с нуля; пояс уже загружен
+  setBeltLive(true);               // расходники доступны весь бой (в любой ход, ТЗ)
   lastTurnShown = 0;
   currentFocusId = battle.focus ? (battle.focus.id ?? null) : null;
   showHP('left', battle.sides.left.hp, battle.sides.left.maxHp);
@@ -1035,20 +1108,19 @@ async function initBattle(resumedBattle = null, starter = null, pvpTarget = null
     ui.startCountdown(d.timeLeft);   // локальный отсчёт — дисплей не «зависнет» без пакетов
     if (d.roster) applyBattleRoster(d.roster);
     updateBattleInfo();
+    // расходники доступны в ЛЮБОЙ ход (ТЗ) — пояс live весь бой, его не гасим по ходам
     if (d.canAct) {                // мой ход
       applyFocus(d.focus);
       ui.setTargets();             // сохранить ручную цель эффекта (если есть)
       ui.showControls();
-      setBeltLive(true);
     } else if (d.waiting) {        // ходит союзник — ждём своего соперника
       setOpponentVisible(false);
       ui.showWait();
-      setBeltLive(false);
     } else {                       // ходит враг — смотрим на него
       applyFocus(d.focus);
       ui.showWaitTimer();
-      setBeltLive(false);
     }
+    if (!beltLive) setBeltLive(true);
   }));
 
   // timer — лёгкий ресинк дисплея, идёт МИМО очереди (иначе отсчёт лагал бы за
@@ -1062,7 +1134,7 @@ async function initBattle(resumedBattle = null, starter = null, pvpTarget = null
 
   battle.addEventListener('resolve', (e) => battleSerial(async () => {
     const d = e.detail;
-    setBeltLive(false);            // ход разыгрывается — пояс блокируется
+    // пояс НЕ гасим (расходники доступны в любой ход), скрываем только колесо удара
     ui.showResolving();            // колесо скрыто, баннер убран — видна анимация
     if (d.roster) applyBattleRoster(d.roster);
     if (d.focus) applyFocus(d.focus);
@@ -1103,6 +1175,12 @@ async function initBattle(resumedBattle = null, starter = null, pvpTarget = null
       else elixirBelt[d.slot].qty = d.slotQty;
       renderCombatBar();
     }
+    // мой свиток ушёл на тайм-аут — заводим серую зону его слота
+    if (d.isUser && d.cooldownUntil
+        && (d.kind === 'poison' || d.kind === 'heal_scroll' || d.kind === 'cleanse')) {
+      scrollCdEnd[d.kind] = d.cooldownUntil;
+      renderCombatBar();
+    }
     if (d.target) syncEffectFromFighter(d.target);
     const byName = esc(d.byName || battle.sides.left.name);
     const tn = d.targetName && d.targetName !== d.byName ? ` для <b>${esc(d.targetName)}</b>` : '';
@@ -1125,26 +1203,11 @@ async function initBattle(resumedBattle = null, starter = null, pvpTarget = null
     const fighter = fighters[side];
     const pos = fighter
       ? arena.worldToScreen(fighter.headPoint()) : { x: side === 'left' ? 70 : 220, y: 90 };
-    if (d.kind === 'health' || d.kind === 'heal_scroll') {
-      ui.popup(pos, 'Лечение', 'heal');
-    } else if (d.kind === 'mana') {
-      ui.popup(pos, 'Мана', 'buff');
-    } else if (d.kind === 'poison') {
-      ui.popup(pos, 'Яд', 'crit');
-    } else if (d.kind === 'blood') {
-      ui.popup(pos, 'Крит +', 'buff');
-    } else if (d.kind === 'cleanse') {
-      ui.popup(pos, 'Очищение', 'buff');
-    } else if (d.kind === 'escape') {
-      ui.popup(pos, 'Побег', 'escape');
-      if (side === 'right') setOpponentVisible(false);
-    } else if (d.kind === 'power') {
-      const pct = Math.round((d.mult - 1) * 100);
-      if (side === 'left') selfBuffPct = pct;
-      // отдельный компактный стиль: текст «Мощь +N%» длиннее цифры урона и в
-      // 'crit' (36px) вылезал за край сцены (#0)
-      ui.popup(pos, `Мощь +${pct}%`, 'buff');
-    }
+    // всплывашка — НАЗВАНИЕ расходника (ТЗ #4), а не «Крит +»/«Яд»/…
+    const label = d.itemName || ELIXIR_KIND_LABEL[d.kind] || '';
+    if (d.kind === 'power' && side === 'left') selfBuffPct = Math.round((d.mult - 1) * 100);
+    ui.popup(pos, label, d.kind === 'poison' ? 'name-bad' : 'name');
+    if (d.kind === 'escape' && side === 'right') setOpponentVisible(false);
     if (side === 'left') selfBuffTurns = d.buffTurns || 0;
     refreshSelfEffects();
     renderCombatBar();         // мощь активна → её слот уходит на «перезарядку» (#3)
@@ -1158,6 +1221,7 @@ async function initBattle(resumedBattle = null, starter = null, pvpTarget = null
     if (left && left.maxHp) showHP('left', left.hp, left.maxHp);
     const right = battle.focus || battle.sides.right;
     if (right && right.maxHp) showHP('right', right.hp, right.maxHp);
+    showEffectNumbers(d.changed);   // всплывашки урона/лечения от свитков/HoT (ТЗ #5)
     refreshHeaderEffects();
     updateBattleInfo();
   }));
@@ -2976,8 +3040,38 @@ let selfBuffPct = 0;                   // прибавка урона «Элик
 const battleEffects = new Map();       // fighterId -> [{ icon, time, kind, label }]
 let beltLive = false;                  // можно ли использовать пояс прямо сейчас
 let beltSnapshot = null;               // состав пояса на старте боя — для автозаполнения (#2)
+let scrollCdEnd = {};                  // тайм-аут свитка по виду (ts) — для серой зоны слота
+const cdMax = {};                      // запомненный «полный» остаток по виду — доля заливки
+let effectAccum = {};                  // fighterId -> накопленный Δ HP эффекта (порог показа всплывашки)
+let cooldownTimer = null;              // тикер пересчёта серой зоны/таймера слотов (250мс)
 
 const elixirGlyph = (kind) => ELIXIR_EMOJI[kind] || '🧪';
+
+/**
+ * Состояние «недоступности» слота расходника (серая зона + таймер). Эликсир недоступен,
+ * пока его эффект того же вида активен НА МНЕ (по умолчанию цель — я); свиток — пока идёт
+ * тайм-аут. Возвращает { cooling, num, frac }: num — число в таймере (секунды или ходы),
+ * frac — доля оставшегося (1→0) для «постепенно осветляющейся» заливки. Свитки яда/
+ * исцеления стакаются — их слот НЕ серый (ограничивает только тайм-аут на свой свиток).
+ */
+function slotCoolState(kind) {
+  const left = battle?.sides?.left;
+  let remain = 0, unit = 'sec';        // remain: секунды (sec) или ходы (turn)
+  if (kind === 'power') { remain = selfBuffTurns; unit = 'turn'; }
+  else if (kind === 'blood') { remain = Number(left?.critBuffTurns) || 0; unit = 'turn'; }
+  else if (kind === 'health') {
+    const e = (left?.effects || []).filter((x) => x.kind === 'health' || x.kind === 'heal_scroll');
+    remain = e.length ? Math.max(...e.map((x) => x.remainSec || 0)) : 0;
+  } else if (kind === 'mana') {
+    const e = (left?.effects || []).find((x) => x.kind === 'mana');
+    remain = e ? (e.remainSec || 0) : 0;
+  } else if (kind === 'poison' || kind === 'heal_scroll' || kind === 'cleanse') {
+    remain = Math.max(0, Math.ceil(((scrollCdEnd[kind] || 0) - Date.now()) / 1000));
+  }
+  if (remain <= 0) { cdMax[kind] = 0; return { cooling: false, num: 0, frac: 0, unit }; }
+  cdMax[kind] = Math.max(cdMax[kind] || 0, remain);          // «полный» отсчёт = максимум виденного
+  return { cooling: true, num: remain, frac: remain / cdMax[kind], unit };
+}
 
 /** Подтянуть состав пояса с сервера (сервер его помнит между сессиями). */
 async function loadBelt() {
@@ -3153,8 +3247,32 @@ function resetElixirBattle() {
   selfBuffTurns = 0;
   selfBuffPct = 0;
   beltLive = false;
+  scrollCdEnd = {};
+  effectAccum = {};
+  for (const k in cdMax) cdMax[k] = 0;
   renderCombatBar();
   refreshSelfEffects();
+}
+
+/** Всплывашки урона/лечения ОТ ЭФФЕКТОВ по времени. Берём `dHp` с сервера — чистое
+ *  изменение HP именно от эффекта за тик (полоса HP двигается и от ударов, поэтому
+ *  считать по разнице HP нельзя, #2). Копим до заметной величины, чтобы не спамить. */
+function showEffectNumbers(changed) {
+  if (!ui || !arena) return;
+  for (const c of changed || []) {
+    const d = Number(c.dHp) || 0;               // + лечение, − урон (только эффект)
+    if (!d) continue;
+    const acc = (effectAccum[c.id] || 0) + d;
+    const thr = Math.max(8, Math.round((c.maxHp || 1000) * 0.012));
+    if (Math.abs(acc) < thr) { effectAccum[c.id] = acc; continue; }
+    effectAccum[c.id] = 0;
+    const shown = Math.round(acc);
+    const side = c.side === 'left' ? 'left' : 'right';   // позиция: я слева, фокус справа
+    const fighter = fighters[side];
+    const pos = fighter
+      ? arena.worldToScreen(fighter.headPoint()) : { x: side === 'left' ? 70 : 220, y: 110 };
+    ui.popup(pos, shown > 0 ? `+${shown}` : `${shown}`, shown > 0 ? 'heal' : 'dmg');
+  }
 }
 
 // Чипы эффектов по виду (over-time): иконка + цвет (усиление/ослабление).
@@ -3165,25 +3283,26 @@ const OT_CHIP = {
   poison:      { icon: '☠️', kind: 'debuff', label: 'Отравление' },
 };
 
-/** Все активные эффекты бойца чипами (мощь, крит, лечение/яд/мана по времени). */
+/** Все активные эффекты бойца чипами (мощь, крит, лечение/яд/мана по времени).
+ *  q — качество расходника (цвет рамки чипа, ТЗ #3). */
 function effectsForFighter(f) {
   const out = [];
   const turns = Number(f?.buffTurns || 0);
   if (turns > 0) {
     const pct = Math.round(((Number(f?.buffMult) || 1.5) - 1) * 100);
     out.push({ icon: '💪', time: turns, kind: 'buff',
-      label: `Эликсир мощи: урон +${pct}%`, pct });
+      label: `Эликсир мощи: урон +${pct}%`, pct, q: f?.buffQuality || 0 });
   }
   const critT = Number(f?.critBuffTurns || 0);
   if (critT > 0) {
     const pct = Math.round((Number(f?.critBuffAdd) || 0) * 100);
     out.push({ icon: '🩸', time: critT, kind: 'buff',
-      label: `Эликсир крови: крит +${pct}%` });
+      label: `Эликсир крови: крит +${pct}%`, q: f?.critBuffQuality || 0 });
   }
   for (const e of f?.effects || []) {
     const m = OT_CHIP[e.kind] || { icon: '✦', kind: 'buff', label: 'Эффект' };
     out.push({ icon: m.icon, time: e.remainSec, kind: m.kind,
-      label: `${m.label} (${e.remainSec} c)` });
+      label: `${m.label} (${e.remainSec} c)`, q: e.q || 0 });
   }
   return out;
 }
@@ -3246,7 +3365,42 @@ function effectPopupSide(d) {
 
 function setBeltLive(v) {
   beltLive = v;
+  if (v) startCooldownTicker();
+  else { stopCooldownTicker(); scrollCdEnd = {}; for (const k in cdMax) cdMax[k] = 0; }
   renderCombatBar();
+}
+
+function startCooldownTicker() {
+  if (cooldownTimer) return;
+  cooldownTimer = setInterval(tickCombatCooldowns, 250);
+}
+function stopCooldownTicker() {
+  clearInterval(cooldownTimer);
+  cooldownTimer = null;
+}
+
+/** Каждые 250мс: осветляем серую зону и тикаем число; слот освободился/занялся → пересбор. */
+function tickCombatCooldowns() {
+  if (mode !== 'battle' || !elixirSlotsEl) { stopCooldownTicker(); return; }
+  const filled = elixirSlotsEl.querySelectorAll('.combat-slot.elixir.filled');
+  let needRerender = false, idx = 0;
+  for (let i = 0; i < ELIXIR_SLOTS; i++) {
+    const cell = elixirBelt[i];
+    if (!cell || (cell.qty != null && cell.qty <= 0)) continue;   // пустые не среди .filled
+    const el = filled[idx++];
+    if (!el) continue;
+    const wasCooling = el.classList.contains('cooling');
+    const cd = slotCoolState(cell.kind);
+    if (cd.cooling && wasCooling) {
+      const veil = el.querySelector('.cd-veil');
+      const num = el.querySelector('.cd-num');
+      if (veil) veil.style.opacity = (0.14 + 0.6 * cd.frac).toFixed(2);
+      if (num) num.textContent = cd.num;
+    } else if (cd.cooling !== wasCooling) {
+      needRerender = true;                       // занялся или освободился — пересобрать слот
+    }
+  }
+  if (needRerender) renderCombatBar();
 }
 
 /** Нижняя боевая панель: 3 заклинания + 6 эликсиров (эликсиры листаются). */
@@ -3292,20 +3446,22 @@ function renderCombatBar() {
         elixirSlotsEl.appendChild(empty);
         continue;
       }
-      // эликсир мощи нельзя пить, пока его усиление ещё действует (#3) — «перезарядка»
-      const onCooldown = cell.kind === 'power' && selfBuffTurns > 0;
+      // серая зона + таймер, пока расходник недоступен (эффект эликсира идёт / тайм-аут свитка)
+      const cd = slotCoolState(cell.kind);
       const qty = cell.qty != null ? cell.qty : 1;
       const slot = document.createElement('button');
       slot.type = 'button';
       slot.className = `combat-slot elixir filled kind-${cell.kind || 'health'}`
-        + ' q' + (cell.quality || 1) + (onCooldown ? ' cooldown' : '');
-      slot.disabled = onCooldown || !beltLive;
-      slot.title = onCooldown
-        ? `${cell.name} — усиление ещё действует (${selfBuffTurns})`
+        + ' q' + (cell.quality || 1) + (cd.cooling ? ' cooling' : '');
+      slot.disabled = cd.cooling || !beltLive;
+      slot.title = cd.cooling
+        ? `${cell.name} — недоступен ещё ${cd.num}${cd.unit === 'turn' ? ' х.' : ' c'}`
         : `${cell.name} ×${qty} — использовать`;
-      // счётчик зарядов в уголке (#1): мощь — стопкой ×N, жизнь — всегда 1
+      // счётчик зарядов в уголке (#1) + серая «вуаль» с таймером (CSS .cd-veil/.cd-num)
       slot.innerHTML = `<span class="bs-ico">${elixirGlyph(cell.kind)}</span>`
-        + `<span class="bs-qty">${qty}</span>`;
+        + `<span class="bs-qty">${qty}</span>`
+        + (cd.cooling ? `<span class="cd-veil" style="opacity:${(0.14 + 0.6 * cd.frac).toFixed(2)}"></span>`
+            + `<span class="cd-num">${cd.num}</span>` : '');
       slot.addEventListener('click', () => useElixir(i));
       elixirSlotsEl.appendChild(slot);
     }

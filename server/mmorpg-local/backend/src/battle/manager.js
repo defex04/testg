@@ -55,9 +55,10 @@ function broadcast(b, payloadFor) {
 const pub = (f) => f && ({ id: f.id, name: f.name, level: f.level,
   hp: Math.round(f.hp), maxHp: f.maxHp, alive: f.alive,
   mp: Math.round(f.mp || 0), maxMp: f.maxMp || 0,
-  buffTurns: f.buffTurns || 0, buffMult: f.buffMult || 1,
+  buffTurns: f.buffTurns || 0, buffMult: f.buffMult || 1, buffQuality: f.buffQuality || 0,
   critBuffTurns: f.critBuffTurns || 0, critBuffAdd: f.critBuffAdd || 0,
-  effects: (f.effects || []).map((e) => ({ kind: e.kind,
+  critBuffQuality: f.critBuffQuality || 0,
+  effects: (f.effects || []).map((e) => ({ kind: e.kind, q: e.quality || 0,
     remainSec: Math.max(0, Math.ceil((e.durationMs - e.elapsedMs) / 1000)) })) });
 const rosterFor = (b, vSide) => ({
   left:  b.engine.teams[vSide].map((id) => pub(b.engine.fighter(id))),
@@ -156,6 +157,7 @@ function elixirEventFor(b, q, actor, target, data) {
     onSelf: isTargetSelf,
     isUser: isActorSelf,
     kind: data.kind,
+    itemName: data.itemName || '',
     heal: data.heal || 0,
     mult: data.mult || 1,
     turns: data.turns || 0,
@@ -516,13 +518,13 @@ function applyAiElixirs(b, af) {
     const mult = clampNum(af.aiPowerMult, 1, 2, 1.5);
     const turns = clampNum(af.aiPowerTurns, 1, 5, 3);
     b.engine.addBuff(af.id, mult, turns);
-    broadcastElixir(b, af, af, { kind: 'power', mult, turns });
+    broadcastElixir(b, af, af, { kind: 'power', mult, turns, itemName: 'Эликсир мощи' });
   }
   if ((af.aiHealUses || 0) > 0 && af.hp <= af.maxHp * (af.aiHealAt || 0.6)) {
     af.aiHealUses -= 1;
     const amount = clampNum(af.aiHealAmount, 1, af.maxHp, 800);
     const healed = b.engine.heal(af.id, amount);
-    broadcastElixir(b, af, af, { kind: 'health', heal: healed });
+    broadcastElixir(b, af, af, { kind: 'health', heal: healed, itemName: 'Эликсир жизни' });
   }
   snapshot(b.id, b).catch(console.error);
 }
@@ -613,19 +615,44 @@ function onEffectTick(b) {
   b.lastEffectAt = now;
   const res = b.engine.tickEffects(dt);
   if (!res.changed.length) return;
+  // статистика (#1): урон ядом и скальпы засчитываем КАСТЕРУ (по srcId эффекта)
+  for (const [srcId, amount] of res.damageBySrc) {
+    const sf = b.engine.fighter(srcId);
+    const sp = sf && sf.charId != null && b.players.get(cid(sf.charId));
+    if (sp) sp.totalDamage += Math.round(amount);
+  }
+  for (const k of res.kills) {
+    logEffectKill(b, k).catch(console.error);
+    const sf = b.engine.fighter(k.killerId);
+    const sp = sf && sf.charId != null && b.players.get(cid(sf.charId));
+    if (sp) sp.kills += 1;
+  }
   snapshot(b.id, b).catch(console.error);
   broadcast(b, (p) => effectTickFor(b, p, res));
   if (res.deaths.length) handleEffectDeaths(b);
 }
 
-/** effectTick для зрителя: изменившиеся бойцы переведены в его систему (он — left). */
+/** Лог гибели от яда в battle_rounds (death=5), чтобы итог боя был полным. */
+async function logEffectKill(b, k) {
+  const killer = b.engine.fighter(k.killerId);
+  const victim = b.engine.fighter(k.victimId);
+  await game.query(
+    `INSERT INTO battle_rounds (battle_id, round_no, action_seq, actor_id,
+        action_type, target_id, value, effects)
+     VALUES ($1, $2, 0, $3, 5, $4, 0, '{"poison":true}')`,
+    [b.id, b.engine.turn, killer?.charId ?? null, victim?.charId ?? null]);
+}
+
+/** effectTick для зрителя: изменившиеся бойцы переведены в его систему (он — left).
+ *  `dHp` — чистое изменение HP от эффектов за тик (для всплывашек, #2). */
 function effectTickFor(b, p, res) {
   const me = b.engine.fighter(p.charId);
   const vSide = me ? me.side : 'left';
   return {
     type: 'effectTick',
     self: me ? pub(me) : null,
-    changed: res.changed.map((f) => ({ side: f.side === vSide ? 'left' : 'right', ...pub(f) })),
+    changed: res.changed.map((f) => ({ side: f.side === vSide ? 'left' : 'right',
+      dHp: Math.round((f._effDelta || 0) * 100) / 100, ...pub(f) })),
     deaths: res.deaths.map(String),
     roster: rosterFor(b, vSide),
   };
@@ -686,13 +713,15 @@ export async function useElixir(charId, msg = {}) {
   // сервере (анти-чит), не из клиента.
   const slot = Number(msg.slot);
   const belt = (await game.query(
-    `SELECT b.template_id, b.quantity, t.base_stats FROM character_belt b
+    `SELECT b.template_id, b.quantity, t.base_stats, t.name, t.quality FROM character_belt b
        JOIN item_templates t ON t.id = b.template_id
       WHERE b.character_id = $1 AND b.slot = $2`, [charId, slot])).rows[0];
   const params = belt && elixirParams(belt.base_stats);
   if (!params || Number(belt.quantity) <= 0) {
     p?.send({ type: 'error', error: 'belt_empty' }); return false;
   }
+  const itemName = belt.name || '';      // имя расходника — для всплывашки в бою (ТЗ #4)
+  const itemQ = Number(belt.quality) || 1;   // качество — цвет чипа эффекта (ТЗ #3)
   // Расходники можно применять в ЛЮБОЙ ход (не обязательно свой) — эффекты идут по
   // реальному времени. Ограничения: тайм-аут свитка и «эликсир того же вида уже活ен».
   const kind = params.kind;
@@ -772,39 +801,39 @@ export async function useElixir(charId, msg = {}) {
   }
 
   if (kind === 'escape') {
-    broadcastElixir(b, me, me, { kind: 'escape', slot, slotQty });
+    broadcastElixir(b, me, me, { kind: 'escape', slot, slotQty, itemName });
     await escapeFighter(b, cid(charId));
     return true;
   }
 
   // применяем эффект (значения из шаблона зажаты — анти-чит). Лечение/урон/мана по
   // времени — через тикер (addOverTime); мощь/кровь — на ходы; очищение — снятие.
-  const out = { kind, slot, slotQty };
+  const out = { kind, slot, slotQty, itemName };
   if (kind === 'health' || kind === 'heal_scroll') {
     const secs = clampNum(params.secs, 1, 600, 60);
     out.secs = secs;
     out.amount = Math.round(tf.maxHp * clampNum(params.heal_pct, 0.01, 1, 0.2));
     // свиток исцеления стакается (несколько лекарей на одну цель), эликсир жизни — нет
-    b.engine.addOverTime(tf.id, kind, out.amount, secs * 1000, me.id, kind === 'heal_scroll');
+    b.engine.addOverTime(tf.id, kind, out.amount, secs * 1000, me.id, kind === 'heal_scroll', itemQ);
   } else if (kind === 'mana') {
     const secs = clampNum(params.secs, 1, 600, 60);
     out.secs = secs;
     out.amount = Math.round((tf.maxMp || 0) * clampNum(params.mana_pct, 0.01, 1, 0.2));
-    b.engine.addOverTime(tf.id, 'mana', out.amount, secs * 1000, me.id);
+    b.engine.addOverTime(tf.id, 'mana', out.amount, secs * 1000, me.id, false, itemQ);
   } else if (kind === 'poison') {
     const secs = clampNum(params.secs, 1, 600, 120);
     out.secs = secs;
     out.amount = Math.round(tf.maxHp * clampNum(params.dmg_pct, 0.01, 1, 0.15));
     // свиток отравления стакается: несколько источников яда на одной цели
-    b.engine.addOverTime(tf.id, 'poison', out.amount, secs * 1000, me.id, true);
+    b.engine.addOverTime(tf.id, 'poison', out.amount, secs * 1000, me.id, true, itemQ);
   } else if (kind === 'power') {
     out.mult = clampNum(params.mult, 1, 2, 1.3);
     out.turns = clampNum(params.turns, 1, 5, 3);
-    b.engine.addBuff(tf.id, out.mult, out.turns);
+    b.engine.addBuff(tf.id, out.mult, out.turns, itemQ);
   } else if (kind === 'blood') {
     out.critAdd = clampNum(params.crit_add, 0, 1, 0.2);
     out.turns = clampNum(params.turns, 1, 3, 1);
-    b.engine.addCritBuff(tf.id, out.critAdd, out.turns);
+    b.engine.addCritBuff(tf.id, out.critAdd, out.turns, itemQ);
   } else if (kind === 'cleanse') {
     out.removed = b.engine.cleanse(tf.id, params.removes);
   }
