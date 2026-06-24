@@ -56,6 +56,7 @@ export const LOCATIONS = {
     image: 'assets/backgrounds/prigorod.webp',
     actions: [
       { label: 'Охота на разбойника', hunt: true },
+      { label: 'Охота на шайку разбойников', hunt: true, npc: 2 },
       { label: 'Магазин эликсиров', shop: true },
       { label: 'Испить живой воды' },
       { label: 'Подняться в замок', soon: true },
@@ -71,6 +72,7 @@ export const LOCATIONS = {
     image: 'assets/backgrounds/derevna.webp',
     actions: [
       { label: 'Охота на разбойника', hunt: true },
+      { label: 'Охота на шайку разбойников', hunt: true, npc: 2 },
       { label: 'Войти в трактир' },
       { label: 'Город Надежды', goto: 'village' },
     ],

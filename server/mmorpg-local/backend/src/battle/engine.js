@@ -3,16 +3,17 @@
  * версией: 3 зоны удара × 3 блока, blocked ×0.12, crit ×1.8, crit+block ×0.85,
  * dodge. Бой 1×1 (охота, дуэль) — частный случай команд из одного бойца.
  *
- * Модель хода:
+ * Модель хода (как в «Легенде: Наследие драконов»):
  *  - стороны left/right — массивы бойцов;
- *  - раунд: каждый живой боец действует один раз в порядке инициативы (по убыванию);
- *  - порядок инициативы считается ОДИН РАЗ со стабильным тай-брейком и
- *    переиспользуется каждый раунд → строго чередование, без ударов подряд
- *    одним бойцом (это и был баг «ходит дважды» при равной инициативе);
- *  - «пары» (кто против кого) сватаются ОДИН раз за раунд (buildPairs) и держатся
- *    весь раунд: удар бойца всегда приходит его паре — «пока соперник не ответит,
- *    ничего не переключается». Между раундами сервер решает: пара продолжает или
- *    меняется (стабильность против простаивания);
+ *  - бой — набор ДУЭЛЕЙ 1-на-1: каждый боец бьёт ровно ОДНОГО соперника, и его
+ *    бьёт ровно один (никаких «навалиться вдвоём на одного»). Цель НЕ выбирает
+ *    игрок — пары сватает СЕРВЕР (assignTargets). Кто без пары — «ждёт»;
+ *  - раунд: каждый боец В ПАРЕ действует один раз в порядке инициативы (по
+ *    убыванию); «ждущие» ход пропускают. Порядок инициативы считается ОДИН РАЗ со
+ *    стабильным тай-брейком → строгое чередование, без ударов подряд одним бойцом;
+ *  - пары стабильны внутри «эпохи ротации» и сдвигаются раз в N раундов: в
+ *    неравном бою ждущий обязательно вступает в бой (честная ротация), ровные
+ *    команды иногда перемешиваются. Решает СЕРВЕР, детерминированно (см. _pairEpoch);
  *  - удар активного бойца разыгрывается сразу (sub-turn), затем ход переходит
  *    следующему по инициативе.
  */
@@ -24,21 +25,25 @@ export class Engine {
    * sides: { left: [def...], right: [def...] }
    * def: { id?, name, level, hp, damage:[min,max], crit?, dodge?, initiative?, isAI?, charId? }
    */
-  constructor(sides, { turnTime = 20, target = {}, model = null } = {}) {
+  constructor(sides, { turnTime = 20, target = {}, model = null, pairRotate = {} } = {}) {
     this.turnTime = turnTime;
     // Боевая модель статов (Broken Sun) — опционально. Если задана и у бойцов есть
     // блок stats, удар считается по производным формулам (Мощь/Защита/Точность/…)
     // и включается контратака. Без модели — прежняя логика (зоны/блок ×0.12/крит ×1.8),
     // поэтому ЖИВОЙ бой не меняется. Модель использует симулятор.
     this.model = model;
-    // выбор цели: соперник «липкий» (держится несколько ходов), меняется
-    // принудительно (умер), с вероятностью switchChance или если боец «холодный»
-    // (давно не дрался). Новый соперник выбирается взвешенно, с приоритетом
-    // «холодным» врагам — простаивающих втягиваем в бой. См. README/plan.
+    // Ротация дуэльных пар (сколько раундов держится одна раскладка): для НЕРАВНЫХ
+    // команд частая (ждущий быстро вступает в бой), для РОВНЫХ — редкая (лишь
+    // «иногда перемешать» для разнообразия). См. assignTargets/_pairEpoch.
+    this.pairRotateUneven = Math.max(1, Number(pairRotate.uneven) || 2);
+    this.pairRotateEven   = Math.max(1, Number(pairRotate.even)   || 4);
+    // target.* (switchChance/cold*) больше НЕ управляют сменой соперника — пары
+    // строгие 1:1 и ротируются по таймеру (assignTargets). Поля приняты лишь для
+    // совместимости с симулятором/админкой (там ещё слайдеры), движок их не чтит.
     this.target = {
-      switchChance: target.switchChance ?? 0.25,
-      coldTurns: target.coldTurns ?? 2,
-      coldWeight: target.coldWeight ?? 1.5,
+      switchChance: target.switchChance ?? 0,
+      coldTurns: target.coldTurns ?? 0,
+      coldWeight: target.coldWeight ?? 0,
     };
     this.fighters = new Map();           // id -> боец
     this.teams = { left: [], right: [] };
@@ -74,8 +79,8 @@ export class Engine {
       tiebreak: Math.random(),
       alive: hp > 0,
       block: null,                       // стойка; null в ходе снимает блок
-      opponentId: null,                  // «пара» на раунд (цель удара/фокус), см. buildPairs
-      lastTargetedTurn: 0,               // раунд, когда по бойцу БИЛИ — для «холода» цели
+      opponentId: null,                  // соперник по дуэли (null = «ждёт»); см. assignTargets
+      lastTargetedTurn: 0,               // раунд, когда по бойцу БИЛИ (для статистики/отладки)
       buffMult: 1,                       // множитель урона от «Эликсира мощи»
       buffTurns: 0,                      // на сколько своих ударов он действует
       critBuffAdd: 0,                    // прибавка к шансу крита («Эликсир крови»)
@@ -90,6 +95,12 @@ export class Engine {
       aiHealAt: Number(def.aiHealAt ?? 0.6),
       aiPowerMult: Number(def.aiPowerMult ?? 1.5),
       aiPowerTurns: Number(def.aiPowerTurns ?? 3),
+      // роли «пачки» (см. manager.applyAiElixirs): лекарь лечит союзников, отравитель травит цель
+      aiHealAllyUses: Number(def.aiHealAllyUses ?? 0),
+      aiPoisonUses: Number(def.aiPoisonUses ?? 0),
+      aiPoisonPct: Number(def.aiPoisonPct ?? 0),
+      aiPoisonSecs: Number(def.aiPoisonSecs ?? 40),
+      aiPoisonEvery: Number(def.aiPoisonEvery ?? 5),
     };
     this.fighters.set(id, f);
     this.teams[side].push(id);
@@ -129,20 +140,21 @@ export class Engine {
   }
 
   /** Новый раунд: сбрасываем «походивших», порядок инициативы НЕ перевыбираем,
-   *  и ОДИН раз сватаем пары «кто против кого» на весь раунд (buildPairs). */
+   *  и пересобираем дуэльные пары под текущую эпоху ротации (assignTargets). */
   startRound() {
     this.turn += 1;
     this.phase = 'choose';
     this.acted = new Set();
     this.idx = -1;
-    this.buildPairs();
+    this.assignTargets();
     return this._nextActor();
   }
 
   _nextActor() {
     for (let i = this.idx + 1; i < this.order.length; i++) {
       const f = this.fighters.get(this.order[i]);
-      if (f.alive && !this.acted.has(f.id) && this.enemiesOf(f.id).length) {
+      // ходят только бойцы В ПАРЕ; «ждущие» (без живого соперника) пропускаются
+      if (f.alive && !this.acted.has(f.id) && this._hasLiveOpponent(f)) {
         this.idx = i;
         this.phase = 'choose';
         return { turn: this.turn, timeLeft: this.turnTime, active: f.id };
@@ -159,109 +171,73 @@ export class Engine {
     const id = this.order[this.idx];
     return id != null && this.idx < this.order.length ? id : null;
   }
-  /** Активный боец sub-turn'а: жив, ещё не ходил в раунде, есть враги. */
+  /** Активный боец sub-turn'а: жив, ещё не ходил в раунде, есть назначенный соперник. */
   _isActiveActor(f) {
-    return !!(f && f.alive && !this.acted.has(f.id) && this.enemiesOf(f.id).length);
+    return !!(f && f.alive && !this.acted.has(f.id) && this._hasLiveOpponent(f));
   }
   currentActor() {
     const f = this.fighter(this.currentActorId());
     return this._isActiveActor(f) ? f : null;
   }
 
-  /** Насколько боец «холодный» (раундов без удара ПО НЕМУ). */
-  coldness(f) { return Math.max(0, this.turn - (f.lastTargetedTurn || 0)); }
-
-  /** Вес выбора цели: база + приоритет «холодным» (на кого давно не нападали). */
-  _targetWeight(enemy) { return 1 + this.target.coldWeight * this.coldness(enemy); }
-
-  /** Самый «холодный»/незанятый враг из списка (вес ÷ текущая нагрузка). */
-  _coldestEnemy(enemies, load) {
-    let best = null, bestW = -Infinity;
-    for (const e of enemies) {
-      const w = this._targetWeight(e) / (1 + (load.get(String(e.id)) || 0));
-      if (w > bestW) { bestW = w; best = e; }
-    }
-    return best;
+  /** Есть ли у бойца назначенный ЖИВОЙ соперник (он в паре, а не «ждёт»). */
+  _hasLiveOpponent(f) {
+    const o = f && f.opponentId ? this.fighter(f.opponentId) : null;
+    return !!(o && o.alive && o.side !== f.side);
   }
 
   /**
-   * Сватовство пар «кто против кого» — ОДИН раз за раунд (см. startRound).
-   * Закрепляет `opponentId` каждому живому бойцу на весь раунд → «пока соперник
-   * не ответит, ничего не переключается». Решает СЕРВЕР, по трём правилам:
-   *  1) стабильность: валидную взаимную пару с вероятностью (1−switchChance)
-   *     сохраняем (реже переключения); «холодную» пару (давно без размена) —
-   *     обязательно пере-сватываем;
-   *  2) меньше простаивания: свободных бойцов (в порядке инициативы) ведём к
-   *     наименее занятому и самому «холодному» врагу (вес `_targetWeight`/нагрузка);
-   *  3) неравные команды: лишние бойцы «дублируются» на врага (2-в-1) — никто не
-   *     стоит без дела; у врага opponentId = один из его атакующих (ответный удар).
+   * Эпоха ротации пар: меняется раз в N раундов и сдвигает раскладку. Для НЕРАВНЫХ
+   * команд (есть ждущие) ротация частая (pairRotateUneven) — ждущий быстро вступает
+   * в бой; для РОВНЫХ — редкая (pairRotateEven), лишь «иногда перемешать». Сдвиг на
+   * 1 за эпоху → честный round-robin (ждущая позиция равномерно ходит по кругу).
    */
-  buildPairs() {
-    const left = this.aliveOf('left'), right = this.aliveOf('right');
-    if (!left.length || !right.length) return;
-    const engaged = new Set();
-    const load = new Map();                       // enemyId -> сколько атакующих на нём
-    const bump = (id) => load.set(String(id), (load.get(String(id)) || 0) + 1);
-
-    // есть ли у бойца «заброшенный» живой враг — по нему давно не били (coldness)
-    // и он сейчас ни с кем не сведён? Тогда устойчивую пару РАЗРЫВАЕМ, чтобы
-    // втянуть забытого в размен. Иначе в неравном бою (1×N) сторона-одиночка
-    // молотит всегда одного и того же, а второй враг не получает урона (ТЗ #3).
-    const hasNeglected = (id) => this.enemiesOf(id).some(
-      (e) => !engaged.has(e.id) && this.coldness(e) >= this.target.coldTurns);
-
-    // 1) сохраняем устойчивые взаимные пары (если не «холодные» и не выпал шанс
-    //    смены). Решение по паре принимаем РОВНО один раз (decided) — иначе второй
-    //    конец пары мог бы отменить разрыв, и забытый враг так и не вступил бы в бой.
-    const decided = new Set();
-    for (const f of [...left, ...right]) {
-      if (engaged.has(f.id) || decided.has(f.id)) continue;
-      const p = f.opponentId ? this.fighter(f.opponentId) : null;
-      const mutual = p && p.alive && p.side !== f.side
-        && String(p.opponentId) === String(f.id)
-        && !engaged.has(p.id) && !decided.has(p.id);
-      if (!mutual) continue;
-      decided.add(f.id); decided.add(p.id);
-      const cold = this.coldness(f) >= this.target.coldTurns
-        || this.coldness(p) >= this.target.coldTurns;
-      if (cold || hasNeglected(f.id) || hasNeglected(p.id)
-          || Math.random() < this.target.switchChance) continue;   // разъединяем
-      engaged.add(f.id); engaged.add(p.id); bump(f.id); bump(p.id);
-    }
-
-    // 2) свободных (по инициативе) сватаем к наименее занятому/«холодному» врагу;
-    //    взаимность ставим, если враг ещё свободен — но смотрит он на самого
-    //    «холодного» из СВОИХ врагов (обычно это и есть f). Так одиночка в неравном
-    //    бою смотрит на заброшенного, а не вечно на того, кто его атаковал первым.
-    for (const id of this.order) {
-      const f = this.fighter(id);
-      if (!f || !f.alive || engaged.has(f.id)) continue;
-      const enemies = this.enemiesOf(f.id);
-      if (!enemies.length) continue;
-      const best = this._coldestEnemy(enemies, load);
-      f.opponentId = best.id; engaged.add(f.id); bump(best.id);
-      if (!engaged.has(best.id)) {
-        const back = this._coldestEnemy(this.enemiesOf(best.id), load) || f;
-        best.opponentId = back.id; engaged.add(best.id); bump(back.id);
-      }
-    }
+  _pairEpoch(uneven) {
+    const period = uneven ? this.pairRotateUneven : this.pairRotateEven;
+    return Math.floor((this.turn - 1) / Math.max(1, period));
   }
 
   /**
-   * Стабильный соперник «напротив» для живого игрока: пока текущий жив — он и
-   * остаётся (никакого случайного переключения), иначе детерминированно берём
-   * первого живого врага в порядке инициативы (тот же, что вернёт enemiesOf[0],
-   * — поэтому показанный фокус и реальная цель удара всегда совпадают).
-   * Возвращает закреплённого живого врага (или null, если врагов не осталось).
+   * Сватовство дуэлей 1-на-1 (механика «Легенды: Наследие драконов»). Раз в раунд
+   * пересобираем раскладку: меньшую сторону целиком разбираем по парам с большей,
+   * ЛИШНИЕ бойцы большей стороны «ждут» (без соперника). Строго 1:1 — никого не
+   * бьют двое сразу. Раскладка детерминирована (стабильна внутри эпохи), а раз в N
+   * раундов ротация её сдвигает: ждущие обязательно вступают в бой, ровные команды
+   * иногда перемешиваются (см. _pairEpoch).
+   *   small[i] ↔ big[(i + epoch) mod |big|];  не выбранные в big — ждут.
+   */
+  assignTargets() {
+    // ранг инициативы строим ОДИН раз за раунд (обе стороны сортируем по нему)
+    const rank = new Map(this.order.map((id, i) => [id, i]));
+    const byInit = (s) => this.aliveOf(s).sort((a, b) =>
+      (rank.get(a.id) ?? 1e9) - (rank.get(b.id) ?? 1e9));
+    const left = byInit('left'), right = byInit('right');
+    for (const f of [...left, ...right]) f.opponentId = null;   // пересобираем заново
+    if (!left.length || !right.length) return;
+    const [small, big] = left.length <= right.length ? [left, right] : [right, left];
+    const uneven = small.length !== big.length;
+    const epoch = this._pairEpoch(uneven);
+    const mod = big.length;
+    for (let i = 0; i < small.length; i++) {
+      const a = small[i];
+      const b = big[(i + epoch) % mod];
+      a.opponentId = b.id;
+      b.opponentId = a.id;
+    }
+    // оставшиеся в big (mod > small.length) держат opponentId = null → «ждут»
+  }
+
+  /**
+   * Соперник бойца по его дуэли на этот раунд (назначен assignTargets). Возвращает
+   * его, если жив; иначе null — соперник погиб либо боец «ждёт». Нового СЕРВЕР здесь
+   * НЕ подбирает: пары пересобираются в начале следующего раунда (assignTargets).
+   * Так держится строгая модель 1:1 без «доганивания» чужих целей.
    */
   ensureOpponent(actorId) {
     const f = this.fighter(actorId);
     if (!f) return null;
-    const cur = f.opponentId ? this.fighter(f.opponentId) : null;
-    if (cur && cur.alive && cur.side !== f.side) return cur;   // держим стабильно
-    const pick = this.enemiesOf(actorId)[0] || null;
-    f.opponentId = pick ? pick.id : null;
-    return pick;
+    const o = f.opponentId ? this.fighter(f.opponentId) : null;
+    return o && o.alive && o.side !== f.side ? o : null;
   }
 
   /** Текущий соперник без пере-выбора (для фокуса зрителя). */
@@ -272,16 +248,16 @@ export class Engine {
   }
 
   aiMove() {
-    // цель ИИ — его «пара» на этот раунд (см. submit/ensureOpponent), поэтому
-    // здесь только зоны удара/блока
+    // цель ИИ — его назначенный соперник по дуэли (assignTargets), поэтому здесь
+    // только зоны удара/блока; ИИ цель не выбирает (move.target не шлёт)
     return { attack: ZONES[(Math.random() * 3) | 0], block: ZONES[(Math.random() * 3) | 0] };
   }
 
   /**
    * Выбор хода активного бойца. move: { attack, block, pass }.
-   * Цель ближнего удара НЕ из move — это всегда «пара» бойца (кто стоит
-   * напротив, задано buildPairs на раунд). move.target для удара игнорируется
-   * (выбор в ростере — только для эликсиров/эффектов, не для удара).
+   * Цель ближнего удара НЕ из move — это назначенный сервером соперник по дуэли
+   * (assignTargets, строгая пара 1:1). Игрок цель удара НЕ выбирает; move.target
+   * используется лишь для эликсиров/эффектов (выбор союзника/врага), не для удара.
    */
   submit(actorId, move) {
     if (this.phase !== 'choose') return false;
@@ -291,8 +267,7 @@ export class Engine {
     let target = null;
     if (!move.pass) {
       if (!ZONES.includes(move.attack)) return false;
-      // бьём «пару»; если она погибла раньше в этом раунде — ensureOpponent
-      // добивает следующего живого врага, чтобы ход не простаивал
+      // бьём своего соперника по паре; если его уже нет (погиб/«ждём») — ход впустую
       target = this.ensureOpponent(f.id);
       if (!target) return false;
     }
@@ -303,9 +278,8 @@ export class Engine {
   }
 
   _strike(attacker, defender, zone, isCounter = false) {
-    // «холод» цели = давно ли по бойцу БИЛИ: отмечаем лишь того, по кому ударили.
-    // Боец, который сам атакует, но по нему не попадают, остаётся «холодным» —
-    // его и выберут целью; иначе в 1×N одиночка молотит всегда одного (ТЗ #3).
+    // отметка «по бойцу били в этом раунде» — для статистики/отладки (на состав
+    // пар не влияет: пары строит assignTargets по ротации, а не по «холоду»)
     defender.lastTargetedTurn = this.turn;
     const m = this.model;
     let blocked, dodged, crit, damage = 0;

@@ -712,7 +712,7 @@ function renderLocationActions(loc) {
     makeButton('loc-btn' + (a.hunt ? ' hunt' : '') + (a.shop ? ' shop' : ''),
       `<span class="lc-ico">${a.shop ? ICON_SHOP : (a.hunt ? ICON_HUNT : ICON_ACT)}</span><span>${esc(a.label)}</span>`,
       () => {
-        if (a.hunt) startBattle();
+        if (a.hunt) startBattle(a.npc);   // a.npc — конкретная цель (напр. шайка), опц.
         else if (a.shop) openShop();
         else showToast(`«${a.label}» — заглушка: модуль действий подключается отдельно`);
       })));
@@ -984,7 +984,8 @@ async function enterBattle({ starter = null, resumed = null, notice = null, pvpT
   await initBattle(resumed, starter, pvpTarget);
 }
 
-const startBattle = () => enterBattle();
+const startBattle = (npc) =>
+  enterBattle(npc ? { starter: () => ServerBattle.hunt(npc) } : undefined);
 const startPvp = (target) =>
   enterBattle({ starter: () => ServerBattle.attack(target.id), pvpTarget: target });
 
@@ -3261,12 +3262,20 @@ function resetElixirBattle() {
  *  считать по разнице HP нельзя, #2). Копим до заметной величины, чтобы не спамить. */
 function showEffectNumbers(changed) {
   if (!ui || !arena) return;
+  const selfId = battle?.sides?.left?.id;
+  const focusId = (battle?.focus || battle?.sides?.right)?.id;
   for (const c of changed || []) {
     // dHp — РОВНО то, что эффект изменил на этом тике (сервер уже применил его к HP,
     // и этот же effectTick двигает полосу HP). Показываем число тик-в-тик, без
     // накопления порога: «−14 на табло ⇔ −14 с полоски» (ТЗ #3).
     const shown = Math.round(Number(c.dHp) || 0);
     if (!shown) continue;
+    // число вешаем ТОЛЬКО на того, кто реально на сцене: себя (left) и
+    // сфокусированного врага (right). Тики прочих бойцов в NvN видны в ростере —
+    // иначе «−N» от не-сфокусированного бандита прыгал бы на чужую модель.
+    const onSelf  = c.side === 'left'  && (selfId  == null || String(c.id) === String(selfId));
+    const onFocus = c.side === 'right' && focusId != null && String(c.id) === String(focusId);
+    if (!onSelf && !onFocus) continue;
     const side = c.side === 'left' ? 'left' : 'right';   // позиция: я слева, фокус справа
     const fighter = fighters[side];
     const pos = fighter

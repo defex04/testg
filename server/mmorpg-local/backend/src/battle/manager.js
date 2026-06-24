@@ -184,13 +184,23 @@ function broadcastElixir(b, actor, target, data) {
   broadcast(b, (q) => elixirEventFor(b, q, actor, target, data));
 }
 
-/** Настройки выбора цели (липкость/«холод») из конфига; есть дефолты. */
+/** Настройки выбора цели — оставлены для совместимости (движок их больше не чтит:
+ *  пары строгие 1:1 и ротируются по таймеру, см. engine.assignTargets). */
 const numCfg = (v, d) => (v == null || Number.isNaN(Number(v)) ? d : Number(v));
 async function targetCfg() {
   return {
     switchChance: numCfg(await gameConfig('battle.target.switch_chance'), 0.25),
     coldTurns:    numCfg(await gameConfig('battle.target.cold_turns'), 2),
     coldWeight:   numCfg(await gameConfig('battle.target.cold_weight'), 1.5),
+  };
+}
+
+/** Ротация дуэльных пар (раундов на раскладку): неравный бой — часто (ждущий
+ *  быстро вступает), ровные команды — редко (иногда перемешать). См. engine. */
+async function pairRotateCfg() {
+  return {
+    uneven: numCfg(await gameConfig('battle.pair_rotate_uneven'), 2),
+    even:   numCfg(await gameConfig('battle.pair_rotate_even'), 4),
   };
 }
 
@@ -268,13 +278,17 @@ async function logRounds(battleId, turn, strikes) {
 // ============================================================
 // Создание боёв
 // ============================================================
-export async function startHunt(ch, send) {
+export async function startHunt(ch, send, npcId = null) {
   if (byChar.has(cid(ch.id))) throw err('already_in_battle', 409);
 
+  // npcId (опц.) — какую цель локации бить (напр. «Шайка разбойников»); сервер
+  // ВАЛИДИРУЕТ, что она тут водится (анти-чит). Без него — первая цель локации.
+  const tid = Number(npcId) || null;
   const npc = (await game.query(
     `SELECT t.id, t.name, t.level, t.stats FROM npc_spawns s
        JOIN npc_templates t ON t.id = s.npc_template_id
-      WHERE s.location_id = $1 LIMIT 1`, [ch.location_id])).rows[0];
+      WHERE s.location_id = $1 ${tid ? 'AND t.id = $2' : ''}
+      ORDER BY t.id LIMIT 1`, tid ? [ch.location_id, tid] : [ch.location_id])).rows[0];
   if (!npc) throw err('no_hunt_here', 400);
 
   const start = await gameConfig('character.start');
@@ -292,17 +306,34 @@ export async function startHunt(ch, send) {
     `INSERT INTO battle_participants (battle_id, character_id, side, status)
      VALUES ($1, $2, 1, 1)`, [battleId, ch.id]);
 
-  const npcStats = { ...(npc.stats || {}), hp: 1100,
-    aiHealUses: 1, aiPowerUses: 1, aiHealAmount: 800, aiHealAt: 0.6,
-    aiPowerMult: 1.5, aiPowerTurns: 3 };
+  // Правая сторона: «пачка» (stats.pack = массив бойцов с ролями) ИЛИ одиночка.
+  // У пачки каждый боец — свои hp/урон + роль (яд/лечение/мощь, см. applyAiElixirs).
+  const stats = npc.stats || {};
+  const pack = Array.isArray(stats.pack) ? stats.pack : null;
+  const right = pack
+    ? pack.map((m, i) => ({
+        id: `npc-${npc.id}-${i + 1}`, name: m.name || `${npc.name} ${i + 1}`,
+        level: m.level ?? npc.level, isAI: true,
+        hp: Number(m.hp) || 900, damage: m.damage || [140, 220],
+        crit: m.crit ?? 0.1, dodge: m.dodge ?? 0.05,
+        aiPoisonUses: m.aiPoisonUses, aiPoisonPct: m.aiPoisonPct,
+        aiPoisonSecs: m.aiPoisonSecs, aiPoisonEvery: m.aiPoisonEvery,
+        aiHealAllyUses: m.aiHealAllyUses, aiHealAmount: m.aiHealAmount, aiHealAt: m.aiHealAt,
+        aiPowerUses: m.aiPowerUses, aiPowerMult: m.aiPowerMult, aiPowerTurns: m.aiPowerTurns }))
+    : [{ id: `npc-${npc.id}`, name: npc.name, level: npc.level, isAI: true,
+         ...stats, hp: 1100, aiHealUses: 1, aiPowerUses: 1, aiHealAmount: 800,
+         aiHealAt: 0.6, aiPowerMult: 1.5, aiPowerTurns: 3 }];
+  // награда: переопределение из шаблона (stats.reward) либо общий конфиг охоты
+  const huntReward = (stats.reward && typeof stats.reward === 'object') ? stats.reward : null;
 
   const engine = new Engine({
     left:  [{ id: ch.id, charId: ch.id, name: ch.name, level: ch.level,
               isAI: false, ...(await combatProfileFor(ch.id, start)), ...(await mpFor(ch.id)) }],
-    right: [{ id: `npc-${npc.id}`, name: npc.name, level: npc.level, isAI: true, ...npcStats }],
-  }, { turnTime, target: await targetCfg() });
+    right,
+  }, { turnTime, target: await targetCfg(), pairRotate: await pairRotateCfg() });
 
   const b = makeBattle(battleId, 'hunt', ch.location_id, policy, engine);
+  b.reward = huntReward;   // null → endBattle возьмёт battle.reward.hunt из конфига
   const p = addPlayer(b, ch.id, send, 'left');
   live.set(battleId, b);
   byChar.set(cid(ch.id), battleId);
@@ -367,7 +398,7 @@ export async function startDuel(att, def, sendAtt, sendDef) {
     right: [{ id: def.id, charId: def.id, name: def.name, level: def.level,
               isAI: false, initiative: defIni,
               ...(await combatProfileFor(def.id, start)), ...(await mpFor(def.id)) }],
-  }, { turnTime, target: await targetCfg() });
+  }, { turnTime, target: await targetCfg(), pairRotate: await pairRotateCfg() });
 
   const b = makeBattle(battleId, 'pvp', att.location_id, policy, engine);
   addPlayer(b, att.id, sendAtt, 'left');
@@ -514,6 +545,18 @@ function startTurnTimer(b) {
   b.timer = id;
 }
 
+/** Самый раненый (по доле HP) живой союзник бойца — цель ИИ-лекаря. */
+function mostInjuredAlly(b, af) {
+  let best = null, bestFrac = 2;
+  for (const id of b.engine.teams[af.side]) {
+    const f = b.engine.fighter(id);
+    if (!f || !f.alive) continue;
+    const frac = f.maxHp ? f.hp / f.maxHp : 1;
+    if (frac < bestFrac) { bestFrac = frac; best = f; }
+  }
+  return best;
+}
+
 function applyAiElixirs(b, af) {
   if (!af || !af.isAI || !af.alive) return;
   if ((af.aiPowerUses || 0) > 0 && af.buffTurns <= 0) {
@@ -528,6 +571,29 @@ function applyAiElixirs(b, af) {
     const amount = clampNum(af.aiHealAmount, 1, af.maxHp, 800);
     const healed = b.engine.heal(af.id, amount);
     broadcastElixir(b, af, af, { kind: 'health', heal: healed, itemName: 'Эликсир жизни' });
+  }
+  // лекарь «пачки»: лечит самого раненого живого союзника (вкл. себя), если тот просел
+  if ((af.aiHealAllyUses || 0) > 0) {
+    const ally = mostInjuredAlly(b, af);
+    if (ally && ally.hp < ally.maxHp * clampNum(af.aiHealAt, 0.1, 1, 0.7)) {
+      af.aiHealAllyUses -= 1;
+      const amount = clampNum(af.aiHealAmount, 1, ally.maxHp, 450);
+      const healed = b.engine.heal(ally.id, amount);
+      broadcastElixir(b, af, ally, { kind: 'health', heal: healed, itemName: 'Эликсир жизни' });
+    }
+  }
+  // отравитель «пачки»: травит своего соперника, если на нём ещё нет ЕГО яда (без бесконечного стака)
+  if ((af.aiPoisonUses || 0) > 0) {
+    const foe = b.engine.opponentOf(af.id) || b.engine.enemiesOf(af.id)[0] || null;
+    if (foe && !foe.effects.some((e) => e.kind === 'poison' && String(e.srcId) === String(af.id))) {
+      af.aiPoisonUses -= 1;
+      const secs = clampNum(af.aiPoisonSecs, 1, 600, 40);
+      const every = clampNum(af.aiPoisonEvery, 1, secs, 5);
+      const amount = Math.round(foe.maxHp * clampNum(af.aiPoisonPct, 0.01, 1, 0.1));
+      b.engine.addOverTime(foe.id, 'poison', amount, secs * 1000, af.id, true, 0, every * 1000);
+      broadcastElixir(b, af, foe,
+        { kind: 'poison', amount, secs, everySec: every, itemName: 'Свиток отравления' });
+    }
   }
   snapshot(b.id, b).catch(console.error);
 }
@@ -574,8 +640,8 @@ function enterActor(b) {
     af = b.engine.currentActor();
   }
   if (!af) return;
-  // соперник «напротив» уже задан на весь раунд (engine.buildPairs в startRound)
-  // и не переключается до следующего раунда — отдельный ре-пик в суб-ходе не нужен.
+  // дуэльная пара «напротив» задана assignTargets в startRound и держится весь
+  // раунд (ротация — между раундами); отдельный ре-пик в суб-ходе не нужен.
   broadcast(b, (p) => turnStartFor(b, p));
   startTurnTimer(b);
   if (af && af.isAI) {
@@ -951,7 +1017,9 @@ async function endBattle(b) {
   dropLive(b);
   b.engine.phase = 'ended';
   const winner = b.engine.winner();   // абсолютная сторона
-  const reward = b.kind === 'hunt' ? await gameConfig('battle.reward.hunt') : null;
+  // награда охоты: переопределение боя (пачка) > общий конфиг battle.reward.hunt
+  const reward = b.kind === 'hunt'
+    ? (b.reward || await gameConfig('battle.reward.hunt')) : null;
 
   await tx(async (c) => {
     await c.query(

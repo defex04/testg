@@ -38,7 +38,13 @@
       "Bash(cd server/mmorpg-local/backend/src/battle && wc -l engine.js manager.js stats.js sim.js && echo \"===belt===\" && wc -l ../belt.js ../shop.js ../inventory.js)",
       "Bash(grep -n \"Гроссбух =====\\\\|class.*SimPlayer\\\\|SP = new\\\\|R.ledger\\\\|/\\\\* =====\" admin.html)",
       "PowerShell($node = \\(Get-Command node -ErrorAction SilentlyContinue\\); if \\($node\\) { \"node: $\\($node.Source\\)\" } else { \"no node\"; $cands = @\\(\"$env:ProgramFiles\\\\nodejs\\\\node.exe\",\"$env:LOCALAPPDATA\\\\Programs\\\\nodejs\\\\node.exe\",\"$env:APPDATA\\\\npm\\\\node.exe\"\\); foreach\\($c in $cands\\){ if\\(Test-Path $c\\){ \"found: $c\" } } })",
-      "Bash(mkdir -p \"C:/Users/andre/Downloads/new/.claude\" && cat \"C:/Users/andre/Downloads/new/.claude/launch.json\" 2>/dev/null || echo \"NO LAUNCH FILE\")"
+      "Bash(mkdir -p \"C:/Users/andre/Downloads/new/.claude\" && cat \"C:/Users/andre/Downloads/new/.claude/launch.json\" 2>/dev/null || echo \"NO LAUNCH FILE\")",
+      "Bash(node test-facing.mjs)",
+      "Bash(node test-distribute.mjs)",
+      "PowerShell($n = \\(Get-Command node -ErrorAction SilentlyContinue\\); if \\($n\\) { Set-Location \"C:\\\\Users\\\\andre\\\\Downloads\\\\new\\\\server\\\\mmorpg-local\\\\backend\"; node test-facing.mjs; \"---\"; node test-distribute.mjs } else { \"node not found\" })",
+      "PowerShell(docker exec mmo-api node --input-type=module -e \"import { runSimulation } from '/app/src/battle/sim.js'; const r = await runSimulation\\({ battles: 30, maxTurns: 200, left: { count: 3, level: 10 }, right: { count: 2, level: 10 } }\\); console.log\\('NvN 3x2:', 'battles=', r.balance.winsLeft + r.balance.winsRight + r.balance.draws, 'avgTurns=', r.balance.avgTurns, 'avgSubTurns=', r.balance.avgSubTurns, 'timedOut=', r.balance.timedOut, 'strikes=', r.balance.totalStrikes\\);\")",
+      "Bash(grep -l \"from './src/battle/engine.js'\\\\|battle/engine\" test-nvn.mjs test-effects.mjs test-consumables.mjs test-nvn-consumables.mjs)",
+      "Bash(grep -L \"engine.js\" test-nvn.mjs test-pvp.mjs test-f5.mjs)"
     ]
   }
 }

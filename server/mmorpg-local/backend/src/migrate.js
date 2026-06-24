@@ -103,6 +103,20 @@ const STATEMENTS = [
              "aiHealAmount": 800, "aiHealAt": 0.6,
              "aiPowerMult": 1.5, "aiPowerTurns": 3}'::jsonb
     WHERE id = 1`,
+  // «Шайка разбойников» (id 2) — групповая охота: 3 бойца по 900 HP с ролями
+  // (отравитель/лекарь/громила, читаются в manager.applyAiElixirs по ai*-полям).
+  // Награда переопределяет общую: опыт 70, медь 125 (×2.5 от обычного разбойника).
+  `INSERT INTO npc_templates (id, name, level, stats, props) VALUES
+     (2, 'Шайка разбойников', 1,
+      '{"pack":[
+         {"name":"Разбойник-отравитель","hp":900,"damage":[120,170],"crit":0.08,"dodge":0.05,"aiPoisonUses":99,"aiPoisonPct":0.10,"aiPoisonSecs":40,"aiPoisonEvery":5},
+         {"name":"Разбойник-лекарь","hp":900,"damage":[110,150],"crit":0.06,"dodge":0.05,"aiHealAllyUses":3,"aiHealAmount":420,"aiHealAt":0.7},
+         {"name":"Разбойник-громила","hp":900,"damage":[170,250],"crit":0.12,"dodge":0.04,"aiPowerUses":99,"aiPowerMult":1.4,"aiPowerTurns":3}
+       ],"reward":{"currency":"copper","amount":125,"exp":70}}'::jsonb,
+      '{"injury_chance":0}'::jsonb)
+   ON CONFLICT (id) DO NOTHING`,
+  `INSERT INTO npc_spawns (id, npc_template_id, location_id) VALUES (3, 2, 1), (4, 2, 2)
+   ON CONFLICT (id) DO NOTHING`,
   // --- Почта -----------------------------------------------------------
   // Номинальная стоимость предмета (медь). От неё считается налог за вложение
   // в письмо (10%). 0 = бесценок (налог за вложение не берётся).

@@ -112,7 +112,7 @@ export function createHub(server) {
         switch (m.type) {
           case 'hunt': {
             const me = await getCharacter(ch.id);
-            await battle.startHunt(me, send);
+            await battle.startHunt(me, send, m.npc);   // m.npc — какую цель локации бить (опц.)
             break;
           }
           case 'attack': {        // дуэль PvP: нападение на игрока локации

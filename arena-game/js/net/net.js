@@ -357,10 +357,10 @@ export class ServerBattle extends EventTarget {
     this.queue = [];
   }
 
-  static hunt() {
+  static hunt(npc = null) {
     return new Promise((resolve, reject) => {
       pendingHunt = { resolve, reject };
-      if (!sendWs({ type: 'hunt' })) { pendingHunt = null; reject(new Error('ws_unavailable')); }
+      if (!sendWs({ type: 'hunt', npc })) { pendingHunt = null; reject(new Error('ws_unavailable')); }
     });
   }
 
