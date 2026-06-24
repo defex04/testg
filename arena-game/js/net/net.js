@@ -153,6 +153,7 @@ export const api = {
   move:      (to) => rest('/api/locations/move', { to }),
   players:   () => rest('/api/locations/players'),
   locationBattles: () => rest('/api/locations/battles'),
+  locationBattlesFinished: () => rest('/api/locations/battles/finished'),
   inventory: () => rest('/api/inventory'),
   equip:     (itemId) => rest('/api/inventory/equip', { itemId }),
   unequip:   (slot) => rest('/api/inventory/unequip', { slot }),

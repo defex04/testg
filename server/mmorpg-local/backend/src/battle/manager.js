@@ -37,6 +37,7 @@ function makeBattle(id, kind, locationId, policy, engine) {
     players: new Map(), timer: null, finishTimer: null, turnEndsAt: 0,
     effectTimer: null, lastEffectAt: 0,   // тикер эффектов по времени (HoT/DoT/мана)
     watchdog: null, resolveAt: 0,         // сторож зависаний + время входа в розыгрыш (#1)
+    stats: new Map(),   // id бойца движка -> { damage, kills } по ВСЕМ (вкл. ИИ-шайку, #1.3/1.4)
     step: 0 };   // токен sub-turn: отложенные колбэки устаревают при смене (анти-двойной-advance)
 }
 function addPlayer(b, charId, send, side) {
@@ -47,6 +48,15 @@ function addPlayer(b, charId, send, side) {
 }
 const playerList = (b) => [...b.players.values()];
 const attachedList = (b) => playerList(b).filter((p) => p.attached);
+
+/** Боевая статистика бойца движка по его id (урон/убийства) — для ВСЕХ участников,
+ *  включая ИИ-бойцов шайки, чтобы итог боя показывал каждого (#1.3/#1.4). */
+function statFor(b, fid) {
+  const key = String(fid);
+  let s = b.stats.get(key);
+  if (!s) { s = { damage: 0, kills: 0 }; b.stats.set(key, s); }
+  return s;
+}
 
 function broadcast(b, payloadFor) {
   for (const p of b.players.values()) p.send(payloadFor(p));
@@ -719,12 +729,14 @@ function onEffectTick(b) {
   if (!res.changed.length) return;
   // статистика (#1): урон ядом и скальпы засчитываем КАСТЕРУ (по srcId эффекта)
   for (const [srcId, amount] of res.damageBySrc) {
+    if (srcId != null) statFor(b, srcId).damage += Math.round(amount);
     const sf = b.engine.fighter(srcId);
     const sp = sf && sf.charId != null && b.players.get(cid(sf.charId));
     if (sp) sp.totalDamage += Math.round(amount);
   }
   for (const k of res.kills) {
     logEffectKill(b, k).catch(console.error);
+    if (k.killerId != null) statFor(b, k.killerId).kills += 1;   // скальп — отравителю
     const sf = b.engine.fighter(k.killerId);
     const sp = sf && sf.charId != null && b.players.get(cid(sf.charId));
     if (sp) sp.kills += 1;
@@ -833,19 +845,26 @@ export async function useElixir(charId, msg = {}) {
     p?.send({ type: 'error', error: 'on_cooldown', cooldownUntil: me.cooldowns[kind] });
     return false;
   }
-  // цель эффекта: союзные (жизнь/мощь/мана/кровь/исцеление) — на выбранного союзника
-  // или себя; яд — на выбранного врага либо того, кто напротив; очищение — на любого.
+  // Цель расходника (ТЗ §A — строгие правила применения):
+  //  • эликсиры (жизнь/мощь/мана/кровь) и побег — ТОЛЬКО на себя (выбор цели игнорируем);
+  //  • свиток ИСЦЕЛЕНИЯ — ТОЛЬКО на союзника (по умолчанию на себя; врага лечить нельзя);
+  //  • свиток ОТРАВЛЕНИЯ — ТОЛЬКО на врага (выбранного либо того, кто напротив);
+  //  • свиток ОЧИЩЕНИЯ — на любого бойца (союзник/враг/себя).
   let tf = me;
   const sel = msg.target != null ? b.engine.fighter(cid(msg.target)) : null;
   if (kind === 'poison') {
     tf = (sel && sel.alive && sel.side !== me.side)
       ? sel : (b.engine.opponentOf(me.id) || b.engine.enemiesOf(me.id)[0] || null);
     if (!tf) { p?.send({ type: 'error', error: 'no_target' }); return false; }
+  } else if (kind === 'heal_scroll') {
+    if (sel && sel.alive && sel.side !== me.side) {     // врага исцелять нельзя
+      p?.send({ type: 'error', error: 'ally_only' }); return false;
+    }
+    if (sel && sel.alive) tf = sel;                     // живой союзник (включая себя)
   } else if (kind === 'cleanse') {
-    if (sel && sel.alive) tf = sel;
-  } else if (kind !== 'escape') {
-    if (sel && sel.alive && sel.side === me.side) tf = sel;
+    if (sel && sel.alive) tf = sel;                     // очищение — на любого
   }
+  // эликсиры (health/mana/power/blood) и escape — всегда на себя: tf остаётся me
 
   // ЭЛИКСИРЫ одного вида НЕ стакаются: нельзя наложить, пока тот же эффект активен на
   // цели (эликсир жизни заблокирован и при активном свитке исцеления). СВИТКИ —
@@ -965,6 +984,10 @@ async function resolveCurrent(b) {
   b.resolveAt = Date.now();          // отметка для сторожа зависаний (#1)
   const r = b.engine.resolveActive();
   for (const s of r.strikes) {
+    // статистика по id движка — для каждого бойца (вкл. ИИ-шайку, #1.4); убийство
+    // засчитываем ТОЛЬКО тому, чей удар добил (s.killed на добивающем ударе, #1.3)
+    if (!s.dodged) statFor(b, s.attackerId).damage += s.damage;
+    if (s.killed)  statFor(b, s.attackerId).kills += 1;
     s.actorId  = b.engine.fighter(s.attackerId)?.charId ?? null;
     s.targetId = b.engine.fighter(s.defenderId)?.charId ?? null;
     const ap = s.actorId && b.players.get(cid(s.actorId));
@@ -1006,6 +1029,28 @@ function advance(b) {
 // ============================================================
 // Завершение / прерывание / побег
 // ============================================================
+
+/**
+ * Полный снимок итога боя по КАЖДОМУ бойцу движка (игроки + ИИ-шайка) — чтобы
+ * таблица результатов показывала всех (а не одну строку «NPC», #1.4) и убийства
+ * стояли у реальных убийц (#1.3). Кладётся в battles.meta.summary; финишное окно
+ * «Бой #N» читает его в приоритете над старым агрегатом по battle_participants.
+ *   side: 1 = left, 2 = right;  result: 1 победа, 2 поражение, 3 ничья.
+ */
+function buildSummary(b, winner) {
+  return [...b.engine.fighters.values()].map((f) => {
+    const st = b.stats.get(String(f.id)) || { damage: 0, kills: 0 };
+    return {
+      id: String(f.id), charId: f.charId ?? null, isAI: !!f.isAI,
+      name: f.name, level: f.level,
+      side: f.side === 'left' ? 1 : 2,
+      damage: Math.round(st.damage), kills: st.kills,
+      deaths: f.alive ? 0 : 1,
+      result: winner ? (winner === f.side ? 1 : 2) : 3,
+    };
+  });
+}
+
 function dropLive(b) {
   clearInterval(b.timer); clearTimeout(b.finishTimer); clearInterval(b.effectTimer);
   clearInterval(b.watchdog);
@@ -1021,10 +1066,13 @@ async function endBattle(b) {
   const reward = b.kind === 'hunt'
     ? (b.reward || await gameConfig('battle.reward.hunt')) : null;
 
+  const summary = buildSummary(b, winner);
   await tx(async (c) => {
     await c.query(
-      `UPDATE battles SET status = 3, ended_at = now(), winner_side = $2 WHERE id = $1`,
-      [b.id, winner === 'left' ? 1 : winner === 'right' ? 2 : null]);
+      `UPDATE battles SET status = 3, ended_at = now(), winner_side = $2,
+          meta = COALESCE(meta, '{}'::jsonb) || $3::jsonb WHERE id = $1`,
+      [b.id, winner === 'left' ? 1 : winner === 'right' ? 2 : null,
+       JSON.stringify({ summary })]);
     for (const p of b.players.values()) {
       const me = b.engine.fighter(p.charId);
       const victory = winner === p.side;
@@ -1062,9 +1110,12 @@ async function endBattle(b) {
 async function abortBattle(b, reason) {
   dropLive(b);
   b.engine.phase = 'ended';
+  const summary = buildSummary(b, b.engine.winner());
   await tx(async (c) => {
     await c.query(
-      `UPDATE battles SET status = 4, ended_at = now() WHERE id = $1`, [b.id]);
+      `UPDATE battles SET status = 4, ended_at = now(),
+          meta = COALESCE(meta, '{}'::jsonb) || $2::jsonb WHERE id = $1`,
+      [b.id, JSON.stringify({ summary })]);
     for (const p of b.players.values()) {
       await c.query(
         `UPDATE battle_participants SET status = 3, result = 4, left_round = $3
@@ -1163,6 +1214,31 @@ export function activeBattlesInLocation(locId) {
   return out.sort((a, b) => a.battleId - b.battleId);
 }
 
+/** Недавно завершённые/прерванные бои локации (вкладка «Завершённые»). Состав
+ *  команд берём из meta.summary (включает ИИ-шайку); старые бои без summary дают
+ *  пустые составы — строка всё равно открывается в таблицу итогов. */
+export async function finishedBattlesInLocation(locId, limit = 20) {
+  const { rows } = await game.query(
+    `SELECT id, type, status, winner_side, meta, ended_at
+       FROM battles
+      WHERE location_id = $1 AND status IN (3, 4)
+      ORDER BY ended_at DESC NULLS LAST, id DESC
+      LIMIT $2`, [locId, Math.max(1, Math.min(50, Number(limit) || 20))]);
+  return rows.map((r) => {
+    const meta = r.meta || {};
+    const summary = Array.isArray(meta.summary) ? meta.summary : [];
+    const names = (side) => summary.filter((s) => s.side === side).map((s) => s.name);
+    return {
+      battleId: Number(r.id),
+      kind: meta.kind || (r.type === 1 ? 'hunt' : 'pvp'),
+      status: r.status === 4 ? 'aborted' : 'finished',
+      endedAt: r.ended_at,
+      winnerSide: r.winner_side,
+      teams: { left: names(1), right: names(2) },
+    };
+  });
+}
+
 /** Кнопка «Прервать бой» в админке. */
 export async function adminAbort(battleId) {
   const b = live.get(Number(battleId));
@@ -1240,31 +1316,48 @@ export function battleRoutes(app, authed) {
       });
     }
 
-    const parts = (await game.query(
-      `SELECT bp.side, bp.result, bp.damage_dealt, bp.kills, bp.deaths,
-              bp.exp_gained, bp.valor_gained, ch.name, ch.level
+    // exp/доблесть — только у игроков (battle_participants), берём по char id
+    const partRows = (await game.query(
+      `SELECT bp.character_id, bp.side, bp.result, bp.damage_dealt, bp.kills,
+              bp.deaths, bp.exp_gained, bp.valor_gained, ch.name, ch.level
          FROM battle_participants bp JOIN characters ch ON ch.id = bp.character_id
         WHERE bp.battle_id = $1 ORDER BY bp.side, ch.name`, [id])).rows;
-    const results = parts.map((p) => ({
-      side: p.side, name: p.name, level: p.level,
-      damage: Number(p.damage_dealt), kills: p.kills, deaths: p.deaths,
-      exp: Number(p.exp_gained), valor: Number(p.valor_gained),
-      result: p.result,
-    }));
 
-    if (meta.npcName) {
-      const npc = (await game.query(
-        `SELECT coalesce(sum(value) FILTER (WHERE actor_id IS NULL AND action_type <> 5), 0) AS damage,
-                count(*) FILTER (WHERE action_type = 5 AND actor_id IS NULL)  AS kills,
-                count(*) FILTER (WHERE action_type = 5 AND target_id IS NULL) AS deaths
-           FROM battle_rounds WHERE battle_id = $1`, [id])).rows[0];
-      const lvl = meta.npc ? (await game.query(
-        `SELECT level FROM npc_templates WHERE id = $1`, [meta.npc])).rows[0] : null;
-      results.push({
-        side: 2, name: meta.npcName, level: lvl ? lvl.level : null,
-        damage: Number(npc.damage), kills: Number(npc.kills),
-        deaths: Number(npc.deaths), exp: null, valor: null, result: null,
+    let results;
+    if (Array.isArray(meta.summary) && meta.summary.length) {
+      // полный снимок (игроки + каждый боец шайки, #1.4); убийства у реальных убийц (#1.3)
+      const byChar = new Map(partRows.map((r) => [String(r.character_id), r]));
+      results = meta.summary.map((s) => {
+        const pr = s.charId != null ? byChar.get(String(s.charId)) : null;
+        return { side: s.side, name: s.name, level: s.level,
+          damage: Number(s.damage) || 0, kills: Number(s.kills) || 0,
+          deaths: Number(s.deaths) || 0,
+          exp: pr ? Number(pr.exp_gained) : null,
+          valor: pr ? Number(pr.valor_gained) : null,
+          result: s.result ?? (pr ? pr.result : null), isAI: !!s.isAI };
       });
+    } else {
+      // старые бои без summary — прежний путь: игроки + одна строка-итог NPC
+      results = partRows.map((p) => ({
+        side: p.side, name: p.name, level: p.level,
+        damage: Number(p.damage_dealt), kills: p.kills, deaths: p.deaths,
+        exp: Number(p.exp_gained), valor: Number(p.valor_gained),
+        result: p.result, isAI: false,
+      }));
+      if (meta.npcName) {
+        const npc = (await game.query(
+          `SELECT coalesce(sum(value) FILTER (WHERE actor_id IS NULL AND action_type <> 5), 0) AS damage,
+                  count(*) FILTER (WHERE action_type = 5 AND actor_id IS NULL)  AS kills,
+                  count(*) FILTER (WHERE action_type = 5 AND target_id IS NULL) AS deaths
+             FROM battle_rounds WHERE battle_id = $1`, [id])).rows[0];
+        const lvl = meta.npc ? (await game.query(
+          `SELECT level FROM npc_templates WHERE id = $1`, [meta.npc])).rows[0] : null;
+        results.push({
+          side: 2, name: meta.npcName, level: lvl ? lvl.level : null,
+          damage: Number(npc.damage), kills: Number(npc.kills),
+          deaths: Number(npc.deaths), exp: null, valor: null, result: null, isAI: true,
+        });
+      }
     }
 
     res.json({

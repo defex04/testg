@@ -169,7 +169,8 @@ export async function addExp(client, charId, amount) {
   return { gained: Math.max(0, exp - oldExp), exp, level, oldLevel, leveledUp: level > oldLevel };
 }
 
-/** Публичная информация об игроке (для карточки «Информация» из чата/почты). */
+/** Публичная информация об игроке (для карточки «Информация» из чата/почты).
+ *  Кроме базовых полей отдаёт надетые вещи, характеристики и статистику боёв (#B2). */
 export async function publicInfo({ id, name }) {
   const where = id ? `ch.id = $1` : `ch.name = $1`;
   const { rows } = await game.query(
@@ -181,12 +182,56 @@ export async function publicInfo({ id, name }) {
       WHERE ${where} AND ch.status = 1`, [id || name]);
   const r = rows[0];
   if (!r) return null;
+  const charId = Number(r.id);
   // присутствие — из Redis (поддерживается при входе/выходе сокета)
-  const online = await redis.hExists(`loc:${r.location_id}:players`, String(r.id))
+  const online = await redis.hExists(`loc:${r.location_id}:players`, String(charId))
     .catch(() => false);
+
+  const start = await gameConfig('character.start');
+  // надетые вещи, базовые характеристики, боевой профиль и сводка боёв — параллельно
+  const [equipRows, statRow, combat, recRow] = await Promise.all([
+    game.query(
+      `SELECT t.name, t.icon, t.slot AS equip_slot, t.type, t.base_stats,
+              i.enchant_level
+         FROM item_instances i JOIN item_templates t ON t.id = i.template_id
+        WHERE i.owner_type = 2 AND i.owner_id = $1 AND i.status = 1
+        ORDER BY t.slot`, [charId]).then((q) => q.rows),
+    game.query(
+      `SELECT str, agi, vit, intel, wis FROM character_stats WHERE character_id = $1`,
+      [charId]).then((q) => q.rows[0] || null),
+    combatProfileFor(charId, start).catch(() => null),
+    game.query(
+      `SELECT count(*) AS battles,
+              count(*) FILTER (WHERE result = 1) AS wins,
+              count(*) FILTER (WHERE result = 2) AS losses,
+              count(*) FILTER (WHERE result = 3) AS draws,
+              coalesce(sum(kills), 0)  AS kills,
+              coalesce(sum(deaths), 0) AS deaths
+         FROM battle_participants WHERE character_id = $1`, [charId])
+      .then((q) => q.rows[0]),
+  ]);
+
+  const equipment = equipRows.map((e) => ({
+    slot: e.equip_slot, name: e.name, icon: e.icon, type: e.type,
+    enchant: Number(e.enchant_level) || 0,
+  }));
+  const stats = statRow ? {
+    str: Number(statRow.str), agi: Number(statRow.agi), vit: Number(statRow.vit),
+    intel: Number(statRow.intel), wis: Number(statRow.wis),
+  } : null;
+  const record = {
+    battles: Number(recRow.battles) || 0, wins: Number(recRow.wins) || 0,
+    losses: Number(recRow.losses) || 0, draws: Number(recRow.draws) || 0,
+    kills: Number(recRow.kills) || 0, deaths: Number(recRow.deaths) || 0,
+  };
   return {
-    id: Number(r.id), name: r.name, level: r.level, faction: r.faction,
+    id: charId, name: r.name, level: r.level, faction: r.faction,
     location: r.location_name, about: r.about || '', online,
+    stats, equipment, record,
+    combat: combat ? {
+      hp: combat.hp, dmgMin: combat.damage?.[0] ?? 0, dmgMax: combat.damage?.[1] ?? 0,
+      crit: combat.crit, dodge: combat.dodge,
+    } : null,
   };
 }
 

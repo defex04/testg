@@ -395,8 +395,9 @@ applyPerfMode(perfModePref());
 // --- состояние UI локации ---
 let locPanelOpen = false;                 // всплывающая панель «Локация»
 let shopOpen = false;
-let battlesPanelOpen = false;             // панель «Текущие бои»
+let battlesPanelOpen = false;             // панель «Бои в локации»
 let battlesTimer = null;
+let battlesTab = 'active';                // вкладка панели боёв: 'active' | 'finished'
 let castleDockPane = null;                // 'members'|'battlelog'|'players'|'chat'|null
 const CASTLE_DOCK_PANES = new Set(['members', 'battlelog', 'chat', 'players']);
 const BATTLE_ONLY_PANES = new Set(['members', 'battlelog']);
@@ -463,6 +464,7 @@ async function toggleBattlesPanel(force) {
   if (battlesPanelOpen) {
     closeLocPanel();
     closeCastleDock();
+    battlesTab = 'active';        // всегда открываем на «Текущие»
     await refreshBattles();
     clearInterval(battlesTimer);
     battlesTimer = setInterval(() => {
@@ -926,6 +928,27 @@ let totalDamage = 0;     // суммарный урон игрока за тек
 let lastTurnShown = 0;   // чтобы не дублировать «ход N» на sub-turn'ах раунда
 let currentFocusId = null;   // id сфокусированного соперника — чтобы не пересобирать шапку зря
 
+// Добыча после боя (#1.7): из награды сервера (battleEnd.reward = {exp, currency, amount})
+// собираем список чипов «что выпало». Валюта и опыт уже начислены сервером — здесь
+// только показ. Предметного лута пока нет, но формат расширяемый.
+const CUR_DROP_LABEL = { copper: 'меди', silver: 'серебра', gold: 'золота',
+  diamond: 'кристаллов', valor: 'доблести' };
+const CUR_DROP_GLYPH = { copper: '🪙', silver: '🪙', gold: '🪙',
+  diamond: '💎', valor: '🎖️' };
+function battleDrop(reward) {
+  if (!reward) return [];
+  const out = [];
+  if (Number(reward.exp) > 0)
+    out.push({ glyph: '⭐', value: '+' + reward.exp, label: 'опыт' });
+  if (Number(reward.amount) > 0)
+    out.push({ glyph: CUR_DROP_GLYPH[reward.currency] || '🪙',
+      value: '+' + reward.amount, label: CUR_DROP_LABEL[reward.currency] || '' });
+  if (Array.isArray(reward.items))   // на будущее: предметный лут
+    for (const it of reward.items)
+      out.push({ glyph: '🎁', value: '×' + (it.qty || 1), label: it.name || 'предмет' });
+  return out;
+}
+
 // Очередь боевых событий: turnStart/resolve/elixir/battleEnd обрабатываются строго
 // по одному, со ВЗАИМНЫМ ожиданием. Розыгрыш удара асинхронный (играет анимацию
 // через await), а сервер/replay могут выпустить несколько событий подряд — без
@@ -1242,7 +1265,8 @@ async function initBattle(resumedBattle = null, starter = null, pvpTarget = null
     }
     // долить пояс из рюкзака, если включено автозаполнение (#2)
     autofillBeltAfterBattle().catch(console.error);
-    ui.showEnd(victory, { onLeave: () => leaveBattle(true) });
+    // добыча после боя (#1.7): опыт + валюта, которые начислил сервер
+    ui.showEnd(victory, { onLeave: () => leaveBattle(true), drop: battleDrop(e.detail.reward) });
   }));
 
   battle.addEventListener('serverError', (e) => {
@@ -1259,6 +1283,7 @@ async function initBattle(resumedBattle = null, starter = null, pvpTarget = null
       : code === 'belt_empty' ? 'Ячейка эликсира пуста'
       : code === 'on_cooldown' ? 'Свиток ещё на перезарядке'
       : code === 'no_target' ? 'Нет цели для свитка'
+      : code === 'ally_only' ? 'Исцелять можно только союзников'
       : 'Сервер: ' + code);
   });
 
@@ -1350,6 +1375,14 @@ function activateTab(name) {
 
 $('loc-scene-close')?.addEventListener('click', () => closeLocPanel());
 $('battles-close')?.addEventListener('click', () => closeBattlesPanel());
+// вкладки панели боёв: «Текущие» / «Завершённые» (#C2)
+$('battles-tabs')?.addEventListener('click', (e) => {
+  const tab = e.target.closest('.battles-tab');
+  if (!tab || tab.dataset.bt === battlesTab) return;
+  battlesTab = tab.dataset.bt;
+  syncBattlesTabs();
+  refreshBattles();
+});
 
 // --- расширение нижнего окна жестом ---
 // повести вверх — окно растёт; вниз или тап по ручке — исходная высота ---
@@ -1952,6 +1985,64 @@ nickmenuPop.addEventListener('click', (e) => {
   }
 });
 
+/**
+ * Секции карточки персонажа (характеристики · снаряжение · статистика боёв) из
+ * publicInfo `p`. Общий рендер для карточки игрока и инфо-карточки боя (#C3).
+ * Пустые блоки не рисуются (у ИИ нет stats/record).
+ */
+function pinfoSectionsHtml(p) {
+  if (!p) return '';
+  const pct = (v) => `${Math.round((Number(v) || 0) * 100)}%`;
+  const statCell = (label, val) =>
+    `<div class="pinfo-stat"><i>${label}</i><b>${val}</b></div>`;
+  let html = '';
+  if (p.stats || p.combat) {
+    const s = p.stats || {};
+    const c = p.combat || {};
+    const cells = [];
+    if (p.stats) cells.push(
+      statCell('Сила', s.str), statCell('Ловкость', s.agi), statCell('Выносл.', s.vit),
+      statCell('Интел.', s.intel), statCell('Мудрость', s.wis));
+    if (p.combat) cells.push(
+      statCell('Здоровье', c.hp),
+      statCell('Урон', `${c.dmgMin}–${c.dmgMax}`),
+      statCell('Крит', pct(c.crit)), statCell('Уворот', pct(c.dodge)));
+    html += `<div class="pinfo-sec">
+      <div class="pinfo-sec-title">Характеристики</div>
+      <div class="pinfo-grid">${cells.join('')}</div></div>`;
+  }
+  if (Array.isArray(p.equipment)) {
+    const rows = p.equipment.map((e) => {
+      const label = SLOT_META[slotNameFor(e.slot)]?.name || 'Слот';
+      const ench = e.enchant > 0 ? ` <span class="pinfo-ench">+${e.enchant}</span>` : '';
+      return `<div class="pinfo-equip-row">
+        <span class="pinfo-equip-ico">${esc(itemIconText(e.icon, e.type))}</span>
+        <span class="pinfo-equip-slot">${esc(label)}</span>
+        <span class="pinfo-equip-name">${esc(e.name)}${ench}</span>
+      </div>`;
+    }).join('');
+    html += `<div class="pinfo-sec">
+      <div class="pinfo-sec-title">Снаряжение</div>
+      ${p.equipment.length ? `<div class="pinfo-equip">${rows}</div>`
+        : '<div class="pinfo-empty">Ничего не надето</div>'}</div>`;
+  }
+  if (p.record) {
+    const r = p.record;
+    const chip = (label, val, cls = '') =>
+      `<div class="pinfo-rec-chip ${cls}"><b>${val}</b><i>${label}</i></div>`;
+    html += `<div class="pinfo-sec">
+      <div class="pinfo-sec-title">Статистика боёв</div>
+      <div class="pinfo-rec">
+        ${chip('боёв', r.battles)}
+        ${chip('побед', r.wins, 'win')}
+        ${chip('поражений', r.losses, 'lose')}
+        ${chip('убийств', r.kills)}
+        ${chip('смертей', r.deaths)}
+      </div></div>`;
+  }
+  return html;
+}
+
 /** Карточка игрока (пункт «Информация»). Рисуем в окне #binfo, пряча «ссылку». */
 async function openPlayerInfo(peer) {
   if (!online) { showToast('Нет связи с сервером'); return; }
@@ -1969,21 +2060,29 @@ async function openPlayerInfo(peer) {
     return;
   }
   binfoTitle.textContent = p.name;
-  binfoBody.innerHTML = `
-    <div class="pinfo">
-      <div class="pinfo-row"><span>Уровень</span><b>${p.level ?? '?'}</b></div>
-      <div class="pinfo-row"><span>Локация</span><b>${esc(p.location || '—')}</b></div>
-      <div class="pinfo-row"><span>Статус</span>
-        <b class="${p.online ? 'pinfo-on' : 'pinfo-off'}">${p.online ? 'в сети' : 'не в сети'}</b></div>
-      ${p.about ? `<div class="pinfo-about">${esc(p.about)}</div>` : ''}
+  const self = String(p.id) === String(PLAYER.id);
+  const sectionsHtml = pinfoSectionsHtml(p);   // характеристики · снаряжение · статистика
+
+  const actionsHtml = self ? '' : `
       <div class="pinfo-actions">
         <button type="button" class="bi-join-btn" data-pi="dm">Приватное сообщение</button>
         <button type="button" class="bi-join-btn" data-pi="mail">Письмо</button>
+      </div>`;
+
+  binfoBody.innerHTML = `
+    <div class="pinfo">
+      <div class="pinfo-head">
+        <div class="pinfo-row"><span>Уровень</span><b>${p.level ?? '?'}</b></div>
+        <div class="pinfo-row"><span>Локация</span><b>${esc(p.location || '—')}</b></div>
+        <div class="pinfo-row"><span>Статус</span>
+          <b class="${p.online ? 'pinfo-on' : 'pinfo-off'}">${p.online ? 'в сети' : 'не в сети'}</b></div>
       </div>
+      ${p.about ? `<div class="pinfo-about">${esc(p.about)}</div>` : ''}
+      ${sectionsHtml}
+      ${actionsHtml}
     </div>`;
-  const self = String(p.id) === String(PLAYER.id);
+  // кнопки «написать» только для ЧУЖОГО профиля (себе писать нельзя, #B3)
   binfoBody.querySelectorAll('.pinfo-actions .bi-join-btn').forEach((b) => {
-    if (self) { b.disabled = true; return; }
     b.addEventListener('click', () => {
       closeBattleInfo();
       if (b.dataset.pi === 'dm') openDmTab({ id: p.id, name: p.name });
@@ -2592,39 +2691,77 @@ function noteMention() {       // личное мне пришло — звон�
 }
 function clearMentions() { mentionUnread = 0; updateChatBadge(); }
 
-/** Список идущих боёв в локации — панель «Текущие бои». */
+/** Подсветить активную вкладку панели боёв. */
+function syncBattlesTabs() {
+  document.querySelectorAll('#battles-tabs .battles-tab').forEach((t) =>
+    t.classList.toggle('active', t.dataset.bt === battlesTab));
+}
+
+/** Строка идущего боя — с кнопкой «вмешаться/смотреть». */
+function activeBattleRow(b) {
+  const row = document.createElement('div');
+  row.className = 'battle-row';
+  const kind = b.kind === 'pvp' ? 'дуэль' : 'охота';
+  const left = (b.teams?.left || []).join(', ') || '—';
+  const right = (b.teams?.right || []).join(', ') || '—';
+  const label = document.createElement('span');
+  label.className = 'battle-row-label';
+  label.innerHTML = `<b>Бой #${b.battleId}</b> <span class="m-lvl">(${kind}, ход ${b.turn})</span>`
+    + `<span class="battle-row-teams">${esc(left)} vs ${esc(right)}</span>`;
+  row.appendChild(label);
+  const info = document.createElement('button');
+  info.type = 'button';
+  info.className = 'pvp-btn';
+  info.title = b.allowJoin ? 'Вмешаться' : 'Смотреть состав';
+  info.textContent = b.allowJoin ? '⚔' : 'ℹ';
+  info.addEventListener('click', () => { closeBattlesPanel(); openBattleInfo(b.battleId); });
+  row.appendChild(info);
+  return row;
+}
+
+/** Строка завершённого боя — с итогом (кто победил) и переходом в таблицу итогов. */
+function finishedBattleRow(b) {
+  const row = document.createElement('div');
+  row.className = 'battle-row';
+  const kind = b.kind === 'pvp' ? 'дуэль' : 'охота';
+  const left = (b.teams?.left || []).join(', ') || '—';
+  const right = (b.teams?.right || []).join(', ') || '—';
+  const outcome = b.status === 'aborted' ? 'прерван'
+    : b.winnerSide === 1 ? 'победа 1-х'
+    : b.winnerSide === 2 ? 'победа 2-х' : 'ничья';
+  const label = document.createElement('span');
+  label.className = 'battle-row-label';
+  label.innerHTML = `<b>Бой #${b.battleId}</b> <span class="m-lvl">(${kind} · ${outcome})</span>`
+    + `<span class="battle-row-teams">${esc(left)} vs ${esc(right)}</span>`;
+  row.appendChild(label);
+  const info = document.createElement('button');
+  info.type = 'button';
+  info.className = 'pvp-btn';
+  info.title = 'Итоги боя';
+  info.textContent = 'ℹ';
+  info.addEventListener('click', () => { closeBattlesPanel(); openBattleInfo(b.battleId); });
+  row.appendChild(info);
+  return row;
+}
+
+/** Список боёв локации — вкладки «Текущие» / «Завершённые» (#C2). */
 async function refreshBattles() {
   if (!online || !battlesList) return;
+  syncBattlesTabs();
+  const finished = battlesTab === 'finished';
   try {
-    const battles = await api.locationBattles();
-    setBattlesBadge(battles.length);
+    const battles = finished
+      ? await api.locationBattlesFinished()
+      : await api.locationBattles();
+    if (!finished) setBattlesBadge(battles.length);   // бейдж = только идущие
     battlesList.innerHTML = '';
     if (!battles.length) {
-      battlesList.innerHTML = '<div class="bi-empty">В локации нет идущих боёв</div>';
+      battlesList.innerHTML = `<div class="bi-empty">${finished
+        ? 'Завершённых боёв пока нет' : 'В локации нет идущих боёв'}</div>`;
       return;
     }
     for (const b of battles) {
-      const row = document.createElement('div');
-      row.className = 'battle-row';
-      const label = document.createElement('span');
-      label.className = 'battle-row-label';
-      const kind = b.kind === 'pvp' ? 'дуэль' : 'охота';
-      const left = (b.teams?.left || []).join(', ') || '—';
-      const right = (b.teams?.right || []).join(', ') || '—';
-      label.innerHTML = `<b>Бой #${b.battleId}</b> <span class="m-lvl">(${kind}, ход ${b.turn})</span>`
-        + `<span class="battle-row-teams">${esc(left)} vs ${esc(right)}</span>`;
-      row.appendChild(label);
-      const info = document.createElement('button');
-      info.type = 'button';
-      info.className = 'pvp-btn';
-      info.title = b.allowJoin ? 'Вмешаться' : 'Смотреть состав';
-      info.textContent = b.allowJoin ? '⚔' : 'ℹ';
-      info.addEventListener('click', () => {
-        closeBattlesPanel();
-        openBattleInfo(b.battleId);
-      });
-      row.appendChild(info);
-      battlesList.appendChild(row);
+      battlesList.appendChild(finished ? finishedBattleRow(b) : activeBattleRow(b));
     }
   } catch (e) {
     console.error('Список боёв:', e);
@@ -2642,6 +2779,8 @@ const binfoBody = $('binfo-body');
 const binfoCopyBtn = $('binfo-copy');
 let binfoTimer = null;   // автообновление, пока бой идёт и окно открыто
 let binfoId = null;      // id боя, открытого в окне (для «скопировать ссылку»)
+let biSummaryData = null;          // данные завершённого боя (для пересортировки без запроса)
+let biSort = 'default';            // сортировка таблицы итогов: 'default' | 'damage' | 'kills'
 
 function closeBattleInfo() {
   binfoEl.classList.add('hidden');
@@ -2823,36 +2962,82 @@ async function renderBattleInfo(id) {
     return;
   }
 
-  // бой завершён или прерван — таблица итогов
+  // бой завершён или прерван — таблица итогов по командам (адаптив + сортировка)
   clearInterval(binfoTimer);
   binfoTimer = null;
   binfoTitle.textContent = `Бой #${id} — ${d.status === 'aborted' ? 'прерван' : 'завершён'}`;
+  biSummaryData = d;                 // запоминаем — для пересортировки без запроса
+  renderBattleSummary();
+}
+
+/**
+ * Итоги завершённого боя: компактная таблица по командам (Игрок · Опыт · Урон ·
+ * Убийства), адаптив под телефон (команды столбцами на широком экране, друг под
+ * другом на узком). Сортировка строк ВНУТРИ команды — по урону/убийствам или по
+ * умолчанию (как пришло с сервера). Перерисовывается из biSummaryData без запроса.
+ */
+function renderBattleSummary() {
+  const d = biSummaryData;
+  if (!d) return;
   const showValor = d.results.some((r) => Number(r.valor) > 0);
   const num = (v) => (v == null ? '—' : v);
-  const rows = d.results.map((r) => `
-    <tr>
-      <td>${r.side}я</td>
-      <td>${esc(r.name)} <span class="m-lvl">[${r.level ?? '?'}]</span></td>
-      <td>${RESULT_LABELS[r.result] || '—'}</td>
-      <td>${num(r.damage)}</td>
-      <td>${num(r.kills)}</td>
-      <td>${num(r.deaths)}</td>
-      <td>${num(r.exp)}</td>
-      ${showValor ? `<td>${num(r.valor)}</td>` : ''}
-    </tr>`).join('');
+
+  // группируем по командам: 1я (left) и 2я (right) — разные цвета (#1.2)
+  const teams = { 1: [], 2: [] };
+  for (const r of d.results) (teams[r.side] || (teams[r.side] = [])).push(r);
+  // сортировка внутри команды (по убыванию); 'default' — порядок с сервера
+  const sortRows = (list) => {
+    if (biSort === 'damage') return [...list].sort((a, b) => (b.damage || 0) - (a.damage || 0));
+    if (biSort === 'kills') return [...list].sort((a, b) => (b.kills || 0) - (a.kills || 0)
+      || (b.damage || 0) - (a.damage || 0));
+    return list;
+  };
+
+  const rowHtml = (r) => {
+    const res = RESULT_LABELS[r.result] || '';
+    const resCls = r.result === 1 ? 'win' : r.result === 2 ? 'lose'
+      : r.result === 4 ? 'flee' : '';
+    return `<tr class="${r.isAI ? 'ai' : ''}">
+      <td class="bi-c-name"><span class="bi-name-in">
+        <span class="bi-dot ${resCls}" title="${res}"></span>
+        <span class="bi-nm">${esc(r.name)}</span><span class="m-lvl">[${r.level ?? '?'}]</span>
+      </span></td>
+      <td class="bi-c-num">${r.exp != null ? num(r.exp) : '—'}</td>
+      <td class="bi-c-num">${num(r.damage)}</td>
+      <td class="bi-c-num${r.kills > 0 ? ' hot' : ''}">${num(r.kills)}</td>
+      ${showValor ? `<td class="bi-c-num">${r.valor != null ? num(r.valor) : '—'}</td>` : ''}
+    </tr>`;
+  };
+  // «N я команда» — буква «я» верхним индексом (степень, #1.2)
+  const teamBlock = (side) => {
+    const list = teams[side] || [];
+    if (!list.length) return '';
+    return `<div class="bi-teamcol bi-side-${side}">
+      <div class="bi-team-cap"><b class="bi-tnum">${side}<sup>я</sup></b> команда</div>
+      <table class="bi-tt">
+        <thead><tr>
+          <th class="bi-c-name">Игрок</th><th class="bi-c-num">Опыт</th>
+          <th class="bi-c-num">Урон</th><th class="bi-c-num">Убийств</th>
+          ${showValor ? '<th class="bi-c-num">Добл.</th>' : ''}
+        </tr></thead>
+        <tbody>${sortRows(list).map(rowHtml).join('')}</tbody>
+      </table>
+    </div>`;
+  };
+  // тулбар сортировки (#2): по умолчанию / по урону / по убийствам
+  const sortBtn = (key, label) =>
+    `<button type="button" class="bi-sort-btn${biSort === key ? ' active' : ''}" data-bi-sort="${key}">${label}</button>`;
+  const toolbar = `<div class="bi-sortbar"><span class="bi-sortbar-k">Сортировка:</span>
+    ${sortBtn('default', 'по умолчанию')}${sortBtn('damage', 'по урону')}${sortBtn('kills', 'по убийствам')}</div>`;
+
   const started = d.startedAt ? new Date(d.startedAt).getTime() : null;
   const ended = d.endedAt ? new Date(d.endedAt).getTime() : null;
   const metaBar = `<div class="bi-meta">Начало ${fmtClock(started)}`
     + ` · длилась ${fmtDuration(started && ended ? ended - started : null)}</div>`;
-  binfoBody.innerHTML = `${metaBar}
-    <table class="bi-table">
-      <thead><tr>
-        <th>Команда</th><th>Имя</th><th>Итог</th><th>Урон</th>
-        <th>Убийств</th><th>Смертей</th><th>Опыт</th>
-        ${showValor ? '<th>Доблесть</th>' : ''}
-      </tr></thead>
-      <tbody>${rows}</tbody>
-    </table>`;
+  binfoBody.innerHTML = `${metaBar}${toolbar}
+    <div class="bi-summary">${teamBlock(1)}${teamBlock(2)}</div>`;
+  binfoBody.querySelectorAll('.bi-sort-btn').forEach((b) =>
+    b.addEventListener('click', () => { biSort = b.dataset.biSort; renderBattleSummary(); }));
 }
 
 // ---------------------------------------------------------------------------
@@ -3168,13 +3353,18 @@ function applyFocus(focus) {
   if (!focus) return;
   // тот же соперник (липкий фокус с сервера) — не пересобираем шапку, только HP
   if (focus.id == null || focus.id !== currentFocusId) {
+    // смена соперника — это переход с одного ЖИВОГО фокуса на другого (не первый показ)
+    const isSwitch = currentFocusId != null && focus.id != null
+      && String(focus.id) !== String(currentFocusId);
     currentFocusId = focus.id ?? null;
-    ui.setOpponent(focus);
-    // NvN: фокус перешёл на нового живого врага — поднимаем правую модель,
-    // если она лежит после гибели прошлого соперника (#6: чёткость мультибоя)
+    ui.setOpponent(focus, { switched: isSwitch });
+    // NvN: фокус перешёл на нового живого врага. На РЕАЛЬНОЙ смене соперника
+    // модель «выезжает» сбоку (#1.5 — момент очевиден); иначе просто поднимаем
+    // правую модель, если она лежит после гибели прошлого соперника (#6).
     const live = focus.alive !== false && (focus.hp == null || focus.hp > 0);
-    if (live && fighters.right && fighters.right.alive === false) {
-      fighters.right.revive();
+    if (live && fighters.right && fighters.right.root) {
+      if (isSwitch) fighters.right.enterFromSide();
+      else if (fighters.right.alive === false) fighters.right.revive();
     }
   }
   if (focus.maxHp) showHP('right', focus.hp, focus.maxHp);
@@ -3207,10 +3397,23 @@ function fighterCard(info, teamLabel) {
   binfoBody.innerHTML = `<div class="finfo">${rows.join('')}
     <div class="finfo-block-title">Активные эффекты</div>
     ${effectsInfoHtml(effectsFor(info?.id))}
+    <div class="finfo-sections pinfo" data-fid="${esc(String(info?.id ?? ''))}"></div>
   </div>`;
   if (binfoCopyBtn) binfoCopyBtn.style.display = 'none';   // не бой — ссылку не копируем
   clearInterval(binfoTimer); binfoTimer = null; binfoId = null;
   binfoEl.classList.remove('hidden');
+  // характеристики/снаряжение/статистика игрока (#C3): подгружаем по charId.
+  // ИИ-бойцы (нечисловой id, напр. 'npc-2-1') пропускаем — публичной карточки нет.
+  const charId = Number(info?.id);
+  if (online && Number.isFinite(charId) && String(charId) === String(info?.id)) {
+    const host = binfoBody.querySelector(`.finfo-sections[data-fid="${charId}"]`);
+    if (host) {
+      host.innerHTML = '<div class="bi-empty">Загрузка…</div>';
+      api.playerInfo({ id: charId })
+        .then((p) => { if (host.isConnected) host.innerHTML = pinfoSectionsHtml(p) || ''; })
+        .catch(() => { if (host.isConnected) host.innerHTML = ''; });
+    }
+  }
 }
 
 /** «Инфо» у ника в шапке боя (своя плашка / сфокусированный соперник). */
@@ -3566,9 +3769,12 @@ function useElixir(i) {
   const cell = elixirBelt[i];
   if (!cell || (cell.qty != null && cell.qty <= 0)) return;
   // авторитетно: сервер берёт эликсир из ячейки пояса, списывает заряд и
-  // применяет эффект к выбранной в ростере цели (союзник/себя). Параметры —
-  // с сервера; клиент шлёт только номер ячейки и цель эффекта.
-  battle.useElixir({ slot: i, target: ui?.target ?? null });
+  // применяет эффект. Параметры — с сервера; клиент шлёт номер ячейки и цель.
+  // Цель имеет смысл лишь у свитков (ТЗ §A): исцеление→союзник, яд→враг,
+  // очищение→любой. Эликсиры применяются только на себя — цель не шлём.
+  const targeted = cell.kind === 'heal_scroll' || cell.kind === 'poison'
+    || cell.kind === 'cleanse';
+  battle.useElixir({ slot: i, target: targeted ? (ui?.target ?? null) : null });
   ui.log(`<b>${esc(battle.sides.left.name)}</b> выпивает «${esc(cell.name)}»…`);
 }
 

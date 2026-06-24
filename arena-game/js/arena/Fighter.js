@@ -262,6 +262,23 @@ export class Fighter {
     this.play('idle', { fade: 0.2, force: true });
   }
 
+  /**
+   * Появление соперника «сбоку» (#1.5): новый противник в мультибое быстро
+   * выезжает в свою позицию из-за края сцены со своей стороны — момент смены
+   * соперника становится очевидным. Поднимает бойца (как revive) и встаёт в idle.
+   */
+  enterFromSide() {
+    this._tweens.length = 0;          // оборвать прошлые твины (падение/слайд)
+    this.pivot.rotation.x = 0;
+    this.pivot.position.y = 0;
+    this.alive = true;
+    const dir = this.side === 'left' ? -1 : 1;
+    const fromX = this.basePos.x + dir * 3.4;   // за краем сцены со своей стороны
+    this.root.position.x = fromX;               // сразу за кадром — без подмигивания
+    this.play('idle', { fade: 0.15, force: true });
+    this._tweenPos(fromX, this.basePos.x, 0.42);
+  }
+
   /** Смерть: падение навзничь (процедурно, без отдельной анимации). */
   async die() {
     this.alive = false;

@@ -203,6 +203,7 @@ export class BattleUI {
         <button class="bui-end-banner bui-leave" type="button" title="Выход в локацию">
           <img class="bui-end-img" alt="" draggable="false">
         </button>
+        <div class="bui-end-drop hidden"></div>
       </div>`;
 
     this.stageEl.appendChild(wheel);
@@ -237,6 +238,7 @@ export class BattleUI {
       popups,
       end,
       endImg: end.querySelector('.bui-end-img'),
+      endDrop: end.querySelector('.bui-end-drop'),
       leave: end.querySelector('.bui-leave'),
     };
 
@@ -445,13 +447,23 @@ export class BattleUI {
     }
   }
 
-  /** Обновить «правую» колонку шапки под текущего сфокусированного соперника. */
-  setOpponent(info) {
+  /** Обновить «правую» колонку шапки под текущего сфокусированного соперника.
+   *  opts.switched — это РЕАЛЬНАЯ смена соперника: перезапускаем анимацию «въезда»
+   *  плашки, чтобы момент смены был заметен (#1.5). */
+  setOpponent(info, opts = {}) {
     if (!info) return;
     if (this.refs.name.right) this.refs.name.right.textContent = info.name ?? '';
     if (this.refs.lvl.right)
       this.refs.lvl.right.textContent = info.level != null ? info.level : '?';
     this.setEffects('right', fighterEffects(info));
+    if (opts.switched) {
+      const col = this.headEl.querySelector('.fighter-col.right');
+      if (col) {                       // снять/вернуть класс — рестарт CSS-анимации
+        col.classList.remove('switching');
+        void col.offsetWidth;
+        col.classList.add('switching');
+      }
+    }
   }
 
   /**
@@ -845,6 +857,21 @@ export class BattleUI {
     this._stopTick();
     this.refs.endImg.src = IMG(victory ? 'win' : 'lose');
     this.refs.endImg.alt = victory ? 'Победа' : 'Поражение';
+    // добыча (#1.7): список { glyph, label, value } — что выпало после боя
+    const drop = Array.isArray(handlers.drop) ? handlers.drop : [];
+    const dropEl = this.refs.endDrop;
+    if (dropEl) {
+      if (drop.length) {
+        dropEl.innerHTML = '<div class="bui-drop-title">Добыча</div>'
+          + '<div class="bui-drop-items">' + drop.map((d) =>
+            `<span class="bui-drop-item"><span class="bui-drop-ico">${d.glyph || '✦'}</span>`
+            + `<b>${d.value}</b><i>${d.label || ''}</i></span>`).join('') + '</div>';
+        dropEl.classList.remove('hidden');
+      } else {
+        dropEl.innerHTML = '';
+        dropEl.classList.add('hidden');
+      }
+    }
     this.refs.end.classList.remove('hidden');
     this.refs.leave.onclick = () => {
       this.refs.end.classList.add('hidden');

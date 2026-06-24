@@ -44,7 +44,17 @@
       "PowerShell($n = \\(Get-Command node -ErrorAction SilentlyContinue\\); if \\($n\\) { Set-Location \"C:\\\\Users\\\\andre\\\\Downloads\\\\new\\\\server\\\\mmorpg-local\\\\backend\"; node test-facing.mjs; \"---\"; node test-distribute.mjs } else { \"node not found\" })",
       "PowerShell(docker exec mmo-api node --input-type=module -e \"import { runSimulation } from '/app/src/battle/sim.js'; const r = await runSimulation\\({ battles: 30, maxTurns: 200, left: { count: 3, level: 10 }, right: { count: 2, level: 10 } }\\); console.log\\('NvN 3x2:', 'battles=', r.balance.winsLeft + r.balance.winsRight + r.balance.draws, 'avgTurns=', r.balance.avgTurns, 'avgSubTurns=', r.balance.avgSubTurns, 'timedOut=', r.balance.timedOut, 'strikes=', r.balance.totalStrikes\\);\")",
       "Bash(grep -l \"from './src/battle/engine.js'\\\\|battle/engine\" test-nvn.mjs test-effects.mjs test-consumables.mjs test-nvn-consumables.mjs)",
-      "Bash(grep -L \"engine.js\" test-nvn.mjs test-pvp.mjs test-f5.mjs)"
+      "Bash(grep -L \"engine.js\" test-nvn.mjs test-pvp.mjs test-f5.mjs)",
+      "Bash(cd /c/Users/andre/Downloads/new/server/mmorpg-local/backend/src && echo \"=== combatProfileFor / character_stats ===\" && grep -n \"combatProfileFor\\\\|character_stats\\\\|getCharacter\\\\|hp_max\\\\|equipped\" characters.js | head -40)",
+      "Bash(cd /c/Users/andre/Downloads/new/server/mmorpg-local && echo \"=== find schema sql files ===\" && find . -name \"*.sql\" | head && echo \"\" && echo \"=== character_stats table def ===\" && grep -rn \"character_stats\\\\|CREATE TABLE.*stats\\\\|battle_participants\\\\|CREATE TABLE battles\" backend/src/migrate.js | head -30)",
+      "Bash(sed -n '/CREATE TABLE.*character_stats/,/\\);/p' 30_game_schema.sql)",
+      "Bash(sed -n '/CREATE TABLE.*battle_participants/,/\\);/p' 30_game_schema.sql)",
+      "Bash(node --check server/mmorpg-local/backend/src/battle/manager.js)",
+      "Bash(node --check arena-game/js/main.js)",
+      "PowerShell($paths = @\\(\"$env:ProgramFiles\\\\nodejs\\\\node.exe\",\"$env:LOCALAPPDATA\\\\Programs\\\\nodejs\\\\node.exe\",\"$env:APPDATA\\\\npm\\\\node.exe\"\\); foreach \\($p in $paths\\){ if \\(Test-Path $p\\){ \"FOUND: $p\" } }; Get-Command node,nodejs,npm,docker -ErrorAction SilentlyContinue | Select-Object Name,Source)",
+      "PowerShell(cd C:\\\\Users\\\\andre\\\\Downloads\\\\new; docker run --rm -v \"${PWD}:/app\" -w /app node:20-alpine sh -c \"node --check server/mmorpg-local/backend/src/battle/manager.js && echo MANAGER_OK && node --check arena-game/js/main.js && echo MAIN_OK\")",
+      "PowerShell(Get-Command python,python3,py -ErrorAction SilentlyContinue)",
+      "PowerShell(\"---\")"
     ]
   }
 }
