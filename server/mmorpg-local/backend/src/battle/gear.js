@@ -55,6 +55,43 @@ export const expectedAllocFrac = (level) => Math.min(1, Math.max(0, (Number(leve
 // Вес слота в HP (сумма по всем доспехам = 1): нательное больше, мелочёвка меньше.
 const HP_WEIGHT = { legs: 0.15, chest: 0.22, boots: 0.08, mail: 0.22, bracers: 0.08, shoulders: 0.12, helmet: 0.13 };
 
+// Аффинити слотов к состязательным статам (какой слот «несёт» какой стат). СУММА веса
+// каждого стата по всем слотам нормируется к 1 → полный сет даёт ту же суммарную долю
+// шмота, что и раньше (баланс треугольника НЕ меняется), но предметы становятся
+// различимыми (у шлема — Точность/Сопр.Криту, у ботинок — Уклонение, и т.д.).
+const AFFINITY_RAW = {
+  weapon:    { accuracy: 2, crit: 3 },
+  helmet:    { accuracy: 2, critResist: 2 },
+  chest:     { defense: 3, block: 1 },
+  mail:      { defense: 2, block: 2, counter: 1 },
+  legs:      { defense: 2, dodge: 2 },
+  boots:     { dodge: 3 },
+  bracers:   { accuracy: 2, crit: 2 },
+  shoulders: { defense: 1, block: 1, counter: 2, critResist: 1 },
+};
+// нормировка по столбцам (для каждого стата сумма долей по слотам = 1)
+const SLOT_AFFINITY = (() => {
+  const col = {}; for (const k of CONTESTED) col[k] = 0;
+  for (const slot of SLOT_KEYS) for (const [k, w] of Object.entries(AFFINITY_RAW[slot] || {})) col[k] += w;
+  const out = {};
+  for (const slot of SLOT_KEYS) {
+    out[slot] = {};
+    for (const [k, w] of Object.entries(AFFINITY_RAW[slot] || {})) out[slot][k] = col[k] ? w / col[k] : 0;
+  }
+  return out;
+})();
+/** Суммарная доля шмота по стату для надетых слотов (полный сет → 1). */
+const gearShare = (stat, slots) => {
+  let sum = 0;
+  for (const slot of slots) sum += SLOT_AFFINITY[slot]?.[stat] || 0;
+  return sum;
+};
+// нейтральный профиль (среднее школ) — для «ориентировочных» характеристик на вещах
+const NEUTRAL = {};
+for (const key of [...CONTESTED, 'power', 'health', 'critPower', 'blockDmg']) {
+  NEUTRAL[key] = Math.round(((SCHOOLS.natisk[key] ?? 0) + (SCHOOLS.uklon[key] ?? 0) + (SCHOOLS.oplot[key] ?? 0)) / 3);
+}
+
 /**
  * Ожидаемая укомплектованность нормально прокачанного бойца на уровне level:
  * BASE + GEAR·(доля открытых слотов) + POINTS·(доля накопленных очков). Это эталон
@@ -78,7 +115,7 @@ export function genItem(slotKey, { school = 'natisk', level = 1, quality = 'blue
   const q = QUALITY_MULT[quality] ?? 1;
   const stats = {};
   for (const key of CONTESTED) {
-    const v = (s[key] ?? STAT_DEFAULTS[key]) * GEAR_FRAC * (1 / N_SLOTS) * q * lf;
+    const v = (s[key] ?? STAT_DEFAULTS[key]) * GEAR_FRAC * (SLOT_AFFINITY[slotKey]?.[key] || 0) * q * lf;
     if (v >= 0.5) stats[key] = Math.round(v);
   }
   if (slot.kind === 'weapon') {
@@ -89,6 +126,38 @@ export function genItem(slotKey, { school = 'natisk', level = 1, quality = 'blue
   return { slot: slotKey, label: slot.label, tier: gearTier(level), quality, school, stats };
 }
 
+/**
+ * «Ориентировочные» характеристики предмета по слоту ИГРЫ (для витрины магазина и
+ * рюкзака): нейтральный профиль (среднее школ) × аффинити слота. Фиксированные, не
+ * зависят от носителя; в бою вклад масштабируется реальной школой (composeFromEquipment).
+ * Возвращает плоский объект статов модели (accuracy/defense/health/power/…).
+ */
+export function gearItemStats(gameSlot, { level = 1, quality = 'blue', growth = DEFAULT_COEF.levelGrowth } = {}) {
+  const lf = levelFactor(level, growth);
+  const q = QUALITY_MULT[quality] ?? 1;
+  const out = {};
+  if (Number(gameSlot) === SHIELD_SLOT) {        // щит — танковость (бонус к блоку/защите)
+    out.block = Math.round(NEUTRAL.block * GEAR_FRAC * 0.5 * q * lf) + 4;
+    out.defense = Math.round(NEUTRAL.defense * GEAR_FRAC * 0.5 * q * lf) + 6;
+    return out;
+  }
+  if (Number(gameSlot) === AMULET_SLOT) {        // амулет — бонус крита/силы крита
+    out.crit = Math.round((NEUTRAL.crit || 0) * GEAR_FRAC * 0.5 * q * lf) + 2;
+    out.critPower = 8 * q;                        // +Сила Крита, %
+    return out;
+  }
+  const tri = GAME_SLOT_TO_TRI[Number(gameSlot)];
+  if (!tri) return out;
+  for (const key of CONTESTED) {
+    const v = (NEUTRAL[key] || 0) * GEAR_FRAC * (SLOT_AFFINITY[tri]?.[key] || 0) * q * lf;
+    if (v >= 0.5) out[key] = Math.round(v);
+  }
+  const slotMeta = SLOTS.find((sm) => sm.key === tri);
+  if (slotMeta?.kind === 'weapon') out.power = Math.round((NEUTRAL.power || 0) * (1 - POW_BASE) * lf);
+  else out.health = Math.round((NEUTRAL.health || 0) * (1 - HP_BASE) * (HP_WEIGHT[tri] || 0) * lf);
+  return out;
+}
+
 // Карта слотов экипировки игры (SLOT_META.id) → слоты треугольника. Щит (8) и амулет
 // (10) — не из восьмёрки: щит даёт бонус Оплота (ниже), амулет пока не учитываем.
 export const GAME_SLOT_TO_TRI = {
@@ -97,6 +166,7 @@ export const GAME_SLOT_TO_TRI = {
 };
 export const SHIELD_SLOT = 8;       // offhand «Щит» — уклон в Оплот
 export const WEAPON_SLOT = 7;       // mainhand «Оружие»
+export const AMULET_SLOT = 10;      // амулет — небольшой бонус крита
 export const QUALITY_BY_RANK = ['gray', 'green', 'blue', 'purple', 'orange'];  // quality 1..5
 
 /**
@@ -106,12 +176,13 @@ export const QUALITY_BY_RANK = ['gray', 'green', 'blue', 'purple', 'orange'];  /
  */
 export function composeFromEquipment(school, { level = 1, items = [], allocFrac = null, growth = DEFAULT_COEF.levelGrowth } = {}) {
   const equipped = new Set();
-  let qSum = 0, qN = 0, shield = false, weapon = false;
+  let qSum = 0, qN = 0, shield = false, weapon = false, amulet = false;
   for (const it of items || []) {
     const tri = GAME_SLOT_TO_TRI[it.slot];
     if (tri) equipped.add(tri);
     if (it.slot === SHIELD_SLOT) shield = true;
     if (it.slot === WEAPON_SLOT) weapon = true;
+    if (it.slot === AMULET_SLOT) amulet = true;
     if (it.quality != null) { qSum += Math.min(5, Math.max(1, Number(it.quality) || 1)); qN++; }
   }
   const quality = QUALITY_BY_RANK[Math.round(qN ? qSum / qN : 3) - 1] || 'blue';
@@ -124,7 +195,11 @@ export function composeFromEquipment(school, { level = 1, items = [], allocFrac 
   } else if (weapon) {               // двуручное: больше Мощи
     s.power = Math.max(1, Math.round(s.power * 1.10));
   }
-  return { stats: s, statNorm: built.statNorm, school, equippedCount: equipped.size, quality, shield };
+  if (amulet) {                      // амулет — бонус крита/силы крита
+    s.crit = Math.max(1, Math.round(s.crit * 1.12));
+    s.critPower = (s.critPower || 0) + 10;
+  }
+  return { stats: s, statNorm: built.statNorm, school, equippedCount: equipped.size, quality, shield, amulet };
 }
 
 /**
@@ -152,6 +227,8 @@ export function composeBuild(school, {
     const key = m.key;
     if (m.pct) { out[key] = s[key] ?? STAT_DEFAULTS[key]; continue; }       // % — как в профиле
     if (CONTESTED.includes(key)) {
+      // БОЙ: равномерная доля шмота (баланс проверен на 1–15). Аффинити слотов — только
+      // для ВИТРИНЫ (gearItemStats), чтобы предметы различались, не трогая баланс.
       const frac = BASE_FRAC + GEAR_FRAC * equippedFrac * q + POINTS_FRAC * alloc;
       out[key] = Math.max(1, Math.round((s[key] ?? STAT_DEFAULTS[key]) * frac * lf));
       continue;

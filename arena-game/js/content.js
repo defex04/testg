@@ -57,7 +57,8 @@ export const LOCATIONS = {
     actions: [
       { label: 'Охота на разбойника', hunt: true },
       { label: 'Охота на шайку разбойников', hunt: true, npc: 2 },
-      { label: 'Магазин эликсиров', shop: true },
+      { label: 'Магазин эликсиров', shop: 'elixir' },
+      { label: 'Магазин экипировки', shop: 'gear' },
       { label: 'Испить живой воды', drink: 'livingWater' },
       { label: 'Подняться в замок', soon: true },
       { label: 'Поселение Зеленое', goto: 'derevna' },

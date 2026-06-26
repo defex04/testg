@@ -715,7 +715,7 @@ function renderLocationActions(loc) {
       `<span class="lc-ico">${a.shop ? ICON_SHOP : (a.hunt ? ICON_HUNT : ICON_ACT)}</span><span>${esc(a.label)}</span>`,
       () => {
         if (a.hunt) startBattle(a.npc);   // a.npc — конкретная цель (напр. шайка), опц.
-        else if (a.shop) openShop();
+        else if (a.shop) openShop(a.shop === 'gear' ? 'gear' : 'elixir');
         else if (a.drink === 'livingWater') drinkLivingWater();
         else showToast(`«${a.label}» — заглушка: модуль действий подключается отдельно`);
       })));
@@ -750,7 +750,25 @@ const SHOP_ERRORS = {
 let shopCharLevel = 1;          // уровень игрока для блокировки покупок не по уровню
 const SHOP_EMOJI = { health: '🧪', power: '⚗️', mana: '🔮', blood: '🩸',
   escape: '🏃', poison: '☠️', heal_scroll: '🩹', cleanse: '🌀', elixir: '⚗️',
-  weapon: '⚔️', armor: '🛡️' };
+  weapon: '⚔️', armor: '🛡️', amulet: '📿' };
+
+// характеристики предмета (модель) → краткая строка для витрины/рюкзака
+const GEAR_STAT_LABEL = { power: 'Мощь', health: 'HP', accuracy: 'Точность',
+  dodge: 'Уклонение', crit: 'Крит', critResist: 'Сопр.Криту', defense: 'Защита',
+  block: 'Блок', counter: 'Контратака', critPower: 'Сила Крита', blockDmg: 'Блок урона' };
+const GEAR_STAT_ORDER = ['power', 'health', 'accuracy', 'dodge', 'crit', 'critPower',
+  'critResist', 'defense', 'block', 'counter', 'blockDmg'];
+const GEAR_PCT_STATS = new Set(['critPower', 'blockDmg']);
+function gearStatsText(stats) {
+  if (!stats || typeof stats !== 'object') return '';
+  const parts = [];
+  for (const k of GEAR_STAT_ORDER) {
+    const v = stats[k];
+    if (v == null || v === 0) continue;
+    parts.push(`${GEAR_STAT_LABEL[k] || k} +${Math.round(v)}${GEAR_PCT_STATS.has(k) ? '%' : ''}`);
+  }
+  return parts.join(' · ');
+}
 
 function shopErrorText(e) {
   return SHOP_ERRORS[e?.message] || ('Магазин: ' + (e?.message || 'ошибка'));
@@ -760,19 +778,24 @@ function shopIcon(kind) {
   return SHOP_EMOJI[kind] || SHOP_EMOJI.elixir;
 }
 
-async function openShop() {
+async function openShop(kind = 'elixir') {
   if (!online) {
     showToast('Магазин доступен только онлайн');
     return;
   }
   shopOpen = true;
   locBody.classList.add('shop-open');
-  locSceneTitle.textContent = 'Магазин';
+  shopKind = kind === 'gear' ? 'gear' : 'elixir';
+  shopTabs = shopKind === 'gear' ? GEAR_TABS : ELIXIR_TABS;
+  shopTab = shopTabs[0].id;
+  locSceneTitle.textContent = shopKind === 'gear' ? 'Магазин экипировки' : 'Магазин эликсиров';
   locActions.innerHTML = '<div class="shop-loading">Загрузка товаров...</div>';
   try {
     const data = await api.shop();
     shopCharLevel = Number(data.charLevel) || PLAYER.level || 1;
-    renderShop(data.items || []);
+    // показываем только товары этого магазина (по kinds его вкладок)
+    const allowed = new Set(shopTabs.flatMap((t) => t.kinds));
+    renderShop((data.items || []).filter((it) => allowed.has(it.kind)));
   } catch (e) {
     showToast(shopErrorText(e));
     renderLocationActions(LOCATIONS[currentLoc]);
@@ -780,8 +803,8 @@ async function openShop() {
 }
 
 // Вкладки магазина по категориям (ТЗ #3); свитки сгруппированы в одну вкладку.
-const SHOP_TABS = [
-  { id: 'gear',   name: 'Экипировка', kinds: ['weapon', 'armor'] },
+// два РАЗДЕЛЬНЫХ магазина: эликсиры и экипировка (со своими категориями-вкладками)
+const ELIXIR_TABS = [
   { id: 'health', name: 'Жизнь',  kinds: ['health'] },
   { id: 'power',  name: 'Мощь',   kinds: ['power'] },
   { id: 'mana',   name: 'Мана',   kinds: ['mana'] },
@@ -789,12 +812,19 @@ const SHOP_TABS = [
   { id: 'scroll', name: 'Свитки', kinds: ['poison', 'heal_scroll', 'cleanse'] },
   { id: 'escape', name: 'Побег',  kinds: ['escape'] },
 ];
+const GEAR_TABS = [
+  { id: 'g-armor',  name: 'Вещи',    kinds: ['armor'] },
+  { id: 'g-weapon', name: 'Оружие',  kinds: ['weapon'] },
+  { id: 'g-amulet', name: 'Амулеты', kinds: ['amulet'] },
+];
+let shopKind = 'elixir';        // 'elixir' | 'gear' — какой магазин открыт
+let shopTabs = ELIXIR_TABS;     // активный набор вкладок
 let shopItems = [];
 let shopTab = 'health';
 let shopSearch = '';
 let shopAvailOnly = false;
 let shopListEl = null;
-const tabKinds = (id) => (SHOP_TABS.find((t) => t.id === id) || { kinds: [] }).kinds;
+const tabKinds = (id) => (shopTabs.find((t) => t.id === id) || { kinds: [] }).kinds;
 
 function renderShop(items) {
   shopItems = items || [];
@@ -802,8 +832,8 @@ function renderShop(items) {
   shopAvailOnly = false;
   // активная вкладка пуста (нет таких товаров) → берём первую непустую
   if (!shopItems.some((it) => tabKinds(shopTab).includes(it.kind))) {
-    const first = SHOP_TABS.find((t) => shopItems.some((it) => t.kinds.includes(it.kind)));
-    shopTab = first ? first.id : 'health';
+    const first = shopTabs.find((t) => shopItems.some((it) => t.kinds.includes(it.kind)));
+    shopTab = first ? first.id : shopTabs[0].id;
   }
   locActions.innerHTML = '';
   const panel = document.createElement('div');
@@ -828,7 +858,7 @@ function renderShop(items) {
   // вкладки-категории (ТЗ #3)
   const tabs = document.createElement('div');
   tabs.className = 'shop-tabs';
-  for (const t of SHOP_TABS) {
+  for (const t of shopTabs) {
     if (!shopItems.some((it) => t.kinds.includes(it.kind))) continue;
     const b = makeButton('shop-tab' + (t.id === shopTab ? ' active' : ''), esc(t.name), () => {
       shopTab = t.id;
@@ -874,7 +904,7 @@ function shopItemRow(it) {
     <div class="shop-ico q${q}">${esc(shopIcon(it.kind))}</div>
     <div class="shop-info">
       <div class="shop-name">${esc(it.name)}</div>
-      <div class="shop-desc">${esc(it.description || '')}</div>
+      <div class="shop-desc">${esc(it.stats ? gearStatsText(it.stats) : (it.description || ''))}</div>
       <div class="shop-price">${Number(it.price) || 0} меди
         <span class="shop-lvl${locked ? ' lock' : ''}">ур. ${levelReq}</span></div>
     </div>
@@ -4164,6 +4194,8 @@ function renderInvPreview(row) {
     if (reserved) rows.push(['В поясе', '×' + reserved]);
   } else {
     if (slotName) rows.push(['Слот', SLOT_META[slotName]?.name || slotName]);
+    const gs = gearStatsText(stats);                 // характеристики предмета (модель)
+    if (gs) rows.push(['Характеристики', gs]);
     rows.push(['В рюкзаке', '×' + owned]);
   }
 

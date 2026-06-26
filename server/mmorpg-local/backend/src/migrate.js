@@ -1,4 +1,5 @@
 import { adminPg } from './db.js';
+import { gearItemStats, QUALITY_BY_RANK } from './battle/gear.js';
 
 const STATEMENTS = [
   // Квесты: имя, описание, картинка, уровень, активность
@@ -291,27 +292,29 @@ STATEMENTS.push(
 // считает composeFromEquipment); base_stats заданы и для старого режима. id 300..344.
 // ---------------------------------------------------------------------------
 const GEAR_COLORS = ['серый', 'зелёный', 'синий', 'фиолетовый', 'оранжевый'];
-// [название, slot игры (SLOT_META.id), type(1 оружие/2 броня), level_req]
+// [название, slot игры (SLOT_META.id), type(1 оружие/2 броня/5 амулет), level_req]
 const GEAR_PIECES = [
   ['Поножи', 3, 2, 1], ['Куртка', 1, 2, 1],          // 1 ур.
   ['Оружие', 7, 1, 2], ['Щит', 8, 2, 2],             // 2 ур.
   ['Ботинки', 4, 2, 3], ['Кольчуга', 9, 2, 3],       // 3 ур.
   ['Наручи', 5, 2, 4], ['Плечи', 6, 2, 4],           // 4 ур.
-  ['Шлем', 2, 2, 5],                                  // 5 ур.
+  ['Шлем', 2, 2, 5], ['Амулет', 10, 5, 5],           // 5 ур.
 ];
 let gearId = 300;
 for (const [piece, slot, type, lvl] of GEAR_PIECES) {
   for (let q = 1; q <= 5; q++) {
     const id = gearId++;
     const name = `${piece} · ${GEAR_COLORS[q - 1]}`;
-    const stats = type === 1
-      ? { damage: [40 + q * 15 + lvl * 10, 70 + q * 20 + lvl * 15] }
-      : { hp: 80 + q * 40 + lvl * 30 };
+    // характеристики модели на предмете (ориентировочно — нейтральный профиль × аффинити слота)
+    const stats = gearItemStats(slot, { level: lvl, quality: QUALITY_BY_RANK[q - 1] });
     STATEMENTS.push(
       `INSERT INTO item_templates (id, name, type, slot, quality, level_req, base_stats, icon, price, sellable, stackable)
        VALUES (${id}, ${sq(name)}, ${type}, ${slot}, ${q}, ${lvl},
          ${sq(JSON.stringify(stats))}::jsonb, ${sq('gear' + piece)}, ${50 * q * lvl}, TRUE, FALSE)
-       ON CONFLICT (id) DO NOTHING`);
+       ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, type = EXCLUDED.type,
+         slot = EXCLUDED.slot, quality = EXCLUDED.quality, level_req = EXCLUDED.level_req,
+         base_stats = EXCLUDED.base_stats, icon = EXCLUDED.icon, price = EXCLUDED.price,
+         sellable = EXCLUDED.sellable, version = item_templates.version + 1`);
   }
 }
 

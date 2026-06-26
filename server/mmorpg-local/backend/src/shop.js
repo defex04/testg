@@ -39,13 +39,14 @@ function describeGear(type, slot) {
 
 function product(row) {
   const type = Number(row.type);
-  if (type === 1 || type === 2) {                 // экипировка (оружие/броня) под треугольник
+  if (type === 1 || type === 2 || type === 5) {   // экипировка: оружие/броня/амулет
     return {
       templateId: Number(row.id), name: row.name, icon: row.icon,
       price: Number(row.price) || 0, quality: Number(row.quality) || 1,
       levelReq: Number(row.level_req) || 1,
-      kind: type === 1 ? 'weapon' : 'armor',
+      kind: type === 1 ? 'weapon' : type === 5 ? 'amulet' : 'armor',
       slot: row.slot != null ? Number(row.slot) : null,
+      stats: row.base_stats || null,              // характеристики предмета (модель) — для витрины
       description: describeGear(type, row.slot),
     };
   }
@@ -77,7 +78,7 @@ async function shopProducts(client = game) {
   const { rows } = await client.query(
     `SELECT id, name, icon, base_stats, price, quality, level_req, type, slot
        FROM item_templates
-      WHERE type IN (1, 2, 4) AND sellable = TRUE AND price > 0
+      WHERE type IN (1, 2, 4, 5) AND sellable = TRUE AND price > 0
       ORDER BY type, level_req, quality, id`);
   return rows.map(product);
 }
@@ -103,7 +104,7 @@ export async function buyShopItem(charId, templateId, quantity) {
       `SELECT id, name, icon, type, slot, stackable, base_stats, price, sellable,
               quality, level_req
          FROM item_templates WHERE id = $1`, [tplId])).rows[0];
-    if (!row || ![1, 2, 4].includes(Number(row.type)) || row.sellable === false) {
+    if (!row || ![1, 2, 4, 5].includes(Number(row.type)) || row.sellable === false) {
       throw err('not_for_sale', 404);
     }
     const price = Number(row.price) || 0;
