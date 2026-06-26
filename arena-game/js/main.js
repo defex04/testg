@@ -716,6 +716,7 @@ function renderLocationActions(loc) {
       () => {
         if (a.hunt) startBattle(a.npc);   // a.npc — конкретная цель (напр. шайка), опц.
         else if (a.shop) openShop();
+        else if (a.drink === 'livingWater') drinkLivingWater();
         else showToast(`«${a.label}» — заглушка: модуль действий подключается отдельно`);
       })));
 
@@ -723,6 +724,20 @@ function renderLocationActions(loc) {
     makeButton('npc-chip',
       `<span class="npc-ava">${esc(n.name.trim()[0])}</span><span>${esc(n.name)}</span>`,
       () => showToast(`Диалог с «${n.name}» — заглушка: модуль NPC подключается отдельно`))));
+}
+
+/** Испить живой воды: бафф +10% к HP и урону на 10 минут (применяется в бою/панели). */
+async function drinkLivingWater() {
+  if (!online) { showToast('Действие доступно только онлайн'); return; }
+  try {
+    const r = await api.drinkWater();
+    const mins = Math.round((r.buff?.secs || 600) / 60);
+    showToast(`Живая вода: +${r.buff?.hpPct || 10}% к HP и урону на ${mins} мин`);
+    paramsData = null;                 // статы изменились — вкладка «Параметры» перетянет
+    if (invCategory === 'params' && dressingEl && !dressingEl.classList.contains('hidden')) refreshParams();
+  } catch (e) {
+    showToast('Не удалось испить: ' + (e.message || ''));
+  }
 }
 
 const SHOP_ERRORS = {
@@ -4100,9 +4115,18 @@ function renderParamsPanel(el) {
     m[k] == null ? '—' : (pctKeys.has(k) ? `${Math.round(m[k])}%` : Math.round(m[k])))).join('');
   const a = d.attrs || {};
   const fp = Number(d.freePoints) || 0;
+  const buff = d.buff && d.buff.active
+    ? `<div class="pinfo-row" style="color:#8fd089"><span>💧 Живая вода</span>
+        <b>+${d.buff.hpPct || 10}% HP/урон · ${Math.ceil((d.buff.remainSec || 0) / 60)} мин</b></div>` : '';
+  // урон за удар выводим из Мощи (сервер: урон = Мощь × powerToDamage 0.10), ±15% разброс
+  const dmg = Math.round((Number(m.power) || 0) * 0.10);
+  const dmgRow = `<div class="pinfo-row" style="color:var(--gold-bright)">
+      <span>⚔ Урон за удар</span><b>≈ ${dmg} (${Math.round(dmg * 0.85)}–${Math.round(dmg * 1.15)})</b></div>`;
   el.innerHTML = `
     <div class="pinfo-sec">
       <div class="pinfo-sec-title">Параметры · ${esc(SCHOOL[d.school] || '—')}</div>
+      ${dmgRow}
+      ${buff}
       <div class="pinfo-grid">${cells}</div></div>
     <div class="pinfo-sec">
       <div class="pinfo-sec-title">Распределение очков</div>

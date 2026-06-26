@@ -115,6 +115,7 @@ export async function getCharacter(id) {
   const model = await combatModelFor(ch.id, ch.level).catch(() => null);
   ch.school = model ? model.school : null;
   ch.params = model ? model.stats : null;
+  ch.buff = await livingWaterStatus(ch.id).catch(() => ({ active: false }));
   return ch;
 }
 
@@ -177,8 +178,37 @@ export function schoolFromStats(s) {
  * ШКОЛУ, см. schoolFromStats), а укомплектованность/качество — из надетых предметов.
  * Возвращает форму дефа бойца движка: { hp, stats, statNorm, school }.
  */
+// «Живая вода»: бафф вне боя на 10 минут реального времени, +10% к HP и урону (Мощи).
+// Хранится в Redis с TTL (сам истекает); применяется в combatModelFor — значит и в
+// панели «Параметры», и в живом бою. Повторное «испить» сбрасывает таймер на 10 мин.
+const LIVING_WATER_SEC = 600;
+const LIVING_WATER_PCT = 10;            // +10%
+const lwKey = (id) => `char:${id}:buff:livingwater`;
+
+/** Испить живой воды: ставит/обновляет бафф на 10 минут. */
+export async function drinkLivingWater(charId) {
+  const expiresAt = Date.now() + LIVING_WATER_SEC * 1000;
+  await redis.set(lwKey(charId), String(expiresAt), { EX: LIVING_WATER_SEC });
+  return { ok: true, buff: { kind: 'livingWater', hpPct: LIVING_WATER_PCT,
+    dmgPct: LIVING_WATER_PCT, secs: LIVING_WATER_SEC, expiresAt } };
+}
+
+/** Статус баффа: { active, remainSec } по TTL ключа в Redis. */
+export async function livingWaterStatus(charId) {
+  const ttl = await redis.ttl(lwKey(charId)).catch(() => -2);
+  return ttl > 0
+    ? { active: true, kind: 'livingWater', hpPct: LIVING_WATER_PCT, dmgPct: LIVING_WATER_PCT, remainSec: ttl }
+    : { active: false };
+}
+
+/** Множитель активных вне-боевых баффов к HP/Мощи (сейчас только «живая вода»). */
+async function buffMult(charId) {
+  const s = await livingWaterStatus(charId);
+  return s.active ? 1 + LIVING_WATER_PCT / 100 : 1;
+}
+
 export async function combatModelFor(charId, level) {
-  const [statRow, eq] = await Promise.all([
+  const [statRow, eq, mult] = await Promise.all([
     game.query(`SELECT str, agi, vit FROM character_stats WHERE character_id = $1`, [charId])
       .then((q) => q.rows[0]),
     game.query(
@@ -186,9 +216,14 @@ export async function combatModelFor(charId, level) {
          JOIN item_templates t ON t.id = i.template_id
         WHERE i.owner_type = 2 AND i.owner_id = $1 AND i.status = 1 AND t.slot IS NOT NULL`,
       [charId]).then((q) => q.rows),
+    buffMult(charId),
   ]);
   const school = schoolFromStats(statRow);
   const built = composeFromEquipment(school, { level: Number(level) || 1, items: eq });
+  if (mult !== 1) {                     // «живая вода»: +10% к HP и Мощи (→ +10% урона)
+    built.stats.health = Math.max(1, Math.round(built.stats.health * mult));
+    built.stats.power = Math.max(1, Math.round(built.stats.power * mult));
+  }
   return { hp: built.stats.health, stats: built.stats, statNorm: built.statNorm,
            school, damage: [1, 1] };
 }
@@ -325,6 +360,15 @@ export function characterRoutes(app, authed) {
       const out = await allocateStat(req.session.character_id,
         String(req.body.attr), Number(req.body.amount) || 1);
       res.json(out);
+    } catch (e) {
+      res.status(e.status || 500).json({ error: e.message || 'error' });
+    }
+  });
+
+  // испить живой воды: бафф +10% HP/урона на 10 минут (вне боя, действие локации)
+  app.post('/api/character/drink', authed, async (req, res) => {
+    try {
+      res.json(await drinkLivingWater(req.session.character_id));
     } catch (e) {
       res.status(e.status || 500).json({ error: e.message || 'error' });
     }
