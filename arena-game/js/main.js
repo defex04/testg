@@ -734,7 +734,8 @@ const SHOP_ERRORS = {
 };
 let shopCharLevel = 1;          // уровень игрока для блокировки покупок не по уровню
 const SHOP_EMOJI = { health: '🧪', power: '⚗️', mana: '🔮', blood: '🩸',
-  escape: '🏃', poison: '☠️', heal_scroll: '🩹', cleanse: '🌀', elixir: '⚗️' };
+  escape: '🏃', poison: '☠️', heal_scroll: '🩹', cleanse: '🌀', elixir: '⚗️',
+  weapon: '⚔️', armor: '🛡️' };
 
 function shopErrorText(e) {
   return SHOP_ERRORS[e?.message] || ('Магазин: ' + (e?.message || 'ошибка'));
@@ -751,7 +752,7 @@ async function openShop() {
   }
   shopOpen = true;
   locBody.classList.add('shop-open');
-  locSceneTitle.textContent = 'Магазин эликсиров';
+  locSceneTitle.textContent = 'Магазин';
   locActions.innerHTML = '<div class="shop-loading">Загрузка товаров...</div>';
   try {
     const data = await api.shop();
@@ -765,6 +766,7 @@ async function openShop() {
 
 // Вкладки магазина по категориям (ТЗ #3); свитки сгруппированы в одну вкладку.
 const SHOP_TABS = [
+  { id: 'gear',   name: 'Экипировка', kinds: ['weapon', 'armor'] },
   { id: 'health', name: 'Жизнь',  kinds: ['health'] },
   { id: 'power',  name: 'Мощь',   kinds: ['power'] },
   { id: 'mana',   name: 'Мана',   kinds: ['mana'] },
@@ -1996,19 +1998,14 @@ function pinfoSectionsHtml(p) {
   const statCell = (label, val) =>
     `<div class="pinfo-stat"><i>${label}</i><b>${val}</b></div>`;
   let html = '';
-  if (p.stats || p.combat) {
-    const s = p.stats || {};
-    const c = p.combat || {};
-    const cells = [];
-    if (p.stats) cells.push(
+  if (p.stats) {                        // только базовые АТРИБУТЫ (задают школу); бой — в «Параметрах»
+    const s = p.stats;
+    const cells = [
       statCell('Сила', s.str), statCell('Ловкость', s.agi), statCell('Выносл.', s.vit),
-      statCell('Интел.', s.intel), statCell('Мудрость', s.wis));
-    if (p.combat) cells.push(
-      statCell('Здоровье', c.hp),
-      statCell('Урон', `${c.dmgMin}–${c.dmgMax}`),
-      statCell('Крит', pct(c.crit)), statCell('Уворот', pct(c.dodge)));
+      statCell('Интел.', s.intel), statCell('Мудрость', s.wis),
+    ];
     html += `<div class="pinfo-sec">
-      <div class="pinfo-sec-title">Характеристики</div>
+      <div class="pinfo-sec-title">Атрибуты</div>
       <div class="pinfo-grid">${cells.join('')}</div></div>`;
   }
   if (p.params) {                       // модельные «ПАРАМЕТРЫ» (треугольник) + школа
@@ -2079,7 +2076,8 @@ async function openPlayerInfo(peer) {
   }
   binfoTitle.textContent = p.name;
   const self = String(p.id) === String(PLAYER.id);
-  const sectionsHtml = pinfoSectionsHtml(p);   // характеристики · снаряжение · статистика
+  const sectionsHtml = pinfoSectionsHtml(p);   // атрибуты · параметры · снаряжение · статистика
+  // распределение очков живёт во вкладке «Параметры» рюкзака; здесь карточка только показывает
 
   const actionsHtml = self ? '' : `
       <div class="pinfo-actions">
@@ -3873,9 +3871,10 @@ const dressingSide = 'left';   // одевать можно только себ�
 
 // Рюкзак: категория (вещи/эликсиры/разное), выбранная ячейка-превью и выбранная
 // ячейка пояса (для адресной вставки эликсира — #4).
-let invCategory = 'gear';            // 'gear' | 'elixir' | 'misc'
+let invCategory = 'gear';            // 'gear' | 'elixir' | 'misc' | 'params'
 let selectedInvId = null;            // id строки рюкзака, открытой в превью
 let selectedBeltSlot = null;         // выбранная ячейка пояса (вставить эликсир сюда)
+let paramsData = null;               // кеш /api/me для вкладки «Параметры» (статы/школа/очки)
 
 // вкладки категорий рюкзака
 invTabsEl?.querySelectorAll('.inv-tab').forEach((b) => {
@@ -3883,9 +3882,15 @@ invTabsEl?.querySelectorAll('.inv-tab').forEach((b) => {
     invCategory = b.dataset.cat;
     selectedInvId = null;            // смена категории закрывает превью
     selectedSlot = null;             // и снимает подсветку слота куклы
-    renderInventory();
+    if (invCategory === 'params') refreshParams(); else renderInventory();
   });
 });
+
+/** Обновить данные вкладки «Параметры» (статы/школа/очки) и перерисовать рюкзак. */
+async function refreshParams() {
+  try { paramsData = await api.me(); } catch (e) { paramsData = null; }
+  renderInventory();
+}
 
 // Сворачивание Mini App / гашение экрана: явно гасим WebGL-циклы (арена +
 // примерочная), чтобы фоновая вкладка не жгла GPU/батарею. На возврате
@@ -4028,6 +4033,17 @@ function renderInventory() {
   invTabsEl?.querySelectorAll('.inv-tab').forEach((b) =>
     b.classList.toggle('active', b.dataset.cat === effCat));
 
+  // вкладка «Параметры»: вместо сетки рисуем панель статов/школы/распределения
+  const paramsEl = $('inv-params');
+  if (effCat === 'params') {
+    invGridEl.classList.add('hidden');
+    invPreviewEl?.classList.add('hidden');
+    if (paramsEl) { paramsEl.classList.remove('hidden'); renderParamsPanel(paramsEl); }
+    return;
+  }
+  if (paramsEl) paramsEl.classList.add('hidden');
+  invGridEl.classList.remove('hidden');
+
   // 0 шт. в рюкзаке не показываем: эликсир, целиком надетый в пояс, исчезает из
   // сетки рюкзака (его «свободный» остаток 0) — пустые квадратики не нужны (ТЗ #10)
   const shown = rows.filter((r) => r.meta.category === effCat
@@ -4063,6 +4079,48 @@ function renderInventory() {
     invGridEl.appendChild(cell);
   }
   renderInvPreview(shown.find((r) => r.id === selectedInvId) || null);
+}
+
+/** Панель вкладки «Параметры»: 14 модельных статов + школа + распределение очков. */
+function renderParamsPanel(el) {
+  const d = paramsData;
+  if (!d) { el.innerHTML = '<div class="inv-empty">Загрузка…</div>'; return; }
+  const SCHOOL = { natisk: 'Натиск', uklon: 'Уклон', oplot: 'Оплот' };
+  const m = d.params || {};
+  const order = [
+    ['power', 'Мощь'], ['health', 'Здоровье'], ['mana', 'Мана'], ['rage', 'Ярость'],
+    ['initiative', 'Инициатива'], ['defense', 'Защита'], ['accuracy', 'Точность'],
+    ['dodge', 'Уклонение'], ['crit', 'Крит'], ['critPower', 'Сила Крита'],
+    ['critResist', 'Сопр. Криту'], ['block', 'Блок'], ['blockDmg', 'Блок урона'],
+    ['counter', 'Контратака'],
+  ];
+  const pctKeys = new Set(['critPower', 'blockDmg']);
+  const stat = (label, val) => `<div class="pinfo-stat"><i>${label}</i><b>${val}</b></div>`;
+  const cells = order.map(([k, label]) => stat(label,
+    m[k] == null ? '—' : (pctKeys.has(k) ? `${Math.round(m[k])}%` : Math.round(m[k])))).join('');
+  const a = d.attrs || {};
+  const fp = Number(d.freePoints) || 0;
+  el.innerHTML = `
+    <div class="pinfo-sec">
+      <div class="pinfo-sec-title">Параметры · ${esc(SCHOOL[d.school] || '—')}</div>
+      <div class="pinfo-grid">${cells}</div></div>
+    <div class="pinfo-sec">
+      <div class="pinfo-sec-title">Распределение очков</div>
+      <div class="pinfo-grid">
+        ${stat('Сила', a.str ?? 0)}${stat('Ловкость', a.agi ?? 0)}${stat('Выносл.', a.vit ?? 0)}</div>
+      <div class="pinfo-row" style="margin-top:6px"><span>Свободных очков</span><b>${fp}</b></div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">
+        <button type="button" class="bi-join-btn" data-alloc="str"${fp < 1 ? ' disabled' : ''}>+Сила → Натиск</button>
+        <button type="button" class="bi-join-btn" data-alloc="agi"${fp < 1 ? ' disabled' : ''}>+Ловкость → Уклон</button>
+        <button type="button" class="bi-join-btn" data-alloc="vit"${fp < 1 ? ' disabled' : ''}>+Выносл. → Оплот</button>
+      </div></div>`;
+  el.querySelectorAll('[data-alloc]').forEach((b) => {
+    b.addEventListener('click', async () => {
+      if (fp < 1) return;
+      try { await api.allocate(b.dataset.alloc, 1); await refreshParams(); }
+      catch (e) { showToast('Не удалось распределить: ' + (e.message || '')); }
+    });
+  });
 }
 
 /** Превью выбранного предмета: иконка, инфо, кнопка действия (#7). */
@@ -4153,6 +4211,7 @@ async function openDressing() {
   } finally {
     dressingBusy = false;
     renderDressingUI();
+    if (invCategory === 'params') refreshParams();   // открыта вкладка «Параметры» — свежие статы
   }
 }
 

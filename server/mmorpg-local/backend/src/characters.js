@@ -271,7 +271,7 @@ export async function publicInfo({ id, name }) {
         WHERE i.owner_type = 2 AND i.owner_id = $1 AND i.status = 1
         ORDER BY t.slot`, [charId]).then((q) => q.rows),
     game.query(
-      `SELECT str, agi, vit, intel, wis FROM character_stats WHERE character_id = $1`,
+      `SELECT str, agi, vit, intel, wis, free_points FROM character_stats WHERE character_id = $1`,
       [charId]).then((q) => q.rows[0] || null),
     combatProfileFor(charId, start).catch(() => null),
     combatModelFor(charId, r.level).catch(() => null),
@@ -310,6 +310,7 @@ export async function publicInfo({ id, name }) {
     // модельные характеристики (экран «ПАРАМЕТРЫ»): школа треугольника + 14 статов
     school: modelRow ? modelRow.school : null,
     params: modelRow ? modelRow.stats : null,
+    freePoints: statRow ? Number(statRow.free_points) || 0 : 0,
   };
 }
 

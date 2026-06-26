@@ -63,7 +63,15 @@
       "PowerShell(docker run --rm -v \"C:\\\\Users\\\\andre\\\\Downloads\\\\new\\\\server\\\\mmorpg-local\\\\backend:/app\" -w /app node:20-alpine node test-gear.mjs)",
       "PowerShell(docker run --rm -v \"C:\\\\Users\\\\andre\\\\Downloads\\\\new\\\\server\\\\mmorpg-local\\\\backend:/app\" -w /app node:20-alpine sh -c 'for f in src/battle/stats.js src/battle/engine.js src/battle/gear.js src/battle/sim.js src/battle/manager.js src/characters.js src/migrate.js; do node --check \"$f\" && echo \"OK $f\" || echo \"FAIL $f\"; done')",
       "PowerShell(docker run --rm -v \"C:\\\\Users\\\\andre\\\\Downloads\\\\new\\\\server\\\\mmorpg-local\\\\backend:/app\" -w /app node:20-alpine sh -c \"node --check src/battle/stats.js && node --check src/battle/engine.js && node --check src/battle/gear.js && node --check src/battle/sim.js && node --check src/battle/manager.js && node --check src/characters.js && node --check src/migrate.js && echo ALL_SYNTAX_OK\")",
-      "PowerShell(docker run --rm -v \"C:\\\\Users\\\\andre\\\\Downloads\\\\new\\\\server\\\\mmorpg-local\\\\backend:/app\" -w /app node:20-alpine node test-live-wiring.mjs)"
+      "PowerShell(docker run --rm -v \"C:\\\\Users\\\\andre\\\\Downloads\\\\new\\\\server\\\\mmorpg-local\\\\backend:/app\" -w /app node:20-alpine node test-live-wiring.mjs)",
+      "PowerShell(docker run --rm -v \"C:\\\\Users\\\\andre\\\\Downloads\\\\new\\\\server\\\\mmorpg-local\\\\backend:/app\" -w /app node:20-alpine sh -c \"node --check src/battle/gear.js && node --check src/battle/sim.js && node --check src/characters.js && node --check src/battle/manager.js && node --check src/migrate.js && echo BACKEND_OK\")",
+      "PowerShell(docker run --rm -v \"C:\\\\Users\\\\andre\\\\Downloads\\\\new\\\\server\\\\mmorpg-local\\\\backend:/app\" -w /app node:20-alpine node test-gear-equip.mjs)",
+      "PowerShell(docker run --rm -v \"C:\\\\Users\\\\andre\\\\Downloads\\\\new\\\\server\\\\mmorpg-local\\\\backend:/app\" -w /app node:20-alpine sh -c \"node --check src/characters.js && node --check src/migrate.js && node --check src/battle/gear.js && node --check src/battle/manager.js && echo BACKEND_OK\")",
+      "PowerShell(docker run --rm -v \"C:\\\\Users\\\\andre\\\\Downloads\\\\new\\\\arena-game:/app\" -w /app node:20-alpine sh -c \"node --check js/main.js && node --check js/net/net.js && echo CLIENT_OK\")",
+      "PowerShell(docker run --rm -v \"C:\\\\Users\\\\andre\\\\Downloads\\\\new\\\\server\\\\mmorpg-local\\\\backend:/app\" -w /app node:20-alpine sh -c \"node test-live-wiring.mjs && node test-gear-equip.mjs && echo ALL_TESTS_DONE\")",
+      "PowerShell(docker run --rm -v \"C:\\\\Users\\\\andre\\\\Downloads\\\\new\\\\server\\\\mmorpg-local\\\\backend:/app\" -w /app node:20-alpine sh -c \"node --check src/shop.js && node --check src/characters.js && node --check src/migrate.js && echo BACKEND_OK\")",
+      "PowerShell(docker run --rm -v \"C:\\\\Users\\\\andre\\\\Downloads\\\\new\\\\server\\\\mmorpg-local\\\\backend:/app\" -w /app node:20-alpine sh -c \"node --check src/shop.js && echo SHOP_OK\")",
+      "PowerShell(docker run --rm -v \"C:\\\\Users\\\\andre\\\\Downloads\\\\new\\\\arena-game:/app\" -w /app node:20-alpine sh -c \"node --check js/main.js && echo MAIN_OK\")"
     ]
   }
 }

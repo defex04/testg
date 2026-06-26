@@ -157,6 +157,8 @@ export const api = {
   inventory: () => rest('/api/inventory'),
   equip:     (itemId) => rest('/api/inventory/equip', { itemId }),
   unequip:   (slot) => rest('/api/inventory/unequip', { slot }),
+  // распределить очко в атрибут (str/agi/vit/intel/wis) — задаёт школу треугольника
+  allocate:  (attr, amount = 1) => rest('/api/character/allocate', { attr, amount }),
   shop:      () => rest('/api/shop'),
   shopBuy:   (templateId, quantity = 1) => rest('/api/shop/buy', { templateId, quantity }),
   // пояс эликсиров (сервер помнит состав): массив ячеек ELIXIR_SLOTS

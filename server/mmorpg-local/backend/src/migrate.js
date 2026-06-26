@@ -134,6 +134,21 @@ const STATEMENTS = [
    ON CONFLICT (id) DO NOTHING`,
   `INSERT INTO npc_spawns (id, npc_template_id, location_id) VALUES (3, 2, 1), (4, 2, 2)
    ON CONFLICT (id) DO NOTHING`,
+  // Школы треугольника для NPC (модельный бой): одиночка → Натиск; шайка —
+  // отравитель→Уклон (вёрткий), лекарь→Оплот (стойкий), громила→Натиск (бугай).
+  // Один раз (флаг), чтобы не затирать админ-правки. withNpcModel читает member.school.
+  `DO $$
+   BEGIN
+     IF NOT EXISTS (SELECT 1 FROM game_config WHERE key = 'migration.npc_schools_v1_done') THEN
+       UPDATE npc_templates SET stats = coalesce(stats, '{}'::jsonb) || '{"school":"natisk"}'::jsonb WHERE id = 1;
+       UPDATE npc_templates SET stats = jsonb_set(stats, '{pack}', '[
+         {"name":"Разбойник-отравитель","school":"uklon","level":1,"hp":900,"damage":[120,170],"crit":0.08,"dodge":0.05,"aiPoisonUses":99,"aiPoisonPct":0.10,"aiPoisonSecs":40,"aiPoisonEvery":5},
+         {"name":"Разбойник-лекарь","school":"oplot","level":1,"hp":900,"damage":[110,150],"crit":0.06,"dodge":0.05,"aiHealAllyUses":3,"aiHealAmount":420,"aiHealAt":0.7},
+         {"name":"Разбойник-громила","school":"natisk","level":1,"hp":900,"damage":[170,250],"crit":0.12,"dodge":0.04,"aiPowerUses":99,"aiPowerMult":1.4,"aiPowerTurns":3}
+       ]'::jsonb) WHERE id = 2 AND stats ? 'pack';
+       INSERT INTO game_config (key, value) VALUES ('migration.npc_schools_v1_done', 'true'::jsonb);
+     END IF;
+   END $$`,
   // --- Почта -----------------------------------------------------------
   // Номинальная стоимость предмета (медь). От неё считается налог за вложение
   // в письмо (10%). 0 = бесценок (налог за вложение не берётся).
@@ -269,6 +284,36 @@ for (const c of consumables) {
 STATEMENTS.push(
   `UPDATE item_templates SET max_stack = 1000000
     WHERE type = 4 AND (max_stack IS NULL OR max_stack < 1000000)`);
+
+// ---------------------------------------------------------------------------
+// Тестовая экипировка под треугольник: по расписанию слотов 1–5 ур., ВСЕ 5 цветов
+// (серый…оранжевый = quality 1..5). Для модельного боя важны slot+quality (статы
+// считает composeFromEquipment); base_stats заданы и для старого режима. id 300..344.
+// ---------------------------------------------------------------------------
+const GEAR_COLORS = ['серый', 'зелёный', 'синий', 'фиолетовый', 'оранжевый'];
+// [название, slot игры (SLOT_META.id), type(1 оружие/2 броня), level_req]
+const GEAR_PIECES = [
+  ['Поножи', 3, 2, 1], ['Куртка', 1, 2, 1],          // 1 ур.
+  ['Оружие', 7, 1, 2], ['Щит', 8, 2, 2],             // 2 ур.
+  ['Ботинки', 4, 2, 3], ['Кольчуга', 9, 2, 3],       // 3 ур.
+  ['Наручи', 5, 2, 4], ['Плечи', 6, 2, 4],           // 4 ур.
+  ['Шлем', 2, 2, 5],                                  // 5 ур.
+];
+let gearId = 300;
+for (const [piece, slot, type, lvl] of GEAR_PIECES) {
+  for (let q = 1; q <= 5; q++) {
+    const id = gearId++;
+    const name = `${piece} · ${GEAR_COLORS[q - 1]}`;
+    const stats = type === 1
+      ? { damage: [40 + q * 15 + lvl * 10, 70 + q * 20 + lvl * 15] }
+      : { hp: 80 + q * 40 + lvl * 30 };
+    STATEMENTS.push(
+      `INSERT INTO item_templates (id, name, type, slot, quality, level_req, base_stats, icon, price, sellable, stackable)
+       VALUES (${id}, ${sq(name)}, ${type}, ${slot}, ${q}, ${lvl},
+         ${sq(JSON.stringify(stats))}::jsonb, ${sq('gear' + piece)}, ${50 * q * lvl}, TRUE, FALSE)
+       ON CONFLICT (id) DO NOTHING`);
+  }
+}
 
 // Разовая конвертация старых шаблонов в «серый» уровень новой системы: 202 → жизнь T1
 // (формат менялся с {heal:N} на %+время), 203 → мощь T1, 201 → побег (продаётся, ур.1).
