@@ -1,5 +1,6 @@
 import { game, tx, gameConfig, redis } from './db.js';
 import { wallet } from './economy.js';
+import { composeBuild } from './battle/gear.js';
 
 const DEFAULT_MAX_LEVEL = 15;
 export const DEFAULT_LEVEL_THRESHOLDS = Object.freeze([
@@ -149,6 +150,29 @@ export async function combatProfileFor(charId, start) {
     damage: [base.damage[0] + b.dmgMin, base.damage[1] + b.dmgMax],
     crit: Math.min(0.95, base.crit + b.crit),
     dodge: Math.min(0.75, base.dodge + b.dodge) };
+}
+
+/** Школа треугольника из распределения атрибутов: str→Натиск, agi→Уклон, vit→Оплот.
+ *  Нули/равенство → Натиск (нейтральный угол). См. battle/stats.js SCHOOLS. */
+export function schoolFromStats(s) {
+  const cand = [['natisk', Number(s?.str) || 0], ['uklon', Number(s?.agi) || 0], ['oplot', Number(s?.vit) || 0]];
+  cand.sort((a, b) => b[1] - a[1]);              // стабильно: при равенстве Натиск раньше
+  return cand[0][1] > 0 ? cand[0][0] : 'natisk';
+}
+
+/**
+ * Боевой блок модели «Broken Sun» для ЖИВОГО боя (треугольник): школа из атрибутов
+ * персонажа + нормальная для уровня сборка (composeBuild). Возвращает форму дефа
+ * бойца движка: { hp, stats, statNorm, school }. Конкретный надетый шмот/очки сюда
+ * пока не подмешиваются (следующий слой — чтение предметов из БД).
+ */
+export async function combatModelFor(charId, level, quality = 'blue') {
+  const row = (await game.query(
+    `SELECT str, agi, vit FROM character_stats WHERE character_id = $1`, [charId])).rows[0];
+  const school = schoolFromStats(row);
+  const built = composeBuild(school, { level: Number(level) || 1, quality });
+  return { hp: built.stats.health, stats: built.stats, statNorm: built.statNorm,
+           school, damage: [1, 1] };
 }
 
 export async function addExp(client, charId, amount) {

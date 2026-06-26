@@ -70,6 +70,7 @@ export class Engine {
       isAI: !!def.isAI,
       maxHp: hp, hp,
       stats: def.stats || null,          // блок статов Broken Sun (для модельного боя)
+      statNorm: Number(def.statNorm) > 0 ? Number(def.statNorm) : 1,  // нормировка шансов по уровню (см. stats.makeModel)
       damage: def.damage,
       crit: def.crit ?? 0.1,
       dodge: def.dodge ?? 0.06,
@@ -284,17 +285,25 @@ export class Engine {
     const m = this.model;
     let blocked, dodged, crit, damage = 0;
     if (m && attacker.stats && defender.stats) {
-      // модельный бой: исходы из производных статов (блок — по шансу, не по зоне)
+      // модельный бой: исходы из производных статов (блок — по шансу, не по зоне).
+      // nD — нормировка состязательных шансов по уровню защитника (см. stats.makeModel)
       const A = attacker.stats, D = defender.stats;
-      dodged = Math.random() < m.dodgeChance(A, D);
-      blocked = !dodged && Math.random() < m.blockChance(A, D);
+      const nD = defender.statNorm || 1;
+      dodged = Math.random() < m.dodgeChance(A, D, nD);
+      blocked = !dodged && Math.random() < m.blockChance(A, D, nD);
       const critBonus = attacker.critBuffTurns > 0 ? attacker.critBuffAdd : 0;
-      crit = !dodged && Math.random() < m.critChance(A, D) + critBonus;
+      crit = !dodged && Math.random() < m.critChance(A, D, nD) + critBonus;
       if (!dodged) {
         let dmg = m.baseDamage(A) * m.damageVariance();
         if (crit) dmg *= m.critMult(A);
-        dmg *= (1 - m.defenseMitigation(D));
-        if (blocked) dmg *= (1 - m.blockMitigation(D));
+        dmg *= (1 - m.defenseMitigation(D, nD));
+        if (blocked) {
+          // крит «вскрывает» блок (ребро треугольника Крит→Блок): при крите блок
+          // срезает лишь долю critBlockPierce своей силы, обычный удар блок гасит полностью
+          let bm = m.blockMitigation(D);
+          if (crit) bm *= (m.coef?.critBlockPierce ?? 0.40);
+          dmg *= (1 - bm);
+        }
         if (attacker.buffTurns > 0) { dmg *= attacker.buffMult; attacker.buffTurns -= 1; }
         damage = Math.max(1, Math.round(dmg));
         damage = Math.min(damage, Math.max(0, Math.round(defender.hp)));
@@ -356,7 +365,7 @@ export class Engine {
         // если выжил и удар попал; ответный удар сам контратаку не вызывает
         if (this.model && !s.dodged && target.alive && actor.alive
             && target.stats && actor.stats
-            && Math.random() < this.model.counterChance(target.stats, actor.stats)) {
+            && Math.random() < this.model.counterChance(target.stats, actor.stats, target.statNorm || 1)) {
           strikes.push(this._strike(target, actor, ZONES[(Math.random() * 3) | 0], true));
         }
       }

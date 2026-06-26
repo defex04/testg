@@ -10,7 +10,8 @@
  * Эликсиры мощи/здоровья моделируются как у ИИ (запас зарядов + порог здоровья).
  */
 import { Engine } from './engine.js';
-import { STAT_META, STAT_DEFAULTS, makeModel, levelFactor } from './stats.js';
+import { STAT_META, STAT_DEFAULTS, makeModel, levelFactor, composeFighter, SCHOOLS } from './stats.js';
+import { composeBuild } from './gear.js';
 
 const clampNum = (v, lo, hi, d) => {
   const n = Number(v);
@@ -41,19 +42,42 @@ function buildTeam(side, p, model) {
   const eHealPct = clampNum(elx.healPct, 0, 100, 30);
   const eHealAt = clampNum(elx.healAtPct, 0, 100, 60) / 100;
   const st = p.stats || p;   // статы можно прислать вложенно (stats) или плоско
+  // школа треугольника (natisk/uklon/oplot): два режима.
+  //  - p.gear задан → реалистичная СБОРКА из шмота+очков (composeBuild): можно указать
+  //    надетые слоты (gear.equipped) и долю вложенных очков (gear.allocFrac);
+  //  - иначе → цель-профиль школы (composeFighter). Без школы — плоский профиль.
+  const school = p.school && SCHOOLS[p.school] ? p.school : null;
+  let schoolBase = null;
+  let statNorm = lf;   // по умолчанию нормируем по уровню; сборка задаёт свой эталон
+  if (school) {
+    if (p.gear !== undefined && p.gear !== null && p.gear !== false) {
+      const g = (p.gear && typeof p.gear === 'object') ? p.gear : {};
+      const built = composeBuild(school, {
+        level, quality: p.quality, growth: model.coef.levelGrowth,
+        equipped: Array.isArray(g.equipped) ? g.equipped : null,
+        allocFrac: g.allocFrac != null ? Number(g.allocFrac) : null,   // null → ожидаемое для уровня
+      });
+      schoolBase = built.stats;
+      statNorm = built.statNorm;   // нормировка по ожидаемой укомплектованности уровня
+    } else {
+      schoolBase = composeFighter(school, { level, quality: p.quality, growth: model.coef.levelGrowth });
+    }
+  }
 
   const out = [];
   for (let i = 0; i < n; i++) {
     const stats = {};
     for (const m of STAT_META) {
-      const base = num(st[m.key], STAT_DEFAULTS[m.key]);
-      const v = base * (m.pct ? 1 : lf) * jitter(varPct);
+      // school-профиль уже домножен на lf и качество; плоский — домножаем на lf здесь
+      const base = schoolBase ? schoolBase[m.key] : num(st[m.key], STAT_DEFAULTS[m.key]) * (m.pct ? 1 : lf);
+      const v = base * jitter(varPct);
       stats[m.key] = m.pct ? +v.toFixed(2) : Math.max(1, Math.round(v));
     }
     const hp = stats.health;
     out.push({
       id: `${side[0]}${i + 1}`, name: `${prefix} ${i + 1}`, level, isAI: true,
       stats, hp, damage: [1, 1],                 // legacy-поля не нужны в модельном бою
+      statNorm,                                  // нормировка состязательных шансов (эталон уровня/сборки)
       initiative: stats.initiative + Math.random(),
       aiPowerUses: ePowerUses, aiPowerMult: ePowerMult, aiPowerTurns: ePowerTurns,
       aiHealUses: eHealUses, aiHealAmount: Math.round(hp * eHealPct / 100), aiHealAt: eHealAt,

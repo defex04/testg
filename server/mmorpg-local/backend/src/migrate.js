@@ -48,6 +48,10 @@ const STATEMENTS = [
   `GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO game_rw`,
   `INSERT INTO game_config (key, value) VALUES ('battle.escape_elixir', '201')
    ON CONFLICT (key) DO NOTHING`,
+  // Боевая модель «треугольник» (Broken Sun): включает в ЖИВОМ бою школьные статы +
+  // нормировку + «крит пробивает блок». Выкл одной правкой value→{"enabled":false}.
+  `INSERT INTO game_config (key, value) VALUES ('battle.model', '{"enabled": true}')
+   ON CONFLICT (key) DO NOTHING`,
   `INSERT INTO game_config (key, value)
    VALUES ('battle.intervention.default', '{"hunt": false, "pvp": true}')
    ON CONFLICT (key) DO NOTHING`,

@@ -1,8 +1,10 @@
 import { randomUUID } from 'crypto';
 import { game, tx, redis, gameConfig } from '../db.js';
 import { Engine } from './engine.js';
+import { makeModel } from './stats.js';
+import { composeBuild } from './gear.js';
 import { addCurrency, CUR } from '../economy.js';
-import { addExp, combatProfileFor, getCharacter } from '../characters.js';
+import { addExp, combatProfileFor, combatModelFor, getCharacter } from '../characters.js';
 import { onHuntVictory } from '../quests.js';
 import { sendSystemChat } from '../chat.js';
 import { elixirParams } from '../belt.js';
@@ -236,6 +238,33 @@ async function initiativeFor(charId, level) {
   return base + Math.random();
 }
 
+// Боевая модель треугольника (Broken Sun): коэффициенты по умолчанию (critBlockPierce,
+// нормировка и пр. — см. battle/stats.js). Включается флагом game_config 'battle.model'
+// (мгновенный выкл, если в live что-то не так). По умолчанию ВЫКЛ — старая механика.
+const battleModel = makeModel();
+async function modelEnabled() {
+  const cfg = await gameConfig('battle.model');
+  return !!(cfg && cfg.enabled);
+}
+
+/** Деф бойца-игрока: модельный (school из атрибутов → composeBuild) или старый профиль.
+ *  extra перекрывает базу (например, initiative). */
+async function playerDef(ch, useModel, start, extra = {}) {
+  const combat = useModel
+    ? await combatModelFor(ch.id, ch.level)
+    : await combatProfileFor(ch.id, start);
+  return { id: ch.id, charId: ch.id, name: ch.name, level: ch.level, isAI: false,
+    ...combat, ...(await mpFor(ch.id)), ...extra };
+}
+
+/** Подмешать модельные статы NPC (для модельного боя): школа из шаблона или нейтраль. */
+function withNpcModel(member, fallbackLevel) {
+  const level = member.level ?? fallbackLevel ?? 1;
+  const built = composeBuild(member.school || 'natisk', { level });
+  return { ...member, stats: built.stats, statNorm: built.statNorm,
+           hp: built.stats.health, damage: member.damage || [1, 1] };
+}
+
 /** Политика вмешательства/выхода: приоритет локация → глобальный дефолт по виду боя. */
 async function resolvePolicy(kind, locationId) {
   const def = (await gameConfig('battle.intervention.default'))
@@ -336,11 +365,13 @@ export async function startHunt(ch, send, npcId = null) {
   // награда: переопределение из шаблона (stats.reward) либо общий конфиг охоты
   const huntReward = (stats.reward && typeof stats.reward === 'object') ? stats.reward : null;
 
+  // модельный бой (треугольник) — если включён флагом; тогда и игрок, и NPC несут stats-блок
+  const useModel = await modelEnabled();
   const engine = new Engine({
-    left:  [{ id: ch.id, charId: ch.id, name: ch.name, level: ch.level,
-              isAI: false, ...(await combatProfileFor(ch.id, start)), ...(await mpFor(ch.id)) }],
-    right,
-  }, { turnTime, target: await targetCfg(), pairRotate: await pairRotateCfg() });
+    left:  [await playerDef(ch, useModel, start)],
+    right: useModel ? right.map((m) => withNpcModel(m, npc.level)) : right,
+  }, { turnTime, target: await targetCfg(), pairRotate: await pairRotateCfg(),
+       model: useModel ? battleModel : null });
 
   const b = makeBattle(battleId, 'hunt', ch.location_id, policy, engine);
   b.reward = huntReward;   // null → endBattle возьмёт battle.reward.hunt из конфига
@@ -401,14 +432,12 @@ export async function startDuel(att, def, sendAtt, sendDef) {
     initiativeFor(att.id, att.level),
     initiativeFor(def.id, def.level),
   ]);
+  const useModel = await modelEnabled();
   const engine = new Engine({
-    left:  [{ id: att.id, charId: att.id, name: att.name, level: att.level,
-              isAI: false, initiative: attIni,
-              ...(await combatProfileFor(att.id, start)), ...(await mpFor(att.id)) }],
-    right: [{ id: def.id, charId: def.id, name: def.name, level: def.level,
-              isAI: false, initiative: defIni,
-              ...(await combatProfileFor(def.id, start)), ...(await mpFor(def.id)) }],
-  }, { turnTime, target: await targetCfg(), pairRotate: await pairRotateCfg() });
+    left:  [await playerDef(att, useModel, start, { initiative: attIni })],
+    right: [await playerDef(def, useModel, start, { initiative: defIni })],
+  }, { turnTime, target: await targetCfg(), pairRotate: await pairRotateCfg(),
+       model: useModel ? battleModel : null });
 
   const b = makeBattle(battleId, 'pvp', att.location_id, policy, engine);
   addPlayer(b, att.id, sendAtt, 'left');
@@ -442,9 +471,9 @@ export async function joinBattle(charId, battleId, side, send) {
 
   const start = await gameConfig('character.start');
   const initiative = await initiativeFor(ch.id, ch.level);
-  b.engine.addFighter(side, { id: ch.id, charId: ch.id, name: ch.name, level: ch.level,
-    isAI: false, initiative,
-    ...(await combatProfileFor(ch.id, start)), ...(await mpFor(ch.id)) });
+  // согласованность: вмешавшийся строится по модели САМОГО боя (она задана при старте)
+  const useModel = !!b.engine.model;
+  b.engine.addFighter(side, await playerDef(ch, useModel, start, { initiative }));
   const p = addPlayer(b, ch.id, send, side);
   // если вмешались прямо во время розыгрыша — этот sub-turn новичок не видел,
   // поэтому не ждём от него turnDone (иначе он зря держит ход до страховки)

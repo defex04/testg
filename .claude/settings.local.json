@@ -54,7 +54,16 @@
       "PowerShell($paths = @\\(\"$env:ProgramFiles\\\\nodejs\\\\node.exe\",\"$env:LOCALAPPDATA\\\\Programs\\\\nodejs\\\\node.exe\",\"$env:APPDATA\\\\npm\\\\node.exe\"\\); foreach \\($p in $paths\\){ if \\(Test-Path $p\\){ \"FOUND: $p\" } }; Get-Command node,nodejs,npm,docker -ErrorAction SilentlyContinue | Select-Object Name,Source)",
       "PowerShell(cd C:\\\\Users\\\\andre\\\\Downloads\\\\new; docker run --rm -v \"${PWD}:/app\" -w /app node:20-alpine sh -c \"node --check server/mmorpg-local/backend/src/battle/manager.js && echo MANAGER_OK && node --check arena-game/js/main.js && echo MAIN_OK\")",
       "PowerShell(Get-Command python,python3,py -ErrorAction SilentlyContinue)",
-      "PowerShell(\"---\")"
+      "PowerShell(\"---\")",
+      "mcp__visualize__read_me",
+      "mcp__visualize__show_widget",
+      "Bash(node src/battle/_triangle_check.mjs)",
+      "PowerShell(docker run --rm -v \"C:\\\\Users\\\\andre\\\\Downloads\\\\new\\\\server\\\\mmorpg-local\\\\backend:/app\" -w /app node:20-alpine node src/battle/_triangle_check.mjs)",
+      "PowerShell(docker run --rm -v \"C:\\\\Users\\\\andre\\\\Downloads\\\\new\\\\server\\\\mmorpg-local\\\\backend:/app\" -w /app node:20-alpine node test-triangle.mjs)",
+      "PowerShell(docker run --rm -v \"C:\\\\Users\\\\andre\\\\Downloads\\\\new\\\\server\\\\mmorpg-local\\\\backend:/app\" -w /app node:20-alpine node test-gear.mjs)",
+      "PowerShell(docker run --rm -v \"C:\\\\Users\\\\andre\\\\Downloads\\\\new\\\\server\\\\mmorpg-local\\\\backend:/app\" -w /app node:20-alpine sh -c 'for f in src/battle/stats.js src/battle/engine.js src/battle/gear.js src/battle/sim.js src/battle/manager.js src/characters.js src/migrate.js; do node --check \"$f\" && echo \"OK $f\" || echo \"FAIL $f\"; done')",
+      "PowerShell(docker run --rm -v \"C:\\\\Users\\\\andre\\\\Downloads\\\\new\\\\server\\\\mmorpg-local\\\\backend:/app\" -w /app node:20-alpine sh -c \"node --check src/battle/stats.js && node --check src/battle/engine.js && node --check src/battle/gear.js && node --check src/battle/sim.js && node --check src/battle/manager.js && node --check src/characters.js && node --check src/migrate.js && echo ALL_SYNTAX_OK\")",
+      "PowerShell(docker run --rm -v \"C:\\\\Users\\\\andre\\\\Downloads\\\\new\\\\server\\\\mmorpg-local\\\\backend:/app\" -w /app node:20-alpine node test-live-wiring.mjs)"
     ]
   }
 }
