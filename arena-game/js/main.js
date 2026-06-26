@@ -2011,6 +2011,24 @@ function pinfoSectionsHtml(p) {
       <div class="pinfo-sec-title">Характеристики</div>
       <div class="pinfo-grid">${cells.join('')}</div></div>`;
   }
+  if (p.params) {                       // модельные «ПАРАМЕТРЫ» (треугольник) + школа
+    const m = p.params;
+    const SCHOOL = { natisk: 'Натиск', uklon: 'Уклон', oplot: 'Оплот' };
+    const order = [
+      ['power', 'Мощь'], ['health', 'Здоровье'], ['mana', 'Мана'], ['rage', 'Ярость'],
+      ['initiative', 'Инициатива'], ['defense', 'Защита'], ['accuracy', 'Точность'],
+      ['dodge', 'Уклонение'], ['crit', 'Крит'], ['critPower', 'Сила Крита'],
+      ['critResist', 'Сопр. Криту'], ['block', 'Блок'], ['blockDmg', 'Блок урона'],
+      ['counter', 'Контратака'],
+    ];
+    const pctKeys = new Set(['critPower', 'blockDmg']);
+    const cells2 = order.map(([k, label]) => statCell(label,
+      m[k] == null ? '—' : (pctKeys.has(k) ? `${Math.round(m[k])}%` : Math.round(m[k])))).join('');
+    const sLabel = SCHOOL[p.school] || '';
+    html += `<div class="pinfo-sec">
+      <div class="pinfo-sec-title">Параметры${sLabel ? ` · ${esc(sLabel)}` : ''}</div>
+      <div class="pinfo-grid">${cells2}</div></div>`;
+  }
   if (Array.isArray(p.equipment)) {
     const rows = p.equipment.map((e) => {
       const label = SLOT_META[slotNameFor(e.slot)]?.name || 'Слот';

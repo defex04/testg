@@ -89,6 +89,44 @@ export function genItem(slotKey, { school = 'natisk', level = 1, quality = 'blue
   return { slot: slotKey, label: slot.label, tier: gearTier(level), quality, school, stats };
 }
 
+// Карта слотов экипировки игры (SLOT_META.id) → слоты треугольника. Щит (8) и амулет
+// (10) — не из восьмёрки: щит даёт бонус Оплота (ниже), амулет пока не учитываем.
+export const GAME_SLOT_TO_TRI = {
+  2: 'helmet', 6: 'shoulders', 7: 'weapon', 1: 'chest',
+  5: 'bracers', 3: 'legs', 4: 'boots', 9: 'mail',
+};
+export const SHIELD_SLOT = 8;       // offhand «Щит» — уклон в Оплот
+export const WEAPON_SLOT = 7;       // mainhand «Оружие»
+export const QUALITY_BY_RANK = ['gray', 'green', 'blue', 'purple', 'orange'];  // quality 1..5
+
+/**
+ * Боевой блок из РЕАЛЬНОЙ экипировки: items = [{ slot, quality }] (slot — id игры).
+ * Надетые слоты → укомплектованность; среднее качество → множитель шмота; щит →
+ * крепче блок/защита и чуть меньше Мощи (1H+щит), без щита но с оружием → +Мощь (2H).
+ */
+export function composeFromEquipment(school, { level = 1, items = [], allocFrac = null, growth = DEFAULT_COEF.levelGrowth } = {}) {
+  const equipped = new Set();
+  let qSum = 0, qN = 0, shield = false, weapon = false;
+  for (const it of items || []) {
+    const tri = GAME_SLOT_TO_TRI[it.slot];
+    if (tri) equipped.add(tri);
+    if (it.slot === SHIELD_SLOT) shield = true;
+    if (it.slot === WEAPON_SLOT) weapon = true;
+    if (it.quality != null) { qSum += Math.min(5, Math.max(1, Number(it.quality) || 1)); qN++; }
+  }
+  const quality = QUALITY_BY_RANK[Math.round(qN ? qSum / qN : 3) - 1] || 'blue';
+  const built = composeBuild(school, { level, equipped: [...equipped], quality, allocFrac, growth });
+  const s = built.stats;
+  if (shield) {                      // 1H + щит: танковее (уклон в Оплот)
+    s.block = Math.max(1, Math.round(s.block * 1.25));
+    s.defense = Math.max(1, Math.round(s.defense * 1.15));
+    s.power = Math.max(1, Math.round(s.power * 0.92));
+  } else if (weapon) {               // двуручное: больше Мощи
+    s.power = Math.max(1, Math.round(s.power * 1.10));
+  }
+  return { stats: s, statNorm: built.statNorm, school, equippedCount: equipped.size, quality, shield };
+}
+
 /**
  * Собрать боевой блок (14 статов) из базы + шмота + очков. По умолчанию — НОРМАЛЬНО
  * прокачанный для уровня боец (надеты открытые слоты, очки вложены по графику).

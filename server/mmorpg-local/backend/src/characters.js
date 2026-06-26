@@ -1,6 +1,6 @@
 import { game, tx, gameConfig, redis } from './db.js';
 import { wallet } from './economy.js';
-import { composeBuild } from './battle/gear.js';
+import { composeFromEquipment } from './battle/gear.js';
 
 const DEFAULT_MAX_LEVEL = 15;
 export const DEFAULT_LEVEL_THRESHOLDS = Object.freeze([
@@ -105,6 +105,16 @@ export async function getCharacter(id) {
   ch.xpMaxed = progress.maxed;
   ch.pvpXp = ch.wallet.valor || 0; ch.pvpXpMax = start.pvp_xp_max;
   ch.combat = await combatProfileFor(ch.id, start);
+  // школа треугольника, очки распределения и модельные характеристики (экран «ПАРАМЕТРЫ»)
+  const sr = (await game.query(
+    `SELECT str, agi, vit, intel, wis, free_points FROM character_stats WHERE character_id = $1`,
+    [ch.id])).rows[0] || null;
+  ch.attrs = sr ? { str: Number(sr.str), agi: Number(sr.agi), vit: Number(sr.vit),
+                    intel: Number(sr.intel), wis: Number(sr.wis) } : null;
+  ch.freePoints = sr ? Number(sr.free_points) || 0 : 0;
+  const model = await combatModelFor(ch.id, ch.level).catch(() => null);
+  ch.school = model ? model.school : null;
+  ch.params = model ? model.stats : null;
   return ch;
 }
 
@@ -162,15 +172,23 @@ export function schoolFromStats(s) {
 
 /**
  * Боевой блок модели «Broken Sun» для ЖИВОГО боя (треугольник): школа из атрибутов
- * персонажа + нормальная для уровня сборка (composeBuild). Возвращает форму дефа
- * бойца движка: { hp, stats, statNorm, school }. Конкретный надетый шмот/очки сюда
- * пока не подмешиваются (следующий слой — чтение предметов из БД).
+ * персонажа + сборка из РЕАЛЬНО надетой экипировки (composeFromEquipment). Сила очков
+ * берётся автоматически по уровню (чтобы аллокация не ослабляла игрока — она задаёт
+ * ШКОЛУ, см. schoolFromStats), а укомплектованность/качество — из надетых предметов.
+ * Возвращает форму дефа бойца движка: { hp, stats, statNorm, school }.
  */
-export async function combatModelFor(charId, level, quality = 'blue') {
-  const row = (await game.query(
-    `SELECT str, agi, vit FROM character_stats WHERE character_id = $1`, [charId])).rows[0];
-  const school = schoolFromStats(row);
-  const built = composeBuild(school, { level: Number(level) || 1, quality });
+export async function combatModelFor(charId, level) {
+  const [statRow, eq] = await Promise.all([
+    game.query(`SELECT str, agi, vit FROM character_stats WHERE character_id = $1`, [charId])
+      .then((q) => q.rows[0]),
+    game.query(
+      `SELECT t.slot, t.quality FROM item_instances i
+         JOIN item_templates t ON t.id = i.template_id
+        WHERE i.owner_type = 2 AND i.owner_id = $1 AND i.status = 1 AND t.slot IS NOT NULL`,
+      [charId]).then((q) => q.rows),
+  ]);
+  const school = schoolFromStats(statRow);
+  const built = composeFromEquipment(school, { level: Number(level) || 1, items: eq });
   return { hp: built.stats.health, stats: built.stats, statNorm: built.statNorm,
            school, damage: [1, 1] };
 }
@@ -190,7 +208,39 @@ export async function addExp(client, charId, amount) {
   const level = levelForExp(exp, leveling);
   await client.query(
     `UPDATE characters SET exp = $2, level = $3 WHERE id = $1`, [charId, exp, level]);
+  // очки распределения: +POINTS_PER_LEVEL за каждый набранный уровень (выбор школы/угла)
+  if (level > oldLevel) {
+    await client.query(
+      `UPDATE character_stats SET free_points = free_points + $2 WHERE character_id = $1`,
+      [charId, POINTS_PER_LEVEL * (level - oldLevel)]);
+  }
   return { gained: Math.max(0, exp - oldExp), exp, level, oldLevel, leveledUp: level > oldLevel };
+}
+
+export const POINTS_PER_LEVEL = 10;
+const ALLOC_ATTRS = ['str', 'agi', 'vit', 'intel', 'wis'];
+
+/**
+ * Распределить ОДНО очко в атрибут (str/agi/vit/intel/wis), списав 1 free_point.
+ * Атрибуты задают ШКОЛУ треугольника (str→Натиск, agi→Уклон, vit→Оплот, см.
+ * schoolFromStats). Возвращает обновлённые атрибуты + остаток очков.
+ */
+export async function allocateStat(charId, attr, amount = 1) {
+  if (!ALLOC_ATTRS.includes(attr)) throw Object.assign(new Error('bad_attr'), { status: 400 });
+  const n = Math.max(1, Math.min(1000, Math.trunc(Number(amount) || 1)));
+  return tx(async (c) => {
+    const row = (await c.query(
+      `SELECT free_points FROM character_stats WHERE character_id = $1 FOR UPDATE`, [charId])).rows[0];
+    if (!row) throw Object.assign(new Error('no_stats'), { status: 404 });
+    if ((Number(row.free_points) || 0) < n) throw Object.assign(new Error('not_enough_points'), { status: 400 });
+    const upd = (await c.query(
+      `UPDATE character_stats SET ${attr} = ${attr} + $2, free_points = free_points - $2
+        WHERE character_id = $1 RETURNING str, agi, vit, intel, wis, free_points`,
+      [charId, n])).rows[0];
+    return { str: Number(upd.str), agi: Number(upd.agi), vit: Number(upd.vit),
+             intel: Number(upd.intel), wis: Number(upd.wis),
+             freePoints: Number(upd.free_points), school: schoolFromStats(upd) };
+  });
 }
 
 /** Публичная информация об игроке (для карточки «Информация» из чата/почты).
@@ -212,8 +262,8 @@ export async function publicInfo({ id, name }) {
     .catch(() => false);
 
   const start = await gameConfig('character.start');
-  // надетые вещи, базовые характеристики, боевой профиль и сводка боёв — параллельно
-  const [equipRows, statRow, combat, recRow] = await Promise.all([
+  // надетые вещи, базовые характеристики, боевой профиль, МОДЕЛЬНЫЕ статы и сводка — параллельно
+  const [equipRows, statRow, combat, modelRow, recRow] = await Promise.all([
     game.query(
       `SELECT t.name, t.icon, t.slot AS equip_slot, t.type, t.base_stats,
               i.enchant_level
@@ -224,6 +274,7 @@ export async function publicInfo({ id, name }) {
       `SELECT str, agi, vit, intel, wis FROM character_stats WHERE character_id = $1`,
       [charId]).then((q) => q.rows[0] || null),
     combatProfileFor(charId, start).catch(() => null),
+    combatModelFor(charId, r.level).catch(() => null),
     game.query(
       `SELECT count(*) AS battles,
               count(*) FILTER (WHERE result = 1) AS wins,
@@ -256,12 +307,26 @@ export async function publicInfo({ id, name }) {
       hp: combat.hp, dmgMin: combat.damage?.[0] ?? 0, dmgMax: combat.damage?.[1] ?? 0,
       crit: combat.crit, dodge: combat.dodge,
     } : null,
+    // модельные характеристики (экран «ПАРАМЕТРЫ»): школа треугольника + 14 статов
+    school: modelRow ? modelRow.school : null,
+    params: modelRow ? modelRow.stats : null,
   };
 }
 
 export function characterRoutes(app, authed) {
   app.get('/api/me', authed, async (req, res) => {
     res.json(await getCharacter(req.session.character_id));
+  });
+
+  // распределить очки в атрибут (str/agi/vit/intel/wis) — задаёт школу треугольника
+  app.post('/api/character/allocate', authed, async (req, res) => {
+    try {
+      const out = await allocateStat(req.session.character_id,
+        String(req.body.attr), Number(req.body.amount) || 1);
+      res.json(out);
+    } catch (e) {
+      res.status(e.status || 500).json({ error: e.message || 'error' });
+    }
   });
 
   // публичная карточка игрока: по id (?id=) или по нику (?name=)

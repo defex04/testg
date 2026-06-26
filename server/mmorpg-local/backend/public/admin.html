@@ -1082,7 +1082,18 @@ R.simulate = async () => {
         <input data-side="${side}" data-grp="meta" data-k="name" value="${esc(name)}" style="width:100%"></div>
       ${fld(side,'meta',['count','Бойцов (1–500)',1])}
       ${fld(side,'meta',['level','Уровень',1])}
-      ${fld(side,'meta',['varPct','Разброс ±(0–1)',0.15,'0.05'])}</div>
+      ${fld(side,'meta',['varPct','Разброс ±(0–1)',0.15,'0.05'])}
+      <div><label>Школа (треугольник)</label>
+        <select data-side="${side}" data-grp="meta" data-k="school">
+          <option value="">— ручные статы</option>
+          <option value="natisk">Натиск</option>
+          <option value="uklon">Уклон</option>
+          <option value="oplot">Оплот</option></select></div>
+      <div><label>Качество шмота</label>
+        <select data-side="${side}" data-grp="meta" data-k="quality">
+          <option value="gray">Серый</option><option value="green">Зелёный</option>
+          <option value="blue" selected>Синий</option>
+          <option value="purple">Фиолетовый</option><option value="orange">Оранжевый</option></select></div></div>
     <h4 style="margin:12px 0 6px;color:var(--dim);font:600 12px var(--mono)">Характеристики</h4>
     <div class="form">${SIM_STATS.map((s) => fld(side, 'stat', s)).join('')}</div>
     <h4 style="margin:12px 0 6px;color:var(--dim);font:600 12px var(--mono)">Эликсиры (использует ИИ)</h4>
@@ -1124,8 +1135,13 @@ function simProfile(side){
   const stats = {}; SIM_STATS.forEach(([k]) => stats[k] = v('stat', k));
   const elixir = {}; SIM_ELIX.forEach(([k]) => elixir[k] = v('elix', k));
   const nameEl = g('meta', 'name');
+  const schoolEl = g('meta', 'school'), qualEl = g('meta', 'quality');
+  const school = schoolEl && schoolEl.value ? schoolEl.value : undefined;
+  const quality = qualEl ? qualEl.value : undefined;
+  // школа выбрана → сборка из шмота+очков (composeBuild, gear:{}); иначе ручные статы
   return { name: nameEl ? nameEl.value : '', count: v('meta', 'count'),
-    level: v('meta', 'level'), varPct: v('meta', 'varPct'), stats, elixir };
+    level: v('meta', 'level'), varPct: v('meta', 'varPct'), stats, elixir,
+    school, quality, gear: school ? {} : undefined };
 }
 
 window.runSim = async () => {

@@ -52,6 +52,19 @@ const STATEMENTS = [
   // нормировку + «крит пробивает блок». Выкл одной правкой value→{"enabled":false}.
   `INSERT INTO game_config (key, value) VALUES ('battle.model', '{"enabled": true}')
    ON CONFLICT (key) DO NOTHING`,
+  // Очки распределения атрибутов (10/уровень) задают школу треугольника. Бэкфилл
+  // существующим персонажам ОДИН раз: положенное за уровень минус уже вложенное.
+  `DO $$
+   BEGIN
+     IF NOT EXISTS (SELECT 1 FROM game_config WHERE key = 'migration.alloc_points_v1_done') THEN
+       UPDATE character_stats cs
+          SET free_points = GREATEST(cs.free_points,
+                c.level * 10 - (cs.str + cs.agi + cs.vit + cs.intel + cs.wis))
+         FROM characters c WHERE c.id = cs.character_id;
+       INSERT INTO game_config (key, value)
+          VALUES ('migration.alloc_points_v1_done', 'true'::jsonb);
+     END IF;
+   END $$`,
   `INSERT INTO game_config (key, value)
    VALUES ('battle.intervention.default', '{"hunt": false, "pvp": true}')
    ON CONFLICT (key) DO NOTHING`,
