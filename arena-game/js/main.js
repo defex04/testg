@@ -4148,14 +4148,21 @@ function renderParamsPanel(el) {
   const buff = d.buff && d.buff.active
     ? `<div class="pinfo-row" style="color:#8fd089"><span>💧 Живая вода</span>
         <b>+${d.buff.hpPct || 10}% HP/урон · ${Math.ceil((d.buff.remainSec || 0) / 60)} мин</b></div>` : '';
-  // урон за удар выводим из Мощи (сервер: урон = Мощь × powerToDamage 0.10), ±15% разброс
+  // урон за удар выводим из Мощи (сервер: урон = Мощь × powerToDamage 0.10), ±15% разброс.
+  // Это БАЗОВЫЙ урон до защиты/блока соперника; Силу качаешь → растёт Мощь → растёт урон.
   const dmg = Math.round((Number(m.power) || 0) * 0.10);
   const dmgRow = `<div class="pinfo-row" style="color:var(--gold-bright)">
-      <span>⚔ Урон за удар</span><b>≈ ${dmg} (${Math.round(dmg * 0.85)}–${Math.round(dmg * 1.15)})</b></div>`;
+      <span>⚔ Базовый урон (от Мощи)</span><b>≈ ${dmg} (${Math.round(dmg * 0.85)}–${Math.round(dmg * 1.15)})</b></div>`;
+  // сет-бонус по классам надетых вещей (статы выше уже учитывают его)
+  const sb = Number(d.setBonus) || 1;
+  const setRow = sb === 1 ? '' :
+    `<div class="pinfo-row" style="color:${sb > 1 ? '#8fd089' : '#e07a6a'}">
+      <span>🎽 Сет</span><b>${sb > 1 ? '+5% — всё своего класса' : '−15% — вещи разных классов'}</b></div>`;
   el.innerHTML = `
     <div class="pinfo-sec">
       <div class="pinfo-sec-title">Параметры · ${esc(SCHOOL[d.school] || '—')}</div>
       ${dmgRow}
+      ${setRow}
       ${buff}
       <div class="pinfo-grid">${cells}</div></div>
     <div class="pinfo-sec">
@@ -4194,6 +4201,8 @@ function renderInvPreview(row) {
     if (reserved) rows.push(['В поясе', '×' + reserved]);
   } else {
     if (slotName) rows.push(['Слот', SLOT_META[slotName]?.name || slotName]);
+    const clsName = { natisk: 'Натиск', uklon: 'Уклон', oplot: 'Оплот' }[stats && stats.cls];
+    if (clsName) rows.push(['Класс', clsName]);
     const gs = gearStatsText(stats);                 // характеристики предмета (модель)
     if (gs) rows.push(['Характеристики', gs]);
     rows.push(['В рюкзаке', '×' + owned]);

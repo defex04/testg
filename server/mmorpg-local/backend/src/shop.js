@@ -46,6 +46,7 @@ function product(row) {
       levelReq: Number(row.level_req) || 1,
       kind: type === 1 ? 'weapon' : type === 5 ? 'amulet' : 'armor',
       slot: row.slot != null ? Number(row.slot) : null,
+      cls: row.base_stats ? row.base_stats.cls || null : null,   // класс вещи (natisk/uklon/oplot)
       stats: row.base_stats || null,              // характеристики предмета (модель) — для витрины
       description: describeGear(type, row.slot),
     };

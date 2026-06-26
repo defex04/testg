@@ -292,6 +292,8 @@ STATEMENTS.push(
 // считает composeFromEquipment); base_stats заданы и для старого режима. id 300..344.
 // ---------------------------------------------------------------------------
 const GEAR_COLORS = ['серый', 'зелёный', 'синий', 'фиолетовый', 'оранжевый'];
+// ТРИ КЛАССА вещей = три школы; статы предмета и сет-бонус считаются по классу.
+const GEAR_CLASSES = [['natisk', 'Натиск'], ['uklon', 'Уклон'], ['oplot', 'Оплот']];
 // [название, slot игры (SLOT_META.id), type(1 оружие/2 броня/5 амулет), level_req]
 const GEAR_PIECES = [
   ['Поножи', 3, 2, 1], ['Куртка', 1, 2, 1],          // 1 ур.
@@ -300,21 +302,24 @@ const GEAR_PIECES = [
   ['Наручи', 5, 2, 4], ['Плечи', 6, 2, 4],           // 4 ур.
   ['Шлем', 2, 2, 5], ['Амулет', 10, 5, 5],           // 5 ур.
 ];
+// id 300..449 = 3 класса × 10 предметов × 5 цветов
 let gearId = 300;
-for (const [piece, slot, type, lvl] of GEAR_PIECES) {
-  for (let q = 1; q <= 5; q++) {
-    const id = gearId++;
-    const name = `${piece} · ${GEAR_COLORS[q - 1]}`;
-    // характеристики модели на предмете (ориентировочно — нейтральный профиль × аффинити слота)
-    const stats = gearItemStats(slot, { level: lvl, quality: QUALITY_BY_RANK[q - 1] });
-    STATEMENTS.push(
-      `INSERT INTO item_templates (id, name, type, slot, quality, level_req, base_stats, icon, price, sellable, stackable)
-       VALUES (${id}, ${sq(name)}, ${type}, ${slot}, ${q}, ${lvl},
-         ${sq(JSON.stringify(stats))}::jsonb, ${sq('gear' + piece)}, ${50 * q * lvl}, TRUE, FALSE)
-       ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, type = EXCLUDED.type,
-         slot = EXCLUDED.slot, quality = EXCLUDED.quality, level_req = EXCLUDED.level_req,
-         base_stats = EXCLUDED.base_stats, icon = EXCLUDED.icon, price = EXCLUDED.price,
-         sellable = EXCLUDED.sellable, version = item_templates.version + 1`);
+for (const [cls, clsName] of GEAR_CLASSES) {
+  for (const [piece, slot, type, lvl] of GEAR_PIECES) {
+    for (let q = 1; q <= 5; q++) {
+      const id = gearId++;
+      const name = `${piece} «${clsName}» · ${GEAR_COLORS[q - 1]}`;
+      // характеристики по КЛАССУ предмета (профиль школы × аффинити слота); cls — для сет-бонуса
+      const stats = { cls, ...gearItemStats(slot, { cls, level: lvl, quality: QUALITY_BY_RANK[q - 1] }) };
+      STATEMENTS.push(
+        `INSERT INTO item_templates (id, name, type, slot, quality, level_req, base_stats, icon, price, sellable, stackable)
+         VALUES (${id}, ${sq(name)}, ${type}, ${slot}, ${q}, ${lvl},
+           ${sq(JSON.stringify(stats))}::jsonb, ${sq('gear' + piece)}, ${50 * q * lvl}, TRUE, FALSE)
+         ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, type = EXCLUDED.type,
+           slot = EXCLUDED.slot, quality = EXCLUDED.quality, level_req = EXCLUDED.level_req,
+           base_stats = EXCLUDED.base_stats, icon = EXCLUDED.icon, price = EXCLUDED.price,
+           sellable = EXCLUDED.sellable, version = item_templates.version + 1`);
+    }
   }
 }
 

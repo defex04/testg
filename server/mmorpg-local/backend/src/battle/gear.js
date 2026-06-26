@@ -47,6 +47,8 @@ const BASE_FRAC = 0.15, GEAR_FRAC = 0.45, POINTS_FRAC = 0.40;
 const HP_BASE = 0.30, POW_BASE = 0.35;
 export const POINTS_PER_LEVEL = 10;
 const MAX_LEVEL = 15;
+// атрибут, питающий школу (его вложение задаёт долю состязательного слоя)
+const SCHOOL_ATTR = { natisk: 'str', uklon: 'agi', oplot: 'vit' };
 /** Накоплено очков к уровню (10/ур). */
 export const pointsForLevel = (level) => POINTS_PER_LEVEL * Math.max(1, Number(level) || 1);
 /** Ожидаемая доля вложенных очков к уровню (1.0 на максимуме). */
@@ -60,14 +62,14 @@ const HP_WEIGHT = { legs: 0.15, chest: 0.22, boots: 0.08, mail: 0.22, bracers: 0
 // шмота, что и раньше (баланс треугольника НЕ меняется), но предметы становятся
 // различимыми (у шлема — Точность/Сопр.Криту, у ботинок — Уклонение, и т.д.).
 const AFFINITY_RAW = {
-  weapon:    { accuracy: 2, crit: 3 },
-  helmet:    { accuracy: 2, critResist: 2 },
-  chest:     { defense: 3, block: 1 },
-  mail:      { defense: 2, block: 2, counter: 1 },
-  legs:      { defense: 2, dodge: 2 },
-  boots:     { dodge: 3 },
-  bracers:   { accuracy: 2, crit: 2 },
-  shoulders: { defense: 1, block: 1, counter: 2, critResist: 1 },
+  weapon:    { accuracy: 2, crit: 3 },              // оружие — точность/крит
+  helmet:    { accuracy: 1, critResist: 2 },        // шлем — сопр.криту/точность
+  chest:     { defense: 1, dodge: 1 },              // куртка (лёгкая) — немного защиты + вёрткость
+  mail:      { defense: 3, block: 2 },              // кольчуга (тяжёлая) — самая защитная
+  legs:      { defense: 2, block: 1 },              // поножи — защита/блок (не уклон!)
+  boots:     { dodge: 3 },                          // ботинки — уклонение
+  bracers:   { accuracy: 2, crit: 2 },              // наручи — точность/крит
+  shoulders: { defense: 1, critResist: 1, counter: 2 }, // плечи — защита/контратака
 };
 // нормировка по столбцам (для каждого стата сумма долей по слотам = 1)
 const SLOT_AFFINITY = (() => {
@@ -127,34 +129,34 @@ export function genItem(slotKey, { school = 'natisk', level = 1, quality = 'blue
 }
 
 /**
- * «Ориентировочные» характеристики предмета по слоту ИГРЫ (для витрины магазина и
- * рюкзака): нейтральный профиль (среднее школ) × аффинити слота. Фиксированные, не
- * зависят от носителя; в бою вклад масштабируется реальной школой (composeFromEquipment).
- * Возвращает плоский объект статов модели (accuracy/defense/health/power/…).
+ * Характеристики предмета по слоту ИГРЫ и КЛАССУ (cls = natisk/uklon/oplot) — для
+ * витрины/рюкзака. Профиль класса × аффинити слота → класс-тематичные статы (вещь
+ * Натиска — точность/крит, Оплота — защита/блок). Без cls — нейтральный профиль.
  */
-export function gearItemStats(gameSlot, { level = 1, quality = 'blue', growth = DEFAULT_COEF.levelGrowth } = {}) {
+export function gearItemStats(gameSlot, { cls = null, level = 1, quality = 'blue', growth = DEFAULT_COEF.levelGrowth } = {}) {
+  const prof = (cls && SCHOOLS[cls]) ? SCHOOLS[cls] : NEUTRAL;
   const lf = levelFactor(level, growth);
   const q = QUALITY_MULT[quality] ?? 1;
   const out = {};
   if (Number(gameSlot) === SHIELD_SLOT) {        // щит — танковость (бонус к блоку/защите)
-    out.block = Math.round(NEUTRAL.block * GEAR_FRAC * 0.5 * q * lf) + 4;
-    out.defense = Math.round(NEUTRAL.defense * GEAR_FRAC * 0.5 * q * lf) + 6;
+    out.block = Math.round((prof.block || 0) * GEAR_FRAC * 0.5 * q * lf) + 4;
+    out.defense = Math.round((prof.defense || 0) * GEAR_FRAC * 0.5 * q * lf) + 6;
     return out;
   }
   if (Number(gameSlot) === AMULET_SLOT) {        // амулет — бонус крита/силы крита
-    out.crit = Math.round((NEUTRAL.crit || 0) * GEAR_FRAC * 0.5 * q * lf) + 2;
+    out.crit = Math.round((prof.crit || 0) * GEAR_FRAC * 0.5 * q * lf) + 2;
     out.critPower = 8 * q;                        // +Сила Крита, %
     return out;
   }
   const tri = GAME_SLOT_TO_TRI[Number(gameSlot)];
   if (!tri) return out;
   for (const key of CONTESTED) {
-    const v = (NEUTRAL[key] || 0) * GEAR_FRAC * (SLOT_AFFINITY[tri]?.[key] || 0) * q * lf;
+    const v = (prof[key] || 0) * GEAR_FRAC * (SLOT_AFFINITY[tri]?.[key] || 0) * q * lf;
     if (v >= 0.5) out[key] = Math.round(v);
   }
   const slotMeta = SLOTS.find((sm) => sm.key === tri);
-  if (slotMeta?.kind === 'weapon') out.power = Math.round((NEUTRAL.power || 0) * (1 - POW_BASE) * lf);
-  else out.health = Math.round((NEUTRAL.health || 0) * (1 - HP_BASE) * (HP_WEIGHT[tri] || 0) * lf);
+  if (slotMeta?.kind === 'weapon') out.power = Math.round((prof.power || 0) * (1 - POW_BASE) * lf);
+  else out.health = Math.round((prof.health || 0) * (1 - HP_BASE) * (HP_WEIGHT[tri] || 0) * lf);
   return out;
 }
 
@@ -174,7 +176,7 @@ export const QUALITY_BY_RANK = ['gray', 'green', 'blue', 'purple', 'orange'];  /
  * Надетые слоты → укомплектованность; среднее качество → множитель шмота; щит →
  * крепче блок/защита и чуть меньше Мощи (1H+щит), без щита но с оружием → +Мощь (2H).
  */
-export function composeFromEquipment(school, { level = 1, items = [], allocFrac = null, growth = DEFAULT_COEF.levelGrowth } = {}) {
+export function composeFromEquipment(school, { level = 1, items = [], allocFrac = null, attrs = null, growth = DEFAULT_COEF.levelGrowth } = {}) {
   const equipped = new Set();
   let qSum = 0, qN = 0, shield = false, weapon = false, amulet = false;
   for (const it of items || []) {
@@ -186,7 +188,7 @@ export function composeFromEquipment(school, { level = 1, items = [], allocFrac 
     if (it.quality != null) { qSum += Math.min(5, Math.max(1, Number(it.quality) || 1)); qN++; }
   }
   const quality = QUALITY_BY_RANK[Math.round(qN ? qSum / qN : 3) - 1] || 'blue';
-  const built = composeBuild(school, { level, equipped: [...equipped], quality, allocFrac, growth });
+  const built = composeBuild(school, { level, equipped: [...equipped], quality, allocFrac, attrs, growth });
   const s = built.stats;
   if (shield) {                      // 1H + щит: танковее (уклон в Оплот)
     s.block = Math.max(1, Math.round(s.block * 1.25));
@@ -211,13 +213,18 @@ export function composeFromEquipment(school, { level = 1, items = [], allocFrac 
  * statNorm = refCompleteness(level)·lf — нормальный билд даёт профильные шансы.
  */
 export function composeBuild(school, {
-  level = 1, quality = 'blue', equipped = null, allocFrac = null, growth = DEFAULT_COEF.levelGrowth,
+  level = 1, quality = 'blue', equipped = null, allocFrac = null, attrs = null, growth = DEFAULT_COEF.levelGrowth,
 } = {}) {
   const s = SCHOOLS[school] || SCHOOLS.natisk;
   const lf = levelFactor(level, growth);
   const q = QUALITY_MULT[quality] ?? 1;
   const slots = new Set(equipped || unlockedSlots(level));
-  const alloc = allocFrac == null ? expectedAllocFrac(level) : Math.min(1, Math.max(0, allocFrac));
+  // доля состязательного слоя: явная allocFrac → иначе от РЕАЛЬНОГО вложения в атрибут
+  // школы (полное вложение = эталон уровня, баланс сохранён) → иначе ожидаемое по уровню
+  let alloc;
+  if (allocFrac != null) alloc = Math.min(1, Math.max(0, allocFrac));
+  else if (attrs) alloc = Math.min(1, (Number(attrs[SCHOOL_ATTR[school]]) || 0) / (POINTS_PER_LEVEL * MAX_LEVEL));
+  else alloc = expectedAllocFrac(level);
   const equippedFrac = slots.size / N_SLOTS;
   const hpFrac = ARMOR_KEYS.reduce((a, k) => a + (slots.has(k) ? (HP_WEIGHT[k] || 0) : 0), 0);
   const hasWeapon = slots.has('weapon');
@@ -242,6 +249,19 @@ export function composeBuild(school, {
       continue;
     }
     out[key] = Math.max(1, Math.round((s[key] ?? STAT_DEFAULTS[key]) * lf));   // мана/ярость/инициатива
+  }
+  // Атрибуты усиливают «свои» статы. ВАЖНО: только СКЕЛЕТ (Мощь/HP/Инициатива) — он не
+  // меняет соотношения состязательного слоя, поэтому ТРЕУГОЛЬНИК НЕ ЛОМАЕТСЯ (сам угол
+  // даёт школа: Уклон уже вёрткий и т.д.). Сила→Мощь(урон), Выносливость→HP, Ловкость→
+  // Инициатива (+чуть крита). Доля вложения 0..1 от ожидаемого максимума очков уровня.
+  if (attrs) {
+    const pl = POINTS_PER_LEVEL * Math.max(1, level);
+    const f = (v) => Math.min(1, Math.max(0, (Number(v) || 0) / pl));
+    const fs = f(attrs.str), fa = f(attrs.agi), fv = f(attrs.vit);
+    out.power = Math.round(out.power * (1 + 0.12 * fs));            // Сила → Мощь (урон)
+    out.health = Math.round(out.health * (1 + 0.12 * fv));         // Выносливость → Здоровье
+    out.initiative = Math.round(out.initiative * (1 + 0.25 * fa)); // Ловкость → Инициатива
+    out.crit = Math.round(out.crit * (1 + 0.14 * fa));            // Ловкость → Крит (урон Уклона)
   }
   return { stats: out, statNorm: refCompleteness(level) * lf };
 }

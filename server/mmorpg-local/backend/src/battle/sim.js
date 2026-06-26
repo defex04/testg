@@ -52,10 +52,16 @@ function buildTeam(side, p, model) {
   if (school) {
     if (p.gear !== undefined && p.gear !== null && p.gear !== false) {
       const g = (p.gear && typeof p.gear === 'object') ? p.gear : {};
+      // атрибуты: явные (g.attrs) или по умолчанию ПОЛНОЕ вложение в атрибут школы
+      // (str→natisk, agi→uklon, vit→oplot), чтобы матрица отражала «достроенного» бойца
+      const pl = 10 * level;
+      const attrs = g.attrs || { str: school === 'natisk' ? pl : 0,
+        agi: school === 'uklon' ? pl : 0, vit: school === 'oplot' ? pl : 0 };
       const built = composeBuild(school, {
         level, quality: p.quality, growth: model.coef.levelGrowth,
         equipped: Array.isArray(g.equipped) ? g.equipped : null,
         allocFrac: g.allocFrac != null ? Number(g.allocFrac) : null,   // null → ожидаемое для уровня
+        attrs,
       });
       schoolBase = built.stats;
       statNorm = built.statNorm;   // нормировка по ожидаемой укомплектованности уровня

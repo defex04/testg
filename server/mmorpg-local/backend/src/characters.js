@@ -115,6 +115,7 @@ export async function getCharacter(id) {
   const model = await combatModelFor(ch.id, ch.level).catch(() => null);
   ch.school = model ? model.school : null;
   ch.params = model ? model.stats : null;
+  ch.setBonus = model ? model.setBonus : 1;   // ×1.05 свой класс / ×0.85 разные / ×1 нейтр.
   ch.buff = await livingWaterStatus(ch.id).catch(() => ({ active: false }));
   return ch;
 }
@@ -212,20 +213,39 @@ export async function combatModelFor(charId, level) {
     game.query(`SELECT str, agi, vit FROM character_stats WHERE character_id = $1`, [charId])
       .then((q) => q.rows[0]),
     game.query(
-      `SELECT t.slot, t.quality FROM item_instances i
+      `SELECT t.slot, t.quality, t.base_stats FROM item_instances i
          JOIN item_templates t ON t.id = i.template_id
         WHERE i.owner_type = 2 AND i.owner_id = $1 AND i.status = 1 AND t.slot IS NOT NULL`,
       [charId]).then((q) => q.rows),
     buffMult(charId),
   ]);
   const school = schoolFromStats(statRow);
-  const built = composeFromEquipment(school, { level: Number(level) || 1, items: eq });
+  // атрибуты усиливают «свои» статы: Сила→Мощь(урон), Ловкость→Уклон/Крит, Выносл→HP/Защита
+  const attrs = statRow ? { str: Number(statRow.str) || 0, agi: Number(statRow.agi) || 0, vit: Number(statRow.vit) || 0 } : null;
+  const built = composeFromEquipment(school, { level: Number(level) || 1, items: eq, attrs });
+  // сет-бонус по КЛАССУ вещей: всё своего класса → +5%, разные классы → −15% ко ВСЕМ статам
+  const set = setBonus(eq, school);
+  if (set !== 1) for (const k of Object.keys(built.stats)) built.stats[k] = Math.max(1, Math.round(built.stats[k] * set));
   if (mult !== 1) {                     // «живая вода»: +10% к HP и Мощи (→ +10% урона)
     built.stats.health = Math.max(1, Math.round(built.stats.health * mult));
     built.stats.power = Math.max(1, Math.round(built.stats.power * mult));
   }
   return { hp: built.stats.health, stats: built.stats, statNorm: built.statNorm,
-           school, damage: [1, 1] };
+           school, setBonus: set, damage: [1, 1] };
+}
+
+/**
+ * Сет-бонус по классам надетых вещей (классы — в base_stats.cls):
+ *  - всё своего класса (= школа) → ×1.05 (+5%);
+ *  - надеты вещи РАЗНЫХ классов → ×0.85 (−15%);
+ *  - один класс, но не твой / нет классовых вещей → ×1.0.
+ */
+export function setBonus(equipItems, school) {
+  const classes = (equipItems || []).map((it) => it.base_stats && it.base_stats.cls).filter(Boolean);
+  if (!classes.length) return 1;
+  const uniq = new Set(classes);
+  if (uniq.size > 1) return 0.85;
+  return [...uniq][0] === school ? 1.05 : 1;
 }
 
 export async function addExp(client, charId, amount) {
