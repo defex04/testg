@@ -52,6 +52,34 @@ const slotNameFor = (slotId) =>
 const slotIdFor = (slotName) =>
   SLOT_IDS[slotName] ?? Number(String(slotName).replace('slot', ''));
 
+// Значки снаряжения по серверному слоту: если шаблон прислал технический icon-код,
+// в рюкзаке всё равно показываем узнаваемый предмет, а не коробку.
+const GEAR_EMOJI_BY_SLOT_ID = {
+  1: '🥋', 2: '⛑️', 3: '👖', 4: '🥾', 5: '🧤',
+  6: '🧥', 7: '⚔️', 8: '🛡️', 9: '⛓️', 10: '📿',
+};
+const GEAR_EMOJI_BY_SLOT = {
+  head: '⛑️', shoulders: '🧥', mainhand: '⚔️', torso: '🥋', belt: '🧷',
+  amulet: '📿', hands: '🧤', offhand: '🛡️', legs: '👖', feet: '🥾',
+};
+function gearIconFromSlot(slot) {
+  if (slot == null) return '';
+  const raw = String(slot);
+  if (/^\d+$/.test(raw)) return GEAR_EMOJI_BY_SLOT_ID[Number(raw)] || '';
+  return GEAR_EMOJI_BY_SLOT[raw] || '';
+}
+function gearIconFromType(type) {
+  const n = Number(type);
+  if (n === 1) return '⚔️';
+  if (n === 5) return '📿';
+  if (n === 2) return '🛡️';
+  return '📦';
+}
+function gearIconForItem(it) {
+  return gearIconFromSlot(it?.slot) || gearIconFromType(it?.type);
+}
+const qClass = (on, quality) => on ? ' q' + Math.min(5, Math.max(1, Number(quality) || 1)) : '';
+
 // id локации в БД сервера -> ключ в LOCATIONS (клиентские локации без id)
 const LOC_BY_ID = Object.fromEntries(
   Object.entries(LOCATIONS).filter(([, l]) => l.id).map(([k, l]) => [l.id, k]));
@@ -2076,7 +2104,7 @@ function pinfoSectionsHtml(p) {
       const label = SLOT_META[slotNameFor(e.slot)]?.name || 'Слот';
       const ench = e.enchant > 0 ? ` <span class="pinfo-ench">+${e.enchant}</span>` : '';
       return `<div class="pinfo-equip-row">
-        <span class="pinfo-equip-ico">${esc(itemIconText(e.icon, e.type))}</span>
+        <span class="pinfo-equip-ico">${esc(itemIconText(e.icon, e.type, e.stats, e.slot))}</span>
         <span class="pinfo-equip-slot">${esc(label)}</span>
         <span class="pinfo-equip-name">${esc(e.name)}${ench}</span>
       </div>`;
@@ -2177,9 +2205,9 @@ async function refreshMailUnread() {
 }
 
 /** Символ предмета: серверный icon-ключ (буквы вроде elixirHealth) — не символ. */
-function itemIconText(icon, type, stats) {
+function itemIconText(icon, type, stats, slot) {
   if (type === 4) return ELIXIR_EMOJI[elixirKindFromStats(stats)] || '🧪';
-  if (!icon || /[A-Za-z]/.test(String(icon))) return type === 2 ? '🛡️' : '📦';
+  if (!icon || /[A-Za-z]/.test(String(icon))) return gearIconFromSlot(slot) || gearIconFromType(type);
   return icon;
 }
 
@@ -3109,7 +3137,11 @@ function renderBattleSummary() {
 let serverInv = [];
 
 /** Ключ шаблона предмета в ITEMS: знакомые получают 3D, остальные — без. */
-const itemKeyFor = (it) => it.icon || 'srv' + it.templateId;
+const itemKeyFor = (it) => {
+  const icon = it?.icon;
+  if (icon && !/[A-Za-z]/.test(String(icon))) return icon;
+  return 'srv' + (it?.templateId ?? it?.id ?? '');
+};
 
 // Эмодзи-иконка эликсира по его эффекту. Серверные icon-строки шаблонов
 // (вроде 'elixirHealth') в ITEMS не маппятся — без этого в рюкзаке висела бы
@@ -3166,11 +3198,15 @@ function registerServerItems(inv) {
   for (const it of inv) {
     const slotName = slotNameFor(it.slot);
     const key = itemKeyFor(it);
+    const ek = it.type === 4 ? elixirKindFromStats(it.stats) : null;
+    const icon = ek ? ELIXIR_EMOJI[ek] : gearIconForItem(it);
     if (!ITEMS[key]) {
-      // эликсиру (type 4) даём колбу/реторту по эффекту, прочему — коробку
-      const ek = it.type === 4 ? elixirKindFromStats(it.stats) : null;
-      ITEMS[key] = { name: it.name, slot: slotName,
-        icon: ek ? ELIXIR_EMOJI[ek] : '📦', noModel: true };
+      ITEMS[key] = { name: it.name, slot: slotName, icon, quality: it.quality || 1, noModel: true };
+    } else {
+      ITEMS[key].name = it.name || ITEMS[key].name;
+      ITEMS[key].slot = slotName || ITEMS[key].slot;
+      ITEMS[key].quality = it.quality || ITEMS[key].quality || 1;
+      if (!ITEMS[key].icon || ITEMS[key].icon === '📦' || /[A-Za-z]/.test(String(ITEMS[key].icon))) ITEMS[key].icon = icon;
     }
     if (it.equipped && slotName) equippedBySlot[slotName] = key;
   }
@@ -3293,6 +3329,29 @@ let cooldownTimer = null;              // тикер пересчёта серо
 
 const elixirGlyph = (kind) => ELIXIR_EMOJI[kind] || '🧪';
 
+function normalizeTimedEffect(e, now = Date.now()) {
+  if (!e || typeof e !== 'object') return null;
+  const rawEnd = Number(e.endsAt);
+  const rawRemain = Number(e.remainSec);
+  if (Number.isFinite(rawEnd) && rawEnd > 0) {
+    e.endsAt = rawEnd;
+  } else if (Number.isFinite(rawRemain) && rawRemain > 0) {
+    e.endsAt = now + rawRemain * 1000;
+  } else {
+    e.remainSec = 0;
+    return e;
+  }
+  e.remainSec = Math.max(0, Math.ceil((e.endsAt - now) / 1000));
+  return e;
+}
+
+function activeTimedEffects(f) {
+  if (!f || !Array.isArray(f.effects)) return [];
+  const now = Date.now();
+  for (const e of f.effects) normalizeTimedEffect(e, now);
+  return f.effects.filter((e) => Number(e.remainSec) > 0);
+}
+
 /**
  * Состояние «недоступности» слота расходника (серая зона + таймер). Эликсир недоступен,
  * пока его эффект того же вида активен НА МНЕ (по умолчанию цель — я); свиток — пока идёт
@@ -3306,10 +3365,10 @@ function slotCoolState(kind) {
   if (kind === 'power') { remain = selfBuffTurns; unit = 'turn'; }
   else if (kind === 'blood') { remain = Number(left?.critBuffTurns) || 0; unit = 'turn'; }
   else if (kind === 'health') {
-    const e = (left?.effects || []).filter((x) => x.kind === 'health' || x.kind === 'heal_scroll');
+    const e = activeTimedEffects(left).filter((x) => x.kind === 'health' || x.kind === 'heal_scroll');
     remain = e.length ? Math.max(...e.map((x) => x.remainSec || 0)) : 0;
   } else if (kind === 'mana') {
-    const e = (left?.effects || []).find((x) => x.kind === 'mana');
+    const e = activeTimedEffects(left).find((x) => x.kind === 'mana');
     remain = e ? (e.remainSec || 0) : 0;
   } else if (kind === 'poison' || kind === 'heal_scroll' || kind === 'cleanse') {
     remain = Math.max(0, Math.ceil(((scrollCdEnd[kind] || 0) - Date.now()) / 1000));
@@ -3574,7 +3633,7 @@ function effectsForFighter(f) {
     out.push({ icon: '🩸', time: critT, unit: 'turn', kind: 'buff',
       label: `Эликсир крови: крит +${pct}%`, q: f?.critBuffQuality || 0 });
   }
-  for (const e of f?.effects || []) {
+  for (const e of activeTimedEffects(f)) {
     const m = OT_CHIP[e.kind] || { icon: '✦', kind: 'buff', label: 'Эффект' };
     const every = Number(e.everySec) || 0;
     out.push({ icon: m.icon, time: e.remainSec, unit: 'sec', every, kind: m.kind,
@@ -3658,6 +3717,7 @@ function stopCooldownTicker() {
 /** Каждые 250мс: осветляем серую зону и тикаем число; слот освободился/занялся → пересбор. */
 function tickCombatCooldowns() {
   if (mode !== 'battle' || !elixirSlotsEl) { stopCooldownTicker(); return; }
+  refreshHeaderEffects();
   const filled = elixirSlotsEl.querySelectorAll('.combat-slot.elixir.filled');
   let needRerender = false, idx = 0;
   for (let i = 0; i < ELIXIR_SLOTS; i++) {
@@ -3991,10 +4051,11 @@ function renderDoll() {
       const cell = document.createElement('button');
       cell.type = 'button';
       cell.className = 'doll-cell' + (item ? ' filled' : '')
+        + qClass(!!item, item?.quality || 1)
         + (selectedSlot === slot ? ' selected' : '');
       cell.title = item ? `${meta.name}: ${item.name} (клик — снять)` : meta.name;
       cell.innerHTML = item
-        ? `<span class="dc-item">${item.icon || '📦'}</span>`
+        ? `<span class="dc-item">${item.icon || gearIconFromSlot(slot) || '📦'}</span>`
         : `<span class="dc-ghost">${SLOT_ICONS[slot] || ''}</span>`;
       cell.addEventListener('click', () => {
         if (item) {                       // надето — клик снимает
@@ -4107,14 +4168,14 @@ function renderInventory() {
     const count = isElixir ? available : qty;     // эликсиры: свободно в рюкзаке (#2)
     const cell = document.createElement('button');
     cell.type = 'button';
-    cell.className = 'inv-cell' + (isElixir ? ' q' + quality : '')
+    cell.className = 'inv-cell' + qClass(isElixir || !!slotName, quality)
       + (equipped ? ' equipped' : '')
       + (selectedInvId === r.id ? ' selected' : '');
     // выбран пустой слот куклы: подходящие подсвечиваем, прочие гасим
     if (selectedSlot) cell.classList.add(slotName === selectedSlot ? 'match' : 'dim');
     cell.title = item.name + (count !== 1 || isElixir ? ` ×${count}` : '');
     const showQty = isElixir || qty > 1;
-    cell.innerHTML = `<span class="inv-cell-ico">${item.icon || '📦'}</span>`
+    cell.innerHTML = `<span class="inv-cell-ico">${item.icon || gearIconFromSlot(slotName) || '📦'}</span>`
       + (showQty ? `<span class="inv-cell-qty">${count}</span>` : '')
       + (equipped ? '<span class="inv-cell-on" title="Надето">✓</span>' : '');
     cell.addEventListener('click', () => {
@@ -4211,7 +4272,7 @@ function renderInvPreview(row) {
   invPreviewEl.classList.remove('hidden');
   invPreviewEl.innerHTML = `
     <div class="ip-head">
-      <span class="ip-ico${isElixir ? ' q' + quality : ''}">${item.icon || '📦'}</span>
+      <span class="ip-ico${qClass(isElixir || !!slotName, quality)}">${item.icon || gearIconFromSlot(slotName) || '📦'}</span>
       <span class="ip-name">${esc(item.name)}</span>
       <button type="button" class="ip-close" title="Закрыть">✕</button>
     </div>

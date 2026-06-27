@@ -265,8 +265,8 @@ function withNpcModel(member, fallbackLevel) {
     equipped: Array.isArray(member.equipped) ? member.equipped : [],
     allocFrac: member.allocFrac != null ? Number(member.allocFrac) : 0,
   });
-  const hpMult = Number.isFinite(Number(member.modelHpMult)) ? Number(member.modelHpMult) : 0.75;
-  const powerMult = Number.isFinite(Number(member.modelPowerMult)) ? Number(member.modelPowerMult) : 0.65;
+  const hpMult = Number.isFinite(Number(member.modelHpMult)) ? Number(member.modelHpMult) : 0.95;
+  const powerMult = Number.isFinite(Number(member.modelPowerMult)) ? Number(member.modelPowerMult) : 0.78;
   built.stats.health = Math.max(1, Math.round(built.stats.health * hpMult));
   built.stats.power = Math.max(1, Math.round(built.stats.power * powerMult));
   return { ...member, stats: built.stats, statNorm: built.statNorm,
@@ -361,14 +361,14 @@ export async function startHunt(ch, send, npcId = null) {
     ? pack.map((m, i) => ({
         id: `npc-${npc.id}-${i + 1}`, name: m.name || `${npc.name} ${i + 1}`,
         level: m.level ?? npc.level, isAI: true,
-        hp: Number(m.hp) || 90, damage: m.damage || [6, 10],
+        hp: Number(m.hp) || 100, damage: m.damage || [7, 11],
         crit: m.crit ?? 0.1, dodge: m.dodge ?? 0.05,
         aiPoisonUses: m.aiPoisonUses, aiPoisonPct: m.aiPoisonPct,
         aiPoisonSecs: m.aiPoisonSecs, aiPoisonEvery: m.aiPoisonEvery,
         aiHealAllyUses: m.aiHealAllyUses, aiHealAmount: m.aiHealAmount, aiHealAt: m.aiHealAt,
         aiPowerUses: m.aiPowerUses, aiPowerMult: m.aiPowerMult, aiPowerTurns: m.aiPowerTurns }))
     : [{ id: `npc-${npc.id}`, name: npc.name, level: npc.level, isAI: true,
-         ...stats, hp: Number(stats.hp) || 160, damage: stats.damage || [10, 16],
+         ...stats, hp: Number(stats.hp) || 180, damage: stats.damage || [13, 19],
          aiHealUses: stats.aiHealUses ?? 0, aiPowerUses: stats.aiPowerUses ?? 0,
          aiHealAmount: stats.aiHealAmount ?? 45, aiHealAt: stats.aiHealAt ?? 0.45,
          aiPowerMult: stats.aiPowerMult ?? 1.15, aiPowerTurns: stats.aiPowerTurns ?? 1 }];

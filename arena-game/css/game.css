@@ -1862,8 +1862,12 @@ body.loc-castle.in-battle .sprite-main .sm-ico {
   background: linear-gradient(180deg, rgba(var(--qc), .18), rgba(var(--qc), .06)),
               linear-gradient(180deg, rgba(32, 39, 19, .9), rgba(15, 20, 9, .9));
 }
-.ip-ico.q1, .ip-ico.q2, .ip-ico.q3, .ip-ico.q4, .ip-ico.q5 {
-  filter: drop-shadow(0 0 6px rgba(var(--qc), .8));
+.ip-ico.q1, .ip-ico.q2, .ip-ico.q3, .ip-ico.q4, .ip-ico.q5,
+.doll-cell.filled.q1, .doll-cell.filled.q2, .doll-cell.filled.q3, .doll-cell.filled.q4, .doll-cell.filled.q5 {
+  border-color: rgba(var(--qc), .9);
+  background: radial-gradient(120% 120% at 50% 22%, rgba(var(--qc), .48), rgba(var(--qc), .12) 70%),
+              linear-gradient(180deg, #1b2210, #101509);
+  box-shadow: 0 0 11px rgba(var(--qc), .38), inset 0 0 9px rgba(var(--qc), .22);
 }
 /* боевой пояс и пояс примерочной: рамка/свечение ячейки = качество (перебивает kind-*) */
 .combat-slot.elixir.filled.q1, .combat-slot.elixir.filled.q2,
@@ -3692,7 +3696,18 @@ button.belt-slot { padding: 0; font: inherit; color: inherit; -webkit-tap-highli
 }
 .inv-params.hidden { display: none; }
 .ip-head { display: flex; align-items: center; gap: 8px; }
-.ip-ico { font-size: 24px; line-height: 1; }
+.ip-ico {
+  flex: none;
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line-dim);
+  border-radius: 8px;
+  background: linear-gradient(180deg, #151c0d, #0d1208);
+  font-size: 24px;
+  line-height: 1;
+}
 .ip-name { flex: 1; font: 700 14px var(--font-display); color: var(--gold-bright); }
 .ip-close {
   flex: 0 0 auto;

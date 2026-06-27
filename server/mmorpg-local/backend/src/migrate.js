@@ -132,8 +132,8 @@ const STATEMENTS = [
    ON CONFLICT (from_id, to_id) DO NOTHING`,
   `UPDATE npc_templates
       SET stats = coalesce(stats, '{}'::jsonb)
-        || '{"hp": 160, "damage": [10, 16], "crit": 0.06, "dodge": 0.03,
-             "school": "natisk", "modelHpMult": 0.72, "modelPowerMult": 0.58,
+        || '{"hp": 180, "damage": [13, 19], "crit": 0.07, "dodge": 0.04,
+             "school": "natisk", "modelHpMult": 1.02, "modelPowerMult": 0.80,
              "aiHealUses": 0, "aiPowerUses": 0,
              "aiHealAmount": 45, "aiHealAt": 0.45,
              "aiPowerMult": 1.15, "aiPowerTurns": 1}'::jsonb
@@ -144,9 +144,9 @@ const STATEMENTS = [
   `INSERT INTO npc_templates (id, name, level, stats, props) VALUES
      (2, 'Шайка разбойников', 1,
       '{"pack":[
-         {"name":"Разбойник-отравитель","school":"uklon","level":1,"hp":80,"damage":[5,9],"crit":0.06,"dodge":0.04,"modelHpMult":0.42,"modelPowerMult":0.42,"aiPoisonUses":2,"aiPoisonPct":0.03,"aiPoisonSecs":15,"aiPoisonEvery":5},
-         {"name":"Разбойник-лекарь","school":"oplot","level":1,"hp":95,"damage":[4,8],"crit":0.04,"dodge":0.03,"modelHpMult":0.42,"modelPowerMult":0.38,"aiHealAllyUses":1,"aiHealAmount":35,"aiHealAt":0.55},
-         {"name":"Разбойник-громила","school":"natisk","level":1,"hp":105,"damage":[7,12],"crit":0.07,"dodge":0.03,"modelHpMult":0.45,"modelPowerMult":0.45,"aiPowerUses":1,"aiPowerMult":1.15,"aiPowerTurns":1}
+         {"name":"Разбойник-отравитель","school":"uklon","level":1,"hp":90,"damage":[6,10],"crit":0.07,"dodge":0.05,"modelHpMult":0.48,"modelPowerMult":0.48,"aiPoisonUses":2,"aiPoisonPct":0.035,"aiPoisonSecs":15,"aiPoisonEvery":5},
+         {"name":"Разбойник-лекарь","school":"oplot","level":1,"hp":105,"damage":[5,9],"crit":0.05,"dodge":0.03,"modelHpMult":0.48,"modelPowerMult":0.43,"aiHealAllyUses":1,"aiHealAmount":40,"aiHealAt":0.55},
+         {"name":"Разбойник-громила","school":"natisk","level":1,"hp":120,"damage":[8,13],"crit":0.08,"dodge":0.03,"modelHpMult":0.52,"modelPowerMult":0.52,"aiPowerUses":1,"aiPowerMult":1.18,"aiPowerTurns":1}
        ],"reward":{"currency":"copper","amount":125,"exp":70}}'::jsonb,
       '{"injury_chance":0}'::jsonb)
    ON CONFLICT (id) DO NOTHING`,
@@ -159,11 +159,11 @@ const STATEMENTS = [
    BEGIN
      IF NOT EXISTS (SELECT 1 FROM game_config WHERE key = 'migration.npc_schools_v1_done') THEN
        UPDATE npc_templates SET stats = coalesce(stats, '{}'::jsonb)
-         || '{"school":"natisk","modelHpMult":0.72,"modelPowerMult":0.58}'::jsonb WHERE id = 1;
+         || '{"school":"natisk","modelHpMult":1.02,"modelPowerMult":0.80}'::jsonb WHERE id = 1;
        UPDATE npc_templates SET stats = jsonb_set(stats, '{pack}', '[
-         {"name":"Разбойник-отравитель","school":"uklon","level":1,"hp":80,"damage":[5,9],"crit":0.06,"dodge":0.04,"modelHpMult":0.42,"modelPowerMult":0.42,"aiPoisonUses":2,"aiPoisonPct":0.03,"aiPoisonSecs":15,"aiPoisonEvery":5},
-         {"name":"Разбойник-лекарь","school":"oplot","level":1,"hp":95,"damage":[4,8],"crit":0.04,"dodge":0.03,"modelHpMult":0.42,"modelPowerMult":0.38,"aiHealAllyUses":1,"aiHealAmount":35,"aiHealAt":0.55},
-         {"name":"Разбойник-громила","school":"natisk","level":1,"hp":105,"damage":[7,12],"crit":0.07,"dodge":0.03,"modelHpMult":0.45,"modelPowerMult":0.45,"aiPowerUses":1,"aiPowerMult":1.15,"aiPowerTurns":1}
+         {"name":"Разбойник-отравитель","school":"uklon","level":1,"hp":90,"damage":[6,10],"crit":0.07,"dodge":0.05,"modelHpMult":0.48,"modelPowerMult":0.48,"aiPoisonUses":2,"aiPoisonPct":0.035,"aiPoisonSecs":15,"aiPoisonEvery":5},
+         {"name":"Разбойник-лекарь","school":"oplot","level":1,"hp":105,"damage":[5,9],"crit":0.05,"dodge":0.03,"modelHpMult":0.48,"modelPowerMult":0.43,"aiHealAllyUses":1,"aiHealAmount":40,"aiHealAt":0.55},
+         {"name":"Разбойник-громила","school":"natisk","level":1,"hp":120,"damage":[8,13],"crit":0.08,"dodge":0.03,"modelHpMult":0.52,"modelPowerMult":0.52,"aiPowerUses":1,"aiPowerMult":1.18,"aiPowerTurns":1}
        ]'::jsonb) WHERE id = 2 AND stats ? 'pack';
        INSERT INTO game_config (key, value) VALUES ('migration.npc_schools_v1_done', 'true'::jsonb);
      END IF;
@@ -173,21 +173,43 @@ const STATEMENTS = [
      IF NOT EXISTS (SELECT 1 FROM game_config WHERE key = 'migration.hunt_npc_low_level_v1_done') THEN
        UPDATE npc_templates SET level = 1,
           stats = coalesce(stats, '{}'::jsonb)
-            || '{"hp":160,"damage":[10,16],"crit":0.06,"dodge":0.03,
-                 "school":"natisk","modelHpMult":0.72,"modelPowerMult":0.58,
+            || '{"hp":180,"damage":[13,19],"crit":0.07,"dodge":0.04,
+                 "school":"natisk","modelHpMult":1.02,"modelPowerMult":0.80,
                  "aiHealUses":0,"aiPowerUses":0,
                  "aiHealAmount":45,"aiHealAt":0.45,
                  "aiPowerMult":1.15,"aiPowerTurns":1}'::jsonb
         WHERE id = 1;
        UPDATE npc_templates SET level = 1,
           stats = coalesce(stats, '{}'::jsonb) || '{"pack":[
-            {"name":"Разбойник-отравитель","school":"uklon","level":1,"hp":80,"damage":[5,9],"crit":0.06,"dodge":0.04,"modelHpMult":0.42,"modelPowerMult":0.42,"aiPoisonUses":2,"aiPoisonPct":0.03,"aiPoisonSecs":15,"aiPoisonEvery":5},
-            {"name":"Разбойник-лекарь","school":"oplot","level":1,"hp":95,"damage":[4,8],"crit":0.04,"dodge":0.03,"modelHpMult":0.42,"modelPowerMult":0.38,"aiHealAllyUses":1,"aiHealAmount":35,"aiHealAt":0.55},
-            {"name":"Разбойник-громила","school":"natisk","level":1,"hp":105,"damage":[7,12],"crit":0.07,"dodge":0.03,"modelHpMult":0.45,"modelPowerMult":0.45,"aiPowerUses":1,"aiPowerMult":1.15,"aiPowerTurns":1}
+            {"name":"Разбойник-отравитель","school":"uklon","level":1,"hp":90,"damage":[6,10],"crit":0.07,"dodge":0.05,"modelHpMult":0.48,"modelPowerMult":0.48,"aiPoisonUses":2,"aiPoisonPct":0.035,"aiPoisonSecs":15,"aiPoisonEvery":5},
+            {"name":"Разбойник-лекарь","school":"oplot","level":1,"hp":105,"damage":[5,9],"crit":0.05,"dodge":0.03,"modelHpMult":0.48,"modelPowerMult":0.43,"aiHealAllyUses":1,"aiHealAmount":40,"aiHealAt":0.55},
+            {"name":"Разбойник-громила","school":"natisk","level":1,"hp":120,"damage":[8,13],"crit":0.08,"dodge":0.03,"modelHpMult":0.52,"modelPowerMult":0.52,"aiPowerUses":1,"aiPowerMult":1.18,"aiPowerTurns":1}
           ]}'::jsonb
         WHERE id = 2;
        INSERT INTO game_config (key, value)
           VALUES ('migration.hunt_npc_low_level_v1_done', 'true'::jsonb);
+     END IF;
+   END $$`,
+  `DO $$
+   BEGIN
+     IF NOT EXISTS (SELECT 1 FROM game_config WHERE key = 'migration.hunt_npc_bandit_tune_v2_done') THEN
+       UPDATE npc_templates SET level = 1,
+          stats = coalesce(stats, '{}'::jsonb)
+            || '{"hp":180,"damage":[13,19],"crit":0.07,"dodge":0.04,
+                 "school":"natisk","modelHpMult":1.02,"modelPowerMult":0.80,
+                 "aiHealUses":0,"aiPowerUses":0,
+                 "aiHealAmount":45,"aiHealAt":0.45,
+                 "aiPowerMult":1.15,"aiPowerTurns":1}'::jsonb
+        WHERE id = 1;
+       UPDATE npc_templates SET level = 1,
+          stats = coalesce(stats, '{}'::jsonb) || '{"pack":[
+            {"name":"Разбойник-отравитель","school":"uklon","level":1,"hp":90,"damage":[6,10],"crit":0.07,"dodge":0.05,"modelHpMult":0.48,"modelPowerMult":0.48,"aiPoisonUses":2,"aiPoisonPct":0.035,"aiPoisonSecs":15,"aiPoisonEvery":5},
+            {"name":"Разбойник-лекарь","school":"oplot","level":1,"hp":105,"damage":[5,9],"crit":0.05,"dodge":0.03,"modelHpMult":0.48,"modelPowerMult":0.43,"aiHealAllyUses":1,"aiHealAmount":40,"aiHealAt":0.55},
+            {"name":"Разбойник-громила","school":"natisk","level":1,"hp":120,"damage":[8,13],"crit":0.08,"dodge":0.03,"modelHpMult":0.52,"modelPowerMult":0.52,"aiPowerUses":1,"aiPowerMult":1.18,"aiPowerTurns":1}
+          ]}'::jsonb
+        WHERE id = 2;
+       INSERT INTO game_config (key, value)
+          VALUES ('migration.hunt_npc_bandit_tune_v2_done', 'true'::jsonb);
      END IF;
    END $$`,
   // --- Почта -----------------------------------------------------------
