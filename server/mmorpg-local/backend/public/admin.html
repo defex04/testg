@@ -562,7 +562,8 @@ const D = {
   bStatus:{1:'набор',2:'идёт',3:'завершён',4:'прерван'},
   result:{1:'победа',2:'поражение',3:'ничья',4:'покинул',5:'таймаут'},
   itemType:{1:'оружие',2:'броня',3:'ресурс',4:'эликсир',5:'артефакт',6:'скальп',7:'подарок'},
-  slot:{1:'торс'},
+  slot:{1:'торс',2:'шлем',3:'поножи',4:'ботинки',5:'наручи',6:'плечи',7:'оружие',8:'щит',9:'кольчуга',10:'амулет'},
+  school:{natisk:'Натиск',uklon:'Уклон',oplot:'Оплот'},
   zone:{high:'голову',mid:'корпус',low:'ноги'},
   rep:{1:'однократное',2:'ежедневное',3:'еженедельное'},
   accStatus:{1:'активен',2:'заморожен',3:'забанен',4:'удалён'},
@@ -594,7 +595,7 @@ function barChart(rows, labelKey, valueKey){
 const SECTIONS = [
   ['stats','Общая статистика'],['chars','Персонажи'],['accounts','Аккаунты'],
   ['battles','Бои'],['battlecfg','Настройки боёв'],['simulate','Симуляция боёв'],
-  ['livesim','Живой бой'],
+  ['livesim','Живой бой'],['balance','Баланс'],
   ['ledger','Гроссбух'],['items','Предметы'],['quests','Задания'],
   ['market','Аукцион'],['mail','Почта'],['chat','Чат'],['config','Конфиг'],['audit','Аудит'],
 ];
@@ -1344,6 +1345,69 @@ function initSimPlayer(timelines){
   load(0);
 }
 
+/* ================= Баланс классов и вещей ================= */
+function balanceOpts(rows, key, label, selected, all = 'все'){
+  const vals = [...new Map(rows.map((r) => [r[key], label ? label(r) : r[key]]))];
+  return `<option value="" ${selected ? '' : 'selected'}>${all}</option>` +
+    vals.map(([v, t]) => `<option value="${esc(v)}" ${String(selected) === String(v) ? 'selected' : ''}>${esc(t)}</option>`).join('');
+}
+function balanceFilter(rows, f, { quality = false } = {}){
+  return rows.filter((r) =>
+    (!f.level || Number(r.level) === Number(f.level))
+    && (!f.cls || r.cls === f.cls)
+    && (!quality || !f.quality || r.quality === f.quality));
+}
+function balanceStatsTable(meta, rows, extraCols = []){
+  const cols = [
+    ...extraCols,
+    ...meta.stats.map((s) => ({ h: s.label, html: (r) =>
+      `<td class="num">${Number(r.stats?.[s.key] || 0)}</td>` })),
+  ];
+  return table(cols, rows);
+}
+R.balance = async (f = {}) => {
+  const d = await api('/balance');
+  const quality = f.quality ?? 'blue';
+  const qf = { ...f, quality: quality === 'all' ? '' : quality };
+  const chars = balanceFilter(d.characters, f);
+  const sets = balanceFilter(d.sets, qf, { quality: true });
+  const items = balanceFilter(d.items, qf, { quality: true })
+    .filter((r) => !f.slot || Number(r.slot) === Number(f.slot));
+  const qOpts = `<option value="all" ${quality === 'all' ? 'selected' : ''}>все</option>` +
+    d.qualities.map((q) => `<option value="${q.key}" ${quality === q.key ? 'selected' : ''}>${q.label}</option>`).join('');
+  const controls = `<div class="toolbar">
+    <div><label>Уровень</label><select id="bal-level">${balanceOpts(d.characters, 'level', (r)=>'ур. '+r.level, f.level)}</select></div>
+    <div><label>Класс</label><select id="bal-cls">${balanceOpts(d.classes, 'key', (r)=>r.label, f.cls)}</select></div>
+    <div><label>Качество вещей</label><select id="bal-quality">${qOpts}</select></div>
+    <div><label>Слот вещи</label><select id="bal-slot">${balanceOpts(d.pieces, 'slot', (r)=>dict(D.slot,r.slot), f.slot)}</select></div>
+    <button class="brass" onclick="R._bal()">Показать</button>
+    <button onclick="show('balance')">Сброс</button>
+  </div>`;
+  return `<div class="panel"><h3>Что это</h3>
+    <p class="muted" style="margin:0">Таблицы считаются теми же функциями, что бой и магазин:
+    классы 1–15, комплекты вещей по качеству и отдельные предметы по уровню/слоту/классу.</p></div>
+  ${controls}
+  <div class="panel"><h3>Персонажи по уровням <span class="muted">· ${chars.length}</span></h3>
+    ${balanceStatsTable(d, chars, [
+      {h:'Ур.',v:r=>r.level},{h:'Класс',v:r=>r.className},
+    ])}</div>
+  <div class="panel"><h3>Комплекты вещей <span class="muted">· ${sets.length}</span></h3>
+    ${balanceStatsTable(d, sets, [
+      {h:'Ур.',v:r=>r.level},{h:'Класс',v:r=>r.className},{h:'Кач.',v:r=>r.qualityName},
+    ])}</div>
+  <div class="panel"><h3>Отдельные вещи <span class="muted">· ${items.length}</span></h3>
+    ${balanceStatsTable(d, items, [
+      {h:'ID',v:r=>r.templateId},{h:'Ур.',v:r=>r.level},{h:'Класс',v:r=>r.className},
+      {h:'Кач.',v:r=>r.qualityName},{h:'Предмет',v:r=>r.piece},{h:'Слот',v:r=>dict(D.slot,r.slot)},
+    ])}</div>`;
+};
+R._bal = () => show('balance', {
+  level: $('#bal-level').value,
+  cls: $('#bal-cls').value,
+  quality: $('#bal-quality').value,
+  slot: $('#bal-slot').value,
+});
+
 /* ================= Живой бой (интерактивный движок) ================= *
  * Гоняет НАСТОЯЩИЙ engine.js (импорт с /battle-src) прямо в браузере: тот же
  * код, что в реальном бою (легаси-путь — зоны/блок ×0.12/крит ×1.8, как PvP).
@@ -1800,8 +1864,12 @@ window.openTpl = async (id) => {
 
 /* характеристики предмета — произвольные пары ключ→значение (число/true/false) */
 const STAT_KEYS = {
-  defense:'Защита', strength:'Сила', hp:'Здоровье', crit:'Крит (доля 0–1)',
-  dodge:'Уворот (доля 0–1)', mp:'Мана', energy:'Энергия',
+  cls:'Класс вещи: natisk/uklon/oplot',
+  power:'Мощь', health:'Здоровье', mana:'Мана', rage:'Ярость', initiative:'Инициатива',
+  defense:'Защита', accuracy:'Точность', dodge:'Уклонение', crit:'Крит',
+  critPower:'Сила Крита, %', critResist:'Сопр. Криту', block:'Блок',
+  blockDmg:'Блок урона, %', counter:'Контратака',
+  strength:'Сила (legacy)', hp:'Здоровье (legacy)', mp:'Мана (legacy)', energy:'Энергия',
   heal:'Лечение (эликсир)', power_mult:'Множитель урона (эликсир)',
   power_turns:'Ходов усиления', escape:'Эликсир побега (true)',
 };

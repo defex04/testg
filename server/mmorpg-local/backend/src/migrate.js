@@ -1,5 +1,8 @@
 import { adminPg } from './db.js';
-import { gearItemStats, QUALITY_BY_RANK } from './battle/gear.js';
+import {
+  gearItemStats, QUALITY_BY_RANK,
+  GEAR_CLASSES, GEAR_COLORS, GEAR_LEVELS, GEAR_PIECES,
+} from './battle/gear.js';
 
 const STATEMENTS = [
   // Квесты: имя, описание, картинка, уровень, активность
@@ -77,10 +80,21 @@ const STATEMENTS = [
    VALUES ('battle.reward.hunt', '{"currency": "copper", "amount": 50, "exp": 25}')
    ON CONFLICT (key) DO NOTHING`,
   `INSERT INTO game_config (key, value)
-   VALUES ('character.start', '{"level": 1, "hp": 2330, "damage": [160, 240],
+   VALUES ('character.start', '{"level": 1, "hp": 200, "damage": [14, 22],
                                 "crit": 0.14, "dodge": 0.07, "height": 1.85,
                                 "xp_max": 200, "pvp_xp_max": 1000}')
    ON CONFLICT (key) DO NOTHING`,
+  `DO $$
+   BEGIN
+     IF NOT EXISTS (SELECT 1 FROM game_config WHERE key = 'migration.low_hp_damage_v1_done') THEN
+       UPDATE game_config SET value = value || '{"hp": 200, "damage": [14, 22]}'::jsonb,
+              version = version + 1, updated_at = now()
+        WHERE key = 'character.start';
+       UPDATE characters SET hp_cur = 200 WHERE level <= 1 AND hp_cur > 200;
+       INSERT INTO game_config (key, value)
+       VALUES ('migration.low_hp_damage_v1_done', 'true'::jsonb);
+     END IF;
+   END $$`,
   `DO $$
    BEGIN
      IF NOT EXISTS (SELECT 1 FROM game_config WHERE key = 'migration.level_system_v1_reset_done') THEN
@@ -100,11 +114,12 @@ const STATEMENTS = [
        VALUES ('migration.level_system_v1_reset_done', 'true'::jsonb);
      END IF;
    END $$`,
-  // Бронзовый доспех из сида был без статов — дозаполняем один раз
-  // (если админ уже задал свои base_stats, не трогаем)
+  // Бронзовый доспех из старого сида был в legacy-формате hp/dodge. Для новой
+  // модели оставляем его нейтральной стартовой вещью: только общий health.
   `UPDATE item_templates
-      SET base_stats = '{"hp": 250, "dodge": 0.01}'::jsonb, version = version + 1
-    WHERE id = 101 AND (base_stats IS NULL OR base_stats = '{}'::jsonb)`,
+      SET base_stats = '{"health": 250}'::jsonb, version = version + 1
+    WHERE id = 101 AND (base_stats IS NULL OR base_stats = '{}'::jsonb
+       OR base_stats = '{"hp": 250, "dodge": 0.01}'::jsonb)`,
   // Мир из content.js: Город Надежды (1) ↔ Поселение Зеленое (2); локация 3 убрана
   `UPDATE locations SET name = 'Город Надежды', type = 1 WHERE id = 1`,
   `UPDATE locations SET name = 'Поселение Зеленое', type = 1 WHERE id = 2`,
@@ -117,9 +132,11 @@ const STATEMENTS = [
    ON CONFLICT (from_id, to_id) DO NOTHING`,
   `UPDATE npc_templates
       SET stats = coalesce(stats, '{}'::jsonb)
-        || '{"hp": 1100, "aiHealUses": 1, "aiPowerUses": 1,
-             "aiHealAmount": 800, "aiHealAt": 0.6,
-             "aiPowerMult": 1.5, "aiPowerTurns": 3}'::jsonb
+        || '{"hp": 160, "damage": [10, 16], "crit": 0.06, "dodge": 0.03,
+             "school": "natisk", "modelHpMult": 0.72, "modelPowerMult": 0.58,
+             "aiHealUses": 0, "aiPowerUses": 0,
+             "aiHealAmount": 45, "aiHealAt": 0.45,
+             "aiPowerMult": 1.15, "aiPowerTurns": 1}'::jsonb
     WHERE id = 1`,
   // «Шайка разбойников» (id 2) — групповая охота: 3 бойца по 900 HP с ролями
   // (отравитель/лекарь/громила, читаются в manager.applyAiElixirs по ai*-полям).
@@ -127,9 +144,9 @@ const STATEMENTS = [
   `INSERT INTO npc_templates (id, name, level, stats, props) VALUES
      (2, 'Шайка разбойников', 1,
       '{"pack":[
-         {"name":"Разбойник-отравитель","hp":900,"damage":[120,170],"crit":0.08,"dodge":0.05,"aiPoisonUses":99,"aiPoisonPct":0.10,"aiPoisonSecs":40,"aiPoisonEvery":5},
-         {"name":"Разбойник-лекарь","hp":900,"damage":[110,150],"crit":0.06,"dodge":0.05,"aiHealAllyUses":3,"aiHealAmount":420,"aiHealAt":0.7},
-         {"name":"Разбойник-громила","hp":900,"damage":[170,250],"crit":0.12,"dodge":0.04,"aiPowerUses":99,"aiPowerMult":1.4,"aiPowerTurns":3}
+         {"name":"Разбойник-отравитель","school":"uklon","level":1,"hp":80,"damage":[5,9],"crit":0.06,"dodge":0.04,"modelHpMult":0.42,"modelPowerMult":0.42,"aiPoisonUses":2,"aiPoisonPct":0.03,"aiPoisonSecs":15,"aiPoisonEvery":5},
+         {"name":"Разбойник-лекарь","school":"oplot","level":1,"hp":95,"damage":[4,8],"crit":0.04,"dodge":0.03,"modelHpMult":0.42,"modelPowerMult":0.38,"aiHealAllyUses":1,"aiHealAmount":35,"aiHealAt":0.55},
+         {"name":"Разбойник-громила","school":"natisk","level":1,"hp":105,"damage":[7,12],"crit":0.07,"dodge":0.03,"modelHpMult":0.45,"modelPowerMult":0.45,"aiPowerUses":1,"aiPowerMult":1.15,"aiPowerTurns":1}
        ],"reward":{"currency":"copper","amount":125,"exp":70}}'::jsonb,
       '{"injury_chance":0}'::jsonb)
    ON CONFLICT (id) DO NOTHING`,
@@ -141,13 +158,36 @@ const STATEMENTS = [
   `DO $$
    BEGIN
      IF NOT EXISTS (SELECT 1 FROM game_config WHERE key = 'migration.npc_schools_v1_done') THEN
-       UPDATE npc_templates SET stats = coalesce(stats, '{}'::jsonb) || '{"school":"natisk"}'::jsonb WHERE id = 1;
+       UPDATE npc_templates SET stats = coalesce(stats, '{}'::jsonb)
+         || '{"school":"natisk","modelHpMult":0.72,"modelPowerMult":0.58}'::jsonb WHERE id = 1;
        UPDATE npc_templates SET stats = jsonb_set(stats, '{pack}', '[
-         {"name":"Разбойник-отравитель","school":"uklon","level":1,"hp":900,"damage":[120,170],"crit":0.08,"dodge":0.05,"aiPoisonUses":99,"aiPoisonPct":0.10,"aiPoisonSecs":40,"aiPoisonEvery":5},
-         {"name":"Разбойник-лекарь","school":"oplot","level":1,"hp":900,"damage":[110,150],"crit":0.06,"dodge":0.05,"aiHealAllyUses":3,"aiHealAmount":420,"aiHealAt":0.7},
-         {"name":"Разбойник-громила","school":"natisk","level":1,"hp":900,"damage":[170,250],"crit":0.12,"dodge":0.04,"aiPowerUses":99,"aiPowerMult":1.4,"aiPowerTurns":3}
+         {"name":"Разбойник-отравитель","school":"uklon","level":1,"hp":80,"damage":[5,9],"crit":0.06,"dodge":0.04,"modelHpMult":0.42,"modelPowerMult":0.42,"aiPoisonUses":2,"aiPoisonPct":0.03,"aiPoisonSecs":15,"aiPoisonEvery":5},
+         {"name":"Разбойник-лекарь","school":"oplot","level":1,"hp":95,"damage":[4,8],"crit":0.04,"dodge":0.03,"modelHpMult":0.42,"modelPowerMult":0.38,"aiHealAllyUses":1,"aiHealAmount":35,"aiHealAt":0.55},
+         {"name":"Разбойник-громила","school":"natisk","level":1,"hp":105,"damage":[7,12],"crit":0.07,"dodge":0.03,"modelHpMult":0.45,"modelPowerMult":0.45,"aiPowerUses":1,"aiPowerMult":1.15,"aiPowerTurns":1}
        ]'::jsonb) WHERE id = 2 AND stats ? 'pack';
        INSERT INTO game_config (key, value) VALUES ('migration.npc_schools_v1_done', 'true'::jsonb);
+     END IF;
+   END $$`,
+  `DO $$
+   BEGIN
+     IF NOT EXISTS (SELECT 1 FROM game_config WHERE key = 'migration.hunt_npc_low_level_v1_done') THEN
+       UPDATE npc_templates SET level = 1,
+          stats = coalesce(stats, '{}'::jsonb)
+            || '{"hp":160,"damage":[10,16],"crit":0.06,"dodge":0.03,
+                 "school":"natisk","modelHpMult":0.72,"modelPowerMult":0.58,
+                 "aiHealUses":0,"aiPowerUses":0,
+                 "aiHealAmount":45,"aiHealAt":0.45,
+                 "aiPowerMult":1.15,"aiPowerTurns":1}'::jsonb
+        WHERE id = 1;
+       UPDATE npc_templates SET level = 1,
+          stats = coalesce(stats, '{}'::jsonb) || '{"pack":[
+            {"name":"Разбойник-отравитель","school":"uklon","level":1,"hp":80,"damage":[5,9],"crit":0.06,"dodge":0.04,"modelHpMult":0.42,"modelPowerMult":0.42,"aiPoisonUses":2,"aiPoisonPct":0.03,"aiPoisonSecs":15,"aiPoisonEvery":5},
+            {"name":"Разбойник-лекарь","school":"oplot","level":1,"hp":95,"damage":[4,8],"crit":0.04,"dodge":0.03,"modelHpMult":0.42,"modelPowerMult":0.38,"aiHealAllyUses":1,"aiHealAmount":35,"aiHealAt":0.55},
+            {"name":"Разбойник-громила","school":"natisk","level":1,"hp":105,"damage":[7,12],"crit":0.07,"dodge":0.03,"modelHpMult":0.45,"modelPowerMult":0.45,"aiPowerUses":1,"aiPowerMult":1.15,"aiPowerTurns":1}
+          ]}'::jsonb
+        WHERE id = 2;
+       INSERT INTO game_config (key, value)
+          VALUES ('migration.hunt_npc_low_level_v1_done', 'true'::jsonb);
      END IF;
    END $$`,
   // --- Почта -----------------------------------------------------------
@@ -287,38 +327,28 @@ STATEMENTS.push(
     WHERE type = 4 AND (max_stack IS NULL OR max_stack < 1000000)`);
 
 // ---------------------------------------------------------------------------
-// Тестовая экипировка под треугольник: по расписанию слотов 1–5 ур., ВСЕ 5 цветов
-// (серый…оранжевый = quality 1..5). Для модельного боя важны slot+quality (статы
-// считает composeFromEquipment); base_stats заданы и для старого режима. id 300..344.
+// Экипировка под треугольник: 3 класса × уровни 1–15 × 10 слотов × 5 цветов
+// (серый…оранжевый = quality 1..5). В живом бою base_stats — реальный вклад вещи:
+// общий скелет (health/power) + школьные статы cls. id 300..2549.
 // ---------------------------------------------------------------------------
-const GEAR_COLORS = ['серый', 'зелёный', 'синий', 'фиолетовый', 'оранжевый'];
-// ТРИ КЛАССА вещей = три школы; статы предмета и сет-бонус считаются по классу.
-const GEAR_CLASSES = [['natisk', 'Натиск'], ['uklon', 'Уклон'], ['oplot', 'Оплот']];
-// [название, slot игры (SLOT_META.id), type(1 оружие/2 броня/5 амулет), level_req]
-const GEAR_PIECES = [
-  ['Поножи', 3, 2, 1], ['Куртка', 1, 2, 1],          // 1 ур.
-  ['Оружие', 7, 1, 2], ['Щит', 8, 2, 2],             // 2 ур.
-  ['Ботинки', 4, 2, 3], ['Кольчуга', 9, 2, 3],       // 3 ур.
-  ['Наручи', 5, 2, 4], ['Плечи', 6, 2, 4],           // 4 ур.
-  ['Шлем', 2, 2, 5], ['Амулет', 10, 5, 5],           // 5 ур.
-];
-// id 300..449 = 3 класса × 10 предметов × 5 цветов
+// id 300..449 оставлены за вещами 1 уровня (совместимость старого диапазона).
 let gearId = 300;
-for (const [cls, clsName] of GEAR_CLASSES) {
-  for (const [piece, slot, type, lvl] of GEAR_PIECES) {
-    for (let q = 1; q <= 5; q++) {
-      const id = gearId++;
-      const name = `${piece} «${clsName}» · ${GEAR_COLORS[q - 1]}`;
-      // характеристики по КЛАССУ предмета (профиль школы × аффинити слота); cls — для сет-бонуса
-      const stats = { cls, ...gearItemStats(slot, { cls, level: lvl, quality: QUALITY_BY_RANK[q - 1] }) };
-      STATEMENTS.push(
-        `INSERT INTO item_templates (id, name, type, slot, quality, level_req, base_stats, icon, price, sellable, stackable)
-         VALUES (${id}, ${sq(name)}, ${type}, ${slot}, ${q}, ${lvl},
-           ${sq(JSON.stringify(stats))}::jsonb, ${sq('gear' + piece)}, ${50 * q * lvl}, TRUE, FALSE)
-         ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, type = EXCLUDED.type,
-           slot = EXCLUDED.slot, quality = EXCLUDED.quality, level_req = EXCLUDED.level_req,
-           base_stats = EXCLUDED.base_stats, icon = EXCLUDED.icon, price = EXCLUDED.price,
-           sellable = EXCLUDED.sellable, version = item_templates.version + 1`);
+for (const lvl of GEAR_LEVELS) {
+  for (const [cls, clsName] of GEAR_CLASSES) {
+    for (const [piece, slot, type] of GEAR_PIECES) {
+      for (let q = 1; q <= 5; q++) {
+        const id = gearId++;
+        const name = `${piece} «${clsName}» ур. ${lvl} · ${GEAR_COLORS[q - 1]}`;
+        const stats = { cls, ...gearItemStats(slot, { cls, level: lvl, quality: QUALITY_BY_RANK[q - 1] }) };
+        STATEMENTS.push(
+          `INSERT INTO item_templates (id, name, type, slot, quality, level_req, base_stats, icon, price, sellable, stackable)
+           VALUES (${id}, ${sq(name)}, ${type}, ${slot}, ${q}, ${lvl},
+             ${sq(JSON.stringify(stats))}::jsonb, ${sq('gear' + piece)}, ${50 * q * lvl}, TRUE, FALSE)
+           ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, type = EXCLUDED.type,
+             slot = EXCLUDED.slot, quality = EXCLUDED.quality, level_req = EXCLUDED.level_req,
+             base_stats = EXCLUDED.base_stats, icon = EXCLUDED.icon, price = EXCLUDED.price,
+             sellable = EXCLUDED.sellable, version = item_templates.version + 1`);
+      }
     }
   }
 }

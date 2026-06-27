@@ -61,6 +61,18 @@ export const DEFAULT_COEF = {
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
+// Отдельная шкала для "скелета" боя: HP и Мощь. Состязательные статы не трогаем,
+// чтобы сохранить треугольник, но опустить числа: ~200 HP на старте и ~3000 HP
+// в среднем у 15 уровня в синем полном комплекте.
+export const SKELETON_SCALE_START = 0.1325;
+export const SKELETON_SCALE_END = 0.524;
+export const SKELETON_SCALE_MAX_LEVEL = 15;
+export const skeletonScale = (level) => {
+  const n = Math.max(1, Math.min(SKELETON_SCALE_MAX_LEVEL, Number(level) || 1));
+  const t = (n - 1) / Math.max(1, SKELETON_SCALE_MAX_LEVEL - 1);
+  return SKELETON_SCALE_START + (SKELETON_SCALE_END - SKELETON_SCALE_START) * t;
+};
+
 /**
  * Боевая модель: чистые функции исходов по статам атакующего/защитника.
  *
@@ -142,6 +154,7 @@ export const SCHOOLS = {
 export function composeFighter(school, { level = 1, quality = 'blue', growth = DEFAULT_COEF.levelGrowth } = {}) {
   const s = SCHOOLS[school] || SCHOOLS.natisk;
   const lf = levelFactor(level, growth);
+  const sk = skeletonScale(level);
   const q = QUALITY_MULT[quality] ?? 1;
   const contested = new Set(CONTESTED);
   const out = {};
@@ -149,6 +162,7 @@ export function composeFighter(school, { level = 1, quality = 'blue', growth = D
     const base = s[m.key] ?? STAT_DEFAULTS[m.key];
     if (m.pct) { out[m.key] = base; continue; }          // % (Сила Крита/Блок урона) — без уровня/качества
     let v = base * lf;
+    if (m.key === 'power' || m.key === 'health') v *= sk;
     if (contested.has(m.key)) v *= q;                     // качество — только состязательный слой
     out[m.key] = Math.max(1, Math.round(v));
   }

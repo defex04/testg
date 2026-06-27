@@ -13,10 +13,17 @@
  * Поэтому НОРМАЛЬНО прокачанный боец на ЛЮБОМ уровне даёт ОДИН И ТОТ ЖЕ резкий
  * треугольник, а недо-экипированный/недо-вложенный честно слабее (вертикалка).
  *
- * Это «генерация в модели»: к БД/живому бою пока НЕ подключено (гоняется симулятором).
+ * В живом бою экипировка берётся из реальных base_stats шаблонов, а composeBuild
+ * остаётся эталоном для симулятора и таблиц баланса.
  */
-import { STAT_META, STAT_DEFAULTS, SCHOOLS, QUALITY_MULT, CONTESTED, levelFactor, gearTier, DEFAULT_COEF }
+import {
+  STAT_META, STAT_DEFAULTS, SCHOOLS, QUALITY_MULT, CONTESTED,
+  levelFactor, gearTier, DEFAULT_COEF, skeletonScale,
+}
   from './stats.js';
+
+export const SCHOOL_ORDER = ['natisk', 'uklon', 'oplot'];
+export const SCHOOL_LABEL = { natisk: 'Натиск', uklon: 'Уклон', oplot: 'Оплот' };
 
 // Слоты и расписание открытия (под-уровень внутри 5-уровневого цикла; тир = ⌈lvl/5⌉).
 // armor — даёт HP; weapon — даёт Мощь; contested — несут все слоты (тематика школы).
@@ -82,12 +89,6 @@ const SLOT_AFFINITY = (() => {
   }
   return out;
 })();
-/** Суммарная доля шмота по стату для надетых слотов (полный сет → 1). */
-const gearShare = (stat, slots) => {
-  let sum = 0;
-  for (const slot of slots) sum += SLOT_AFFINITY[slot]?.[stat] || 0;
-  return sum;
-};
 // нейтральный профиль (среднее школ) — для «ориентировочных» характеристик на вещах
 const NEUTRAL = {};
 for (const key of [...CONTESTED, 'power', 'health', 'critPower', 'blockDmg']) {
@@ -114,6 +115,7 @@ export function genItem(slotKey, { school = 'natisk', level = 1, quality = 'blue
   if (!slot) throw new Error(`unknown slot: ${slotKey}`);
   const s = SCHOOLS[school] || SCHOOLS.natisk;
   const lf = levelFactor(level, growth);
+  const sk = skeletonScale(level);
   const q = QUALITY_MULT[quality] ?? 1;
   const stats = {};
   for (const key of CONTESTED) {
@@ -121,9 +123,9 @@ export function genItem(slotKey, { school = 'natisk', level = 1, quality = 'blue
     if (v >= 0.5) stats[key] = Math.round(v);
   }
   if (slot.kind === 'weapon') {
-    stats.power = Math.round((s.power ?? 0) * (1 - POW_BASE) * lf);
+    stats.power = Math.round((s.power ?? 0) * (1 - POW_BASE) * lf * sk);
   } else {
-    stats.health = Math.round((s.health ?? 0) * (1 - HP_BASE) * (HP_WEIGHT[slotKey] || 0) * lf);
+    stats.health = Math.round((s.health ?? 0) * (1 - HP_BASE) * (HP_WEIGHT[slotKey] || 0) * lf * sk);
   }
   return { slot: slotKey, label: slot.label, tier: gearTier(level), quality, school, stats };
 }
@@ -136,6 +138,7 @@ export function genItem(slotKey, { school = 'natisk', level = 1, quality = 'blue
 export function gearItemStats(gameSlot, { cls = null, level = 1, quality = 'blue', growth = DEFAULT_COEF.levelGrowth } = {}) {
   const prof = (cls && SCHOOLS[cls]) ? SCHOOLS[cls] : NEUTRAL;
   const lf = levelFactor(level, growth);
+  const sk = skeletonScale(level);
   const q = QUALITY_MULT[quality] ?? 1;
   const out = {};
   if (Number(gameSlot) === SHIELD_SLOT) {        // щит — танковость (бонус к блоку/защите)
@@ -155,8 +158,8 @@ export function gearItemStats(gameSlot, { cls = null, level = 1, quality = 'blue
     if (v >= 0.5) out[key] = Math.round(v);
   }
   const slotMeta = SLOTS.find((sm) => sm.key === tri);
-  if (slotMeta?.kind === 'weapon') out.power = Math.round((prof.power || 0) * (1 - POW_BASE) * lf);
-  else out.health = Math.round((prof.health || 0) * (1 - HP_BASE) * (HP_WEIGHT[tri] || 0) * lf);
+  if (slotMeta?.kind === 'weapon') out.power = Math.round((prof.power || 0) * (1 - POW_BASE) * lf * sk);
+  else out.health = Math.round((prof.health || 0) * (1 - HP_BASE) * (HP_WEIGHT[tri] || 0) * lf * sk);
   return out;
 }
 
@@ -170,11 +173,55 @@ export const SHIELD_SLOT = 8;       // offhand «Щит» — уклон в Оп
 export const WEAPON_SLOT = 7;       // mainhand «Оружие»
 export const AMULET_SLOT = 10;      // амулет — небольшой бонус крита
 export const QUALITY_BY_RANK = ['gray', 'green', 'blue', 'purple', 'orange'];  // quality 1..5
+export const GEAR_COLORS = ['серый', 'зелёный', 'синий', 'фиолетовый', 'оранжевый'];
+export const GEAR_LEVELS = Array.from({ length: MAX_LEVEL }, (_, i) => i + 1);
+export const GEAR_CLASSES = SCHOOL_ORDER.map((cls) => [cls, SCHOOL_LABEL[cls]]);
+// [название, slot игры (SLOT_META.id), type(1 оружие/2 броня/5 амулет)]
+export const GEAR_PIECES = [
+  ['Поножи', 3, 2], ['Куртка', 1, 2],
+  ['Оружие', WEAPON_SLOT, 1], ['Щит', SHIELD_SLOT, 2],
+  ['Ботинки', 4, 2], ['Кольчуга', 9, 2],
+  ['Наручи', 5, 2], ['Плечи', 6, 2],
+  ['Шлем', 2, 2], ['Амулет', AMULET_SLOT, 5],
+];
+
+const STAT_KEYS = new Set(STAT_META.map((m) => m.key));
+const PCT_KEYS = new Set(STAT_META.filter((m) => m.pct).map((m) => m.key));
+const cleanStatBlock = (raw = {}) => {
+  const out = {};
+  for (const key of STAT_KEYS) {
+    const n = Number(raw[key]);
+    if (Number.isFinite(n) && n !== 0) out[key] = n;
+  }
+  // Поддержка старых шаблонов до Broken Sun.
+  const hp = Number(raw.hp);
+  if (Number.isFinite(hp) && hp !== 0) out.health = (out.health || 0) + hp;
+  return out;
+};
+
+const hasStatBonus = (raw = {}) => Object.keys(cleanStatBlock(raw)).length > 0;
+
+export function sumItemStatBonuses(items = []) {
+  const out = {};
+  let used = 0;
+  for (const it of items || []) {
+    const stats = cleanStatBlock(it.base_stats || it.stats || {});
+    if (!Object.keys(stats).length) continue;
+    used++;
+    const enchant = Math.max(0, Math.trunc(Number(it.enchant_level ?? it.enchant) || 0));
+    const mult = 1 + 0.1 * enchant;
+    for (const [key, value] of Object.entries(stats)) {
+      const scaled = PCT_KEYS.has(key) ? value : value * mult;
+      out[key] = (out[key] || 0) + scaled;
+    }
+  }
+  return used ? out : null;
+}
 
 /**
- * Боевой блок из РЕАЛЬНОЙ экипировки: items = [{ slot, quality }] (slot — id игры).
- * Надетые слоты → укомплектованность; среднее качество → множитель шмота; щит →
- * крепче блок/защита и чуть меньше Мощи (1H+щит), без щита но с оружием → +Мощь (2H).
+ * Боевой блок из РЕАЛЬНОЙ экипировки: items = [{ slot, quality, base_stats }].
+ * Если у предметов есть base_stats, именно они добавляют школьный слой. Для старых
+ * тестов/админских вызовов без base_stats остаётся виртуальная сборка по слотам.
  */
 export function composeFromEquipment(school, { level = 1, items = [], allocFrac = null, attrs = null, growth = DEFAULT_COEF.levelGrowth } = {}) {
   const equipped = new Set();
@@ -188,18 +235,19 @@ export function composeFromEquipment(school, { level = 1, items = [], allocFrac 
     if (it.quality != null) { qSum += Math.min(5, Math.max(1, Number(it.quality) || 1)); qN++; }
   }
   const quality = QUALITY_BY_RANK[Math.round(qN ? qSum / qN : 3) - 1] || 'blue';
-  const built = composeBuild(school, { level, equipped: [...equipped], quality, allocFrac, attrs, growth });
+  const gearStats = (items || []).some((it) => hasStatBonus(it.base_stats || it.stats || {}))
+    ? sumItemStatBonuses(items)
+    : null;
+  const built = composeBuild(school, { level, equipped: [...equipped], quality, allocFrac, attrs, growth, gearStats });
   const s = built.stats;
-  if (shield) {                      // 1H + щит: танковее (уклон в Оплот)
-    s.block = Math.max(1, Math.round(s.block * 1.25));
-    s.defense = Math.max(1, Math.round(s.defense * 1.15));
+  if (shield) {                      // 1H + щит: в живых вещах защита в base_stats; в старых тестах — виртуально
+    if (!gearStats) {
+      s.block = Math.max(1, Math.round(s.block * 1.25));
+      s.defense = Math.max(1, Math.round(s.defense * 1.15));
+    }
     s.power = Math.max(1, Math.round(s.power * 0.92));
   } else if (weapon) {               // двуручное: больше Мощи
     s.power = Math.max(1, Math.round(s.power * 1.10));
-  }
-  if (amulet) {                      // амулет — бонус крита/силы крита
-    s.crit = Math.max(1, Math.round(s.crit * 1.12));
-    s.critPower = (s.critPower || 0) + 10;
   }
   return { stats: s, statNorm: built.statNorm, school, equippedCount: equipped.size, quality, shield, amulet };
 }
@@ -214,9 +262,11 @@ export function composeFromEquipment(school, { level = 1, items = [], allocFrac 
  */
 export function composeBuild(school, {
   level = 1, quality = 'blue', equipped = null, allocFrac = null, attrs = null, growth = DEFAULT_COEF.levelGrowth,
+  gearStats = null,
 } = {}) {
   const s = SCHOOLS[school] || SCHOOLS.natisk;
   const lf = levelFactor(level, growth);
+  const sk = skeletonScale(level);
   const q = QUALITY_MULT[quality] ?? 1;
   const slots = new Set(equipped || unlockedSlots(level));
   // доля состязательного слоя: явная allocFrac → иначе от РЕАЛЬНОГО вложения в атрибут
@@ -228,27 +278,30 @@ export function composeBuild(school, {
   const equippedFrac = slots.size / N_SLOTS;
   const hpFrac = ARMOR_KEYS.reduce((a, k) => a + (slots.has(k) ? (HP_WEIGHT[k] || 0) : 0), 0);
   const hasWeapon = slots.has('weapon');
+  const realGear = gearStats && typeof gearStats === 'object' ? gearStats : null;
 
   const out = {};
   for (const m of STAT_META) {
     const key = m.key;
-    if (m.pct) { out[key] = s[key] ?? STAT_DEFAULTS[key]; continue; }       // % — как в профиле
+    const itemAdd = Number(realGear?.[key]) || 0;
+    if (m.pct) { out[key] = (s[key] ?? STAT_DEFAULTS[key]) + itemAdd; continue; } // % — профиль + предметы
     if (CONTESTED.includes(key)) {
-      // БОЙ: равномерная доля шмота (баланс проверен на 1–15). Аффинити слотов — только
-      // для ВИТРИНЫ (gearItemStats), чтобы предметы различались, не трогая баланс.
-      const frac = BASE_FRAC + GEAR_FRAC * equippedFrac * q + POINTS_FRAC * alloc;
-      out[key] = Math.max(1, Math.round((s[key] ?? STAT_DEFAULTS[key]) * frac * lf));
+      const baseFrac = BASE_FRAC + POINTS_FRAC * alloc;
+      const virtualGear = realGear ? 0 : GEAR_FRAC * equippedFrac * q;
+      out[key] = Math.max(1, Math.round((s[key] ?? STAT_DEFAULTS[key]) * (baseFrac + virtualGear) * lf + itemAdd));
       continue;
     }
     if (key === 'power') {
-      out.power = Math.max(1, Math.round((s.power ?? 0) * (POW_BASE + (1 - POW_BASE) * (hasWeapon ? 1 : 0)) * lf));
+      const virtualGear = realGear ? 0 : (1 - POW_BASE) * (hasWeapon ? 1 : 0);
+      out.power = Math.max(1, Math.round((s.power ?? 0) * (POW_BASE + virtualGear) * lf * sk + itemAdd));
       continue;
     }
     if (key === 'health') {
-      out.health = Math.max(1, Math.round((s.health ?? 0) * (HP_BASE + (1 - HP_BASE) * hpFrac) * lf));
+      const virtualGear = realGear ? 0 : (1 - HP_BASE) * hpFrac;
+      out.health = Math.max(1, Math.round((s.health ?? 0) * (HP_BASE + virtualGear) * lf * sk + itemAdd));
       continue;
     }
-    out[key] = Math.max(1, Math.round((s[key] ?? STAT_DEFAULTS[key]) * lf));   // мана/ярость/инициатива
+    out[key] = Math.max(1, Math.round((s[key] ?? STAT_DEFAULTS[key]) * lf + itemAdd)); // мана/ярость/инициатива
   }
   // Атрибуты усиливают «свои» статы. ВАЖНО: только СКЕЛЕТ (Мощь/HP/Инициатива) — он не
   // меняет соотношения состязательного слоя, поэтому ТРЕУГОЛЬНИК НЕ ЛОМАЕТСЯ (сам угол

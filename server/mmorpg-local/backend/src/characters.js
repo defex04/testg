@@ -142,7 +142,7 @@ async function equipmentBonus(charId) {
   for (const r of rows) {
     const s = r.base_stats || {};
     const k = 1 + 0.1 * (r.enchant_level || 0);
-    bonus.hp     += Math.round((Number(s.hp) || 0) * k);
+    bonus.hp     += Math.round((Number(s.hp ?? s.health) || 0) * k);
     bonus.crit   += asChance(s.crit);
     bonus.dodge  += asChance(s.dodge);
     if (Array.isArray(s.damage)) {
@@ -213,7 +213,7 @@ export async function combatModelFor(charId, level) {
     game.query(`SELECT str, agi, vit FROM character_stats WHERE character_id = $1`, [charId])
       .then((q) => q.rows[0]),
     game.query(
-      `SELECT t.slot, t.quality, t.base_stats FROM item_instances i
+      `SELECT t.slot, t.quality, t.base_stats, i.enchant_level FROM item_instances i
          JOIN item_templates t ON t.id = i.template_id
         WHERE i.owner_type = 2 AND i.owner_id = $1 AND i.status = 1 AND t.slot IS NOT NULL`,
       [charId]).then((q) => q.rows),

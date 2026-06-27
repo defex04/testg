@@ -260,7 +260,15 @@ async function playerDef(ch, useModel, start, extra = {}) {
 /** Подмешать модельные статы NPC (для модельного боя): школа из шаблона или нейтраль. */
 function withNpcModel(member, fallbackLevel) {
   const level = member.level ?? fallbackLevel ?? 1;
-  const built = composeBuild(member.school || 'natisk', { level });
+  const built = composeBuild(member.school || 'natisk', {
+    level,
+    equipped: Array.isArray(member.equipped) ? member.equipped : [],
+    allocFrac: member.allocFrac != null ? Number(member.allocFrac) : 0,
+  });
+  const hpMult = Number.isFinite(Number(member.modelHpMult)) ? Number(member.modelHpMult) : 0.75;
+  const powerMult = Number.isFinite(Number(member.modelPowerMult)) ? Number(member.modelPowerMult) : 0.65;
+  built.stats.health = Math.max(1, Math.round(built.stats.health * hpMult));
+  built.stats.power = Math.max(1, Math.round(built.stats.power * powerMult));
   return { ...member, stats: built.stats, statNorm: built.statNorm,
            hp: built.stats.health, damage: member.damage || [1, 1] };
 }
@@ -353,15 +361,17 @@ export async function startHunt(ch, send, npcId = null) {
     ? pack.map((m, i) => ({
         id: `npc-${npc.id}-${i + 1}`, name: m.name || `${npc.name} ${i + 1}`,
         level: m.level ?? npc.level, isAI: true,
-        hp: Number(m.hp) || 900, damage: m.damage || [140, 220],
+        hp: Number(m.hp) || 90, damage: m.damage || [6, 10],
         crit: m.crit ?? 0.1, dodge: m.dodge ?? 0.05,
         aiPoisonUses: m.aiPoisonUses, aiPoisonPct: m.aiPoisonPct,
         aiPoisonSecs: m.aiPoisonSecs, aiPoisonEvery: m.aiPoisonEvery,
         aiHealAllyUses: m.aiHealAllyUses, aiHealAmount: m.aiHealAmount, aiHealAt: m.aiHealAt,
         aiPowerUses: m.aiPowerUses, aiPowerMult: m.aiPowerMult, aiPowerTurns: m.aiPowerTurns }))
     : [{ id: `npc-${npc.id}`, name: npc.name, level: npc.level, isAI: true,
-         ...stats, hp: 1100, aiHealUses: 1, aiPowerUses: 1, aiHealAmount: 800,
-         aiHealAt: 0.6, aiPowerMult: 1.5, aiPowerTurns: 3 }];
+         ...stats, hp: Number(stats.hp) || 160, damage: stats.damage || [10, 16],
+         aiHealUses: stats.aiHealUses ?? 0, aiPowerUses: stats.aiPowerUses ?? 0,
+         aiHealAmount: stats.aiHealAmount ?? 45, aiHealAt: stats.aiHealAt ?? 0.45,
+         aiPowerMult: stats.aiPowerMult ?? 1.15, aiPowerTurns: stats.aiPowerTurns ?? 1 }];
   // награда: переопределение из шаблона (stats.reward) либо общий конфиг охоты
   const huntReward = (stats.reward && typeof stats.reward === 'object') ? stats.reward : null;
 

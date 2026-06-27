@@ -5,6 +5,11 @@ import { game, auth, redis, tx, adminPg, clearConfigCache } from './db.js';
 import { addCurrency, wallet, CUR } from './economy.js';
 import { adminAbort, adminSetIntervention } from './battle/manager.js';
 import { runSimulation } from './battle/sim.js';
+import { STAT_META } from './battle/stats.js';
+import {
+  GEAR_CLASSES, GEAR_COLORS, GEAR_LEVELS, GEAR_PIECES, POINTS_PER_LEVEL,
+  QUALITY_BY_RANK, composeBuild, gearItemStats, sumItemStatBonuses,
+} from './battle/gear.js';
 import { cfg, isTelegramAdmin } from './config.js';
 import { verifyInitData } from './auth.js';
 
@@ -14,6 +19,66 @@ import { verifyInitData } from './auth.js';
  * строка в admin_audit. Статика (шаблоны, квесты) правится пулом adminPg.
  */
 const bad = (status, msg) => Object.assign(new Error(msg), { status });
+
+const BALANCE_STATS = STAT_META.map((m) => ({ key: m.key, label: m.label }));
+const attrsForBalance = (cls, level) => ({
+  str: cls === 'natisk' ? POINTS_PER_LEVEL * level : 0,
+  agi: cls === 'uklon' ? POINTS_PER_LEVEL * level : 0,
+  vit: cls === 'oplot' ? POINTS_PER_LEVEL * level : 0,
+});
+const roundedStats = (stats = {}) => Object.fromEntries(
+  BALANCE_STATS.map(({ key }) => [key, Math.round(Number(stats[key]) || 0)]));
+
+function balanceTables() {
+  const classes = GEAR_CLASSES.map(([key, label]) => ({ key, label }));
+  const qualities = QUALITY_BY_RANK.map((key, i) => ({
+    rank: i + 1, key, label: GEAR_COLORS[i],
+  }));
+  const pieces = GEAR_PIECES.map(([name, slot, type]) => ({ name, slot, type }));
+
+  const characters = [];
+  for (const level of GEAR_LEVELS) {
+    for (const [cls, className] of GEAR_CLASSES) {
+      const built = composeBuild(cls, {
+        level,
+        quality: 'blue',
+        attrs: attrsForBalance(cls, level),
+      });
+      characters.push({ level, cls, className, quality: 'blue', qualityRank: 3,
+        stats: roundedStats(built.stats) });
+    }
+  }
+
+  const sets = [];
+  const items = [];
+  let templateId = 300;
+  for (const level of GEAR_LEVELS) {
+    for (const [cls, className] of GEAR_CLASSES) {
+      const setByQuality = new Map(qualities.map((q) => [q.key, []]));
+      for (const [piece, slot, type] of GEAR_PIECES) {
+        for (let qi = 0; qi < QUALITY_BY_RANK.length; qi++) {
+          const quality = QUALITY_BY_RANK[qi];
+          const qualityRank = qi + 1;
+          const qualityName = GEAR_COLORS[qi];
+          const itemStats = { cls, ...gearItemStats(slot, { cls, level, quality }) };
+          setByQuality.get(quality).push({ base_stats: itemStats });
+          items.push({ templateId, level, cls, className, quality, qualityRank,
+            qualityName, piece, slot, type, stats: roundedStats(itemStats) });
+          templateId++;
+        }
+      }
+      for (let qi = 0; qi < QUALITY_BY_RANK.length; qi++) {
+        const quality = QUALITY_BY_RANK[qi];
+        const qualityRank = qi + 1;
+        const qualityName = GEAR_COLORS[qi];
+        sets.push({ level, cls, className, quality, qualityRank, qualityName,
+          stats: roundedStats(sumItemStatBonuses(setByQuality.get(quality)) || {}) });
+      }
+    }
+  }
+
+  return { stats: BALANCE_STATS, classes, qualities, pieces, characters, sets, items };
+}
 
 async function audit(action, targetType, targetId, details) {
   await game.query(
@@ -433,6 +498,10 @@ export function adminRoutes(app) {
     await audit('battle.simulate', null, null, {
       params: out.params, perf: out.perf, balance: out.balance });
     res.json(out);
+  });
+
+  app.get('/admin/api/balance', guard, async (req, res) => {
+    res.json(balanceTables());
   });
 
   // ================= гроссбухи =================

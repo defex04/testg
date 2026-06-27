@@ -17,18 +17,18 @@ INSERT INTO location_links (from_id, to_id) VALUES
 
 -- Экипировка из ITEMS: бронзовый доспех, слот 1 = torso
 INSERT INTO item_templates (id, name, type, slot, quality, stackable, base_stats, icon)
-VALUES (101, 'Бронзовый доспех', 2, 1, 2, FALSE, '{"hp": 250, "dodge": 0.01}', 'bronzeArmor');
+VALUES (101, 'Бронзовый доспех', 2, 1, 2, FALSE, '{"health": 250}', 'bronzeArmor');
 
 -- NPC «Разбойник» для «Охоты»: статы brawlerElite из main.js
 INSERT INTO npc_templates (id, name, level, stats, props) VALUES
-    (1, 'Разбойник', 15,
-     '{"hp": 1100, "damage": [140, 220], "crit": 0.1, "dodge": 0.05, "height": 1.92,
-       "aiHealUses": 1, "aiPowerUses": 1, "aiHealAmount": 800, "aiHealAt": 0.6,
-       "aiPowerMult": 1.5, "aiPowerTurns": 3}',
+    (1, 'Разбойник', 1,
+     '{"hp": 160, "damage": [10, 16], "crit": 0.06, "dodge": 0.03, "height": 1.88,
+       "school": "natisk", "modelHpMult": 0.72, "modelPowerMult": 0.58,
+       "aiHealUses": 0, "aiPowerUses": 0, "aiHealAmount": 45, "aiHealAt": 0.45,
+       "aiPowerMult": 1.15, "aiPowerTurns": 1}',
      '{"injury_chance": 0}');
 INSERT INTO npc_spawns (id, npc_template_id, location_id) VALUES
     (1, 1, 1), (2, 1, 2);
-UPDATE npc_templates SET level = 1 WHERE id = 1;
 
 INSERT INTO game_config (key, value) VALUES
     ('battle.turn_time',     '20'),
@@ -44,7 +44,7 @@ INSERT INTO game_config (key, value) VALUES
     ('battle.target.switch_chance', '0.25'),
     ('battle.target.cold_turns',    '2'),
     ('battle.target.cold_weight',   '1.5'),
-    ('character.start',      '{"level": 1, "hp": 2330, "damage": [160, 240],
+    ('character.start',      '{"level": 1, "hp": 200, "damage": [14, 22],
                                "crit": 0.14, "dodge": 0.07, "height": 1.85,
                                "xp_max": 200, "pvp_xp_max": 1000}'),
     ('chat.history_limit',   '50');
