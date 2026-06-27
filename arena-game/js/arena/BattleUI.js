@@ -474,26 +474,49 @@ export class BattleUI {
   setEffects(side, list = []) {
     const host = this.refs.effects[side];
     if (!host) return;
-    host.innerHTML = '';
-    for (const e of list) {
-      const chip = document.createElement('button');
-      chip.type = 'button';
-      chip.className = 'effect-chip ' + (e.kind === 'debuff' ? 'debuff' : 'buff')
-        + (e.q ? ' q' + e.q : '');     // рамка чипа = качество расходника (ТЗ #3)
-      if (e.label) chip.title = e.label;
-      const ico = document.createElement('span');
-      ico.className = 'effect-ico';
-      if (e.icon && /[./]/.test(e.icon)) ico.innerHTML = `<img src="${e.icon}" alt="">`;
-      else ico.textContent = e.icon || '✦';
-      chip.appendChild(ico);
-      if (e.time != null && e.time !== '') {
+    // Чипы перерисовываются по таймеру несколько раз в секунду (тикает время эффекта).
+    // Полный innerHTML-снос на каждый кадр мигает и грузит главный поток (особенно
+    // под несколькими ядами — отсюда «лаги круга»). Поэтому СТРУКТУРУ (набор/иконки/
+    // качество) пересобираем только при её смене, а между — обновляем лишь цифру
+    // времени на месте. Это и убирает мерцание таймера, и снимает джанк.
+    this._effCache = this._effCache || { left: [], right: [] };
+    const structSig = list.map((e) =>
+      `${e.kind}|${e.icon || ''}|${e.q || 0}|${e.label || ''}`).join(';');
+    if (host._structSig !== structSig) {
+      host._structSig = structSig;
+      host.innerHTML = '';
+      this._effCache[side] = list.map((e) => {
+        const chip = document.createElement('button');
+        chip.type = 'button';
+        chip.className = 'effect-chip ' + (e.kind === 'debuff' ? 'debuff' : 'buff')
+          + (e.q ? ' q' + e.q : '');   // рамка чипа = качество расходника (ТЗ #3)
+        if (e.label) chip.title = e.label;
+        const ico = document.createElement('span');
+        ico.className = 'effect-ico';
+        if (e.icon && /[./]/.test(e.icon)) ico.innerHTML = `<img src="${e.icon}" alt="">`;
+        else ico.textContent = e.icon || '✦';
+        chip.appendChild(ico);
         const t = document.createElement('span');
         t.className = 'effect-time';
-        t.textContent = e.time;
         chip.appendChild(t);
-      }
-      chip.addEventListener('click', () => this.onEffectInfo(e));   // превью эффекта (#8)
-      host.appendChild(chip);
+        const row = { chip, t, eff: e };
+        // превью эффекта (#8): читаем АКТУАЛЬНЫЙ эффект из row (обновляется на месте)
+        chip.addEventListener('click', () => this.onEffectInfo(row.eff));
+        host.appendChild(chip);
+        return row;
+      });
+    }
+    const rows = this._effCache[side];
+    for (let i = 0; i < list.length; i++) {
+      const e = list[i], row = rows[i];
+      if (!row) continue;
+      row.eff = e;
+      if (e.label && row.chip.title !== e.label) row.chip.title = e.label;
+      const time = (e.time != null && e.time !== '') ? String(e.time) : '';
+      if (row.t.textContent !== time) row.t.textContent = time;
+      // пустой бейдж времени скрываем (иначе виден чёрный квадратик min-width)
+      const show = time !== '';
+      if (row._shown !== show) { row.t.style.display = show ? '' : 'none'; row._shown = show; }
     }
   }
 
@@ -553,7 +576,12 @@ export class BattleUI {
           if (!row) continue;
           row.hp.style.width = (f.maxHp ? Math.max(0, (f.hp / f.maxHp) * 100) : 0) + '%';
           row.en.style.width = (f.maxMp ? Math.max(0, (f.mp / f.maxMp) * 100) : 0) + '%';
-          if (row.eff) row.eff.innerHTML = miniEffectsHtml(fighterEffects(f));
+          // мини-чипы эффектов переписываем только при реальной смене (иначе под
+          // ядом строки участников переразбираются на каждом тике — лишний джанк)
+          if (row.eff) {
+            const html = miniEffectsHtml(fighterEffects(f));
+            if (row.effHtml !== html) { row.eff.innerHTML = html; row.effHtml = html; }
+          }
           row.el.classList.toggle('dead', f.alive === false || f.hp <= 0);
         }
       }
@@ -604,6 +632,7 @@ export class BattleUI {
           hp: m.querySelector('.m-hp .m-fill'),
           en: m.querySelector('.m-en .m-fill'),
           eff: m.querySelector('.m-effects'),
+          effHtml: miniEffectsHtml(fighterEffects(f)),   // кэш для быстрого пути
         });
       }
     }

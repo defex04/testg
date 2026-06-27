@@ -114,12 +114,11 @@ const STATEMENTS = [
        VALUES ('migration.level_system_v1_reset_done', 'true'::jsonb);
      END IF;
    END $$`,
-  // Бронзовый доспех из старого сида был в legacy-формате hp/dodge. Для новой
-  // модели оставляем его нейтральной стартовой вещью: только общий health.
-  `UPDATE item_templates
-      SET base_stats = '{"health": 250}'::jsonb, version = version + 1
-    WHERE id = 101 AND (base_stats IS NULL OR base_stats = '{}'::jsonb
-       OR base_stats = '{"hp": 250, "dodge": 0.01}'::jsonb)`,
+  // Бронзовый доспех (id 101) убран из игры — уже выданные экземпляры мягко
+  // удаляем у владельцев (status=2, как расход). Снятие с продажи/цены — ниже,
+  // после добавления колонки price. Идемпотентно: повтор ничего не меняет.
+  `UPDATE item_instances SET status = 2, deleted_at = now(), version = version + 1
+    WHERE template_id = 101 AND status = 1`,
   // Мир из content.js: Город Надежды (1) ↔ Поселение Зеленое (2); локация 3 убрана
   `UPDATE locations SET name = 'Город Надежды', type = 1 WHERE id = 1`,
   `UPDATE locations SET name = 'Поселение Зеленое', type = 1 WHERE id = 2`,
@@ -216,8 +215,11 @@ const STATEMENTS = [
   // Номинальная стоимость предмета (медь). От неё считается налог за вложение
   // в письмо (10%). 0 = бесценок (налог за вложение не берётся).
   `ALTER TABLE item_templates ADD COLUMN IF NOT EXISTS price BIGINT NOT NULL DEFAULT 0`,
+  // Бронзовый доспех (id 101) убран из игры: снимаем с продажи и гасим цену
+  // (исчезает из магазина). Колонка price уже добавлена выше. Идемпотентно.
+  `UPDATE item_templates SET sellable = FALSE, price = 0, version = version + 1
+    WHERE id = 101 AND (sellable = TRUE OR price <> 0)`,
   // Стартовые цены для предметов сидов (только пока админ не задал своих — price=0).
-  `UPDATE item_templates SET price = 1000 WHERE id = 101 AND price = 0`,  // бронзовый доспех
   `UPDATE item_templates SET price = 300  WHERE id = 201 AND price = 0`,  // эликсир побега
   `UPDATE item_templates SET price = 200  WHERE id = 202 AND price = 0`,  // эликсир жизни
   `UPDATE item_templates SET price = 250  WHERE id = 203 AND price = 0`,  // эликсир ярости

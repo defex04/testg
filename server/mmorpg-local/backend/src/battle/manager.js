@@ -73,6 +73,9 @@ const pub = (f) => f && ({ id: f.id, name: f.name, level: f.level,
   critBuffQuality: f.critBuffQuality || 0,
   effects: (f.effects || []).map((e) => ({ kind: e.kind, q: e.quality || 0,
     remainSec: Math.max(0, Math.ceil((e.durationMs - e.elapsedMs) / 1000)),
+    // точный остаток (мс): клиент ведёт ПЛАВНЫЙ локальный отсчёт от него, а каждое
+    // событие лишь ресинкает — без ±1с дёрганья таймера эффекта
+    remainMs: Math.max(0, Math.round(e.durationMs - e.elapsedMs)),
     everySec: Math.max(1, Math.round((e.stepMs || 5000) / 1000)) })) });
 const rosterFor = (b, vSide) => ({
   left:  b.engine.teams[vSide].map((id) => pub(b.engine.fighter(id))),
@@ -381,7 +384,8 @@ export async function startHunt(ch, send, npcId = null) {
     left:  [await playerDef(ch, useModel, start)],
     right: useModel ? right.map((m) => withNpcModel(m, npc.level)) : right,
   }, { turnTime, target: await targetCfg(), pairRotate: await pairRotateCfg(),
-       model: useModel ? battleModel : null });
+       model: useModel ? battleModel : null,
+       counterChance: numCfg(await gameConfig('battle.counter_chance'), 1) });
 
   const b = makeBattle(battleId, 'hunt', ch.location_id, policy, engine);
   b.reward = huntReward;   // null → endBattle возьмёт battle.reward.hunt из конфига
@@ -447,7 +451,8 @@ export async function startDuel(att, def, sendAtt, sendDef) {
     left:  [await playerDef(att, useModel, start, { initiative: attIni })],
     right: [await playerDef(def, useModel, start, { initiative: defIni })],
   }, { turnTime, target: await targetCfg(), pairRotate: await pairRotateCfg(),
-       model: useModel ? battleModel : null });
+       model: useModel ? battleModel : null,
+       counterChance: numCfg(await gameConfig('battle.counter_chance'), 1) });
 
   const b = makeBattle(battleId, 'pvp', att.location_id, policy, engine);
   addPlayer(b, att.id, sendAtt, 'left');
@@ -760,6 +765,13 @@ function startWatchdog(b) {
 }
 
 function onEffectTick(b) {
+  try {
+    onEffectTickInner(b);
+  } catch (e) {
+    console.error(`Бой ${b?.id}: ошибка тика эффектов`, e);
+  }
+}
+function onEffectTickInner(b) {
   if (!b || b.engine.phase === 'ended') return;
   const now = Date.now();
   const dt = now - (b.lastEffectAt || now);

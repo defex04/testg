@@ -98,10 +98,10 @@ export async function grantStarterItems(charId) {
     `SELECT 1 FROM item_instances WHERE owner_id = $1 AND owner_type IN (1,2) LIMIT 1`,
     [charId]);
   if (has.rows[0]) return;
-  // [templateId, quantity]: бронзовый доспех + серые (T1) расходники каждой
-  // категории — чтобы поясом, свитками и выходом можно было пользоваться сразу.
+  // [templateId, quantity]: серые (T1) расходники каждой категории — чтобы поясом,
+  // свитками и выходом можно было пользоваться сразу (бронзовый доспех убран из игры).
   // 202 жизнь, 203 мощь, 230 мана, 240 кровь, 250 яд, 260 исцеление, 270 очищение, 201 побег.
-  const grants = [[101, 1], [202, 5], [203, 5], [230, 3], [240, 3],
+  const grants = [[202, 5], [203, 5], [230, 3], [240, 3],
     [250, 2], [260, 2], [270, 1], [201, 1]];
   await tx(async (c) => {
     for (const [tpl, qty] of grants) {

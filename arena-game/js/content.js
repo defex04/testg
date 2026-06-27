@@ -92,21 +92,14 @@ export const LOCATIONS = {
 //   demo: true    — локальная демо-вещь: не синхронизируется с сервером
 //            (надевается мгновенно, живёт только в этой сессии).
 //
-// 3D bronze_armor.fbx временно отключена (28 МБ — тяжела для телефонов).
-// Вернуть: убрать noModel и добавить model + attach — рабочий конфиг
-// сохранён в README, раздел «Экипировка».
+// Тяжёлые 3D-модели брони (FBX) пока отключены (noModel) — рабочий конфиг
+// крепления (model + attach) сохранён в README, раздел «Экипировка».
 // ---------------------------------------------------------------------------
 
 export const ITEMS = {
-  bronzeArmor: {
-    name: 'Бронзовый доспех',
-    icon: '🛡️',
-    slot: 'torso',
-    noModel: true,
-  },
   // демо-набор: по вещи на каждый слот куклы
   recruitHelm:    { name: 'Шлем рекрута',          icon: '🪖', slot: 'head',      noModel: true, demo: true },
-  wandererPads:   { name: 'Наплечники странника',  icon: '🧥', slot: 'shoulders', noModel: true, demo: true },
+  wandererPads:   { name: 'Наплечники странника',  icon: '🦾', slot: 'shoulders', noModel: true, demo: true },
   militiaSword:   { name: 'Меч ополченца',         icon: '🗡️', slot: 'mainhand',  noModel: true, demo: true },
   leatherBelt:    { name: 'Кожаный пояс',          icon: '🥋', slot: 'belt',      noModel: true, demo: true },
   dragonAmulet:   { name: 'Амулет дракона',        icon: '📿', slot: 'amulet',    noModel: true, demo: true },

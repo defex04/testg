@@ -15,10 +15,6 @@ INSERT INTO locations (id, name, type, min_level) VALUES
 INSERT INTO location_links (from_id, to_id) VALUES
     (1, 2), (2, 1);
 
--- Экипировка из ITEMS: бронзовый доспех, слот 1 = torso
-INSERT INTO item_templates (id, name, type, slot, quality, stackable, base_stats, icon)
-VALUES (101, 'Бронзовый доспех', 2, 1, 2, FALSE, '{"health": 250}', 'bronzeArmor');
-
 -- NPC «Разбойник» для «Охоты»: статы brawlerElite из main.js
 INSERT INTO npc_templates (id, name, level, stats, props) VALUES
     (1, 'Разбойник', 1,
@@ -38,6 +34,9 @@ INSERT INTO game_config (key, value) VALUES
     -- переопределяется на уровне локации (locations.flags) и конкретного боя
     ('battle.intervention.default', '{"hunt": false, "pvp": true}'),
     ('battle.max_per_side',  '10'),
+    -- контратака (рипост) в живом бою: шанс ответного удара получившего удар (0..1).
+    -- 1 = всегда отвечает сразу за ударом соперника (без направления, см. engine)
+    ('battle.counter_chance', '1'),
     -- выбор цели в NvN: соперник «липкий», переключается с вероятностью
     -- switch_chance; боец без размена cold_turns раундов — «холодный», и его
     -- приоритетно берут в цель (вес растёт на cold_weight за раунд «холода»)

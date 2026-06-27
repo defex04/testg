@@ -56,10 +56,10 @@ const slotIdFor = (slotName) =>
 // в рюкзаке всё равно показываем узнаваемый предмет, а не коробку.
 const GEAR_EMOJI_BY_SLOT_ID = {
   1: '🥋', 2: '⛑️', 3: '👖', 4: '🥾', 5: '🧤',
-  6: '🧥', 7: '⚔️', 8: '🛡️', 9: '⛓️', 10: '📿',
+  6: '🦾', 7: '⚔️', 8: '🛡️', 9: '🦺', 10: '📿',   // 6 плечи (наплечье), 9 кольчуга (доспех)
 };
 const GEAR_EMOJI_BY_SLOT = {
-  head: '⛑️', shoulders: '🧥', mainhand: '⚔️', torso: '🥋', belt: '🧷',
+  head: '⛑️', shoulders: '🦾', mainhand: '⚔️', torso: '🥋', belt: '🧷',
   amulet: '📿', hands: '🧤', offhand: '🛡️', legs: '👖', feet: '🥾',
 };
 function gearIconFromSlot(slot) {
@@ -1316,13 +1316,15 @@ async function initBattle(resumedBattle = null, starter = null, pvpTarget = null
   // эффекты по времени (лечение/яд/мана) тикают на сервере — обновляем полосы и чипы
   battle.addEventListener('effectTick', (e) => battleSerial(() => {
     const d = e.detail;
+    // applyBattleRoster уже зовёт refreshHeaderEffects — не дублируем (лишний джанк
+    // под несколькими ядами); без ростера обновляем шапку напрямую
     if (d.roster) applyBattleRoster(d.roster);
+    else refreshHeaderEffects();
     const left = battle.sides.left;
     if (left && left.maxHp) showHP('left', left.hp, left.maxHp);
     const right = battle.focus || battle.sides.right;
     if (right && right.maxHp) showHP('right', right.hp, right.maxHp);
     showEffectNumbers(d.changed);   // всплывашки урона/лечения от свитков/HoT (ТЗ #5)
-    refreshHeaderEffects();
     updateBattleInfo();
   }));
 
@@ -1407,10 +1409,12 @@ async function playStrike(s, sides) {
       ui.popup(pos, `Блок −${dmg}`, 'block');
     } else {
       defender.hitReact();
-      ui.popup(pos, `−${dmg}`, s.crit ? 'crit' : 'dmg');
+      // контратака — отдельная подпись всплывашки (рипост, без направления)
+      ui.popup(pos, s.counter ? `⚡−${dmg}` : `−${dmg}`, s.crit ? 'crit' : 'dmg');
     }
-    // бьют игрока — запоминаем зону на колесе (метка видна в следующий свой ход)
-    if (s.defender === 'left' && !s.dodged) {
+    // бьют игрока направленным ударом — запоминаем зону на колесе (метка видна в
+    // следующий свой ход). У контратаки направления нет (zone=null) — метку не ставим.
+    if (s.defender === 'left' && !s.dodged && s.zone) {
       ui.showIncoming(s.zone);
     }
     showHP(s.defender, s.defenderHp, sides[s.defender].maxHp);
@@ -1423,9 +1427,15 @@ async function playStrike(s, sides) {
 
     const who = esc(sides[s.attacker].name);
     const whom = esc(sides[s.defender].name);
-    const zone = ZONE_LABELS[s.zone] || s.zone;
+    const zone = s.zone ? (ZONE_LABELS[s.zone] || s.zone) : '';
     let text;
-    if (s.dodged) text = `<b>${whom}</b> уклонился от удара`;
+    if (s.counter) {
+      // контратака без направления: «в зону» не пишем
+      if (s.dodged) text = `<b>${whom}</b> уклонился от контратаки`;
+      else if (s.crit) text = `<b>${who}</b> наносит <span class="crit">критическую контратаку</span>: −${dmg}`;
+      else if (s.blocked) text = `<b>${whom}</b> отбивает контратаку: −${dmg}`;
+      else text = `<b>${who}</b> контратакует: −${dmg}`;
+    } else if (s.dodged) text = `<b>${whom}</b> уклонился от удара`;
     else if (s.crit) text = `<b>${who}</b> наносит <span class="crit">критический удар</span> в ${zone}: −${dmg}`;
     else if (s.blocked) text = `<b>${whom}</b> блокирует удар в ${zone}: −${dmg}`;
     else text = `<b>${who}</b> бьёт в ${zone}: −${dmg}`;
@@ -3335,9 +3345,15 @@ const elixirGlyph = (kind) => ELIXIR_EMOJI[kind] || '🧪';
 function normalizeTimedEffect(e, now = Date.now()) {
   if (!e || typeof e !== 'object') return null;
   const rawEnd = Number(e.endsAt);
+  const rawRemainMs = Number(e.remainMs);
   const rawRemain = Number(e.remainSec);
+  // Якорь локального отсчёта: уже зафиксированный endsAt → точный remainMs с
+  // сервера → грубый remainSec. Привязываем ОДИН раз на свежий объект эффекта
+  // (события приносят новые объекты с remainMs и ресинкают отсчёт точно).
   if (Number.isFinite(rawEnd) && rawEnd > 0) {
     e.endsAt = rawEnd;
+  } else if (Number.isFinite(rawRemainMs) && rawRemainMs > 0) {
+    e.endsAt = now + rawRemainMs;
   } else if (Number.isFinite(rawRemain) && rawRemain > 0) {
     e.endsAt = now + rawRemain * 1000;
   } else {

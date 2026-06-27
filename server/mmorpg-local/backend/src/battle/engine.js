@@ -25,8 +25,13 @@ export class Engine {
    * sides: { left: [def...], right: [def...] }
    * def: { id?, name, level, hp, damage:[min,max], crit?, dodge?, initiative?, isAI?, charId? }
    */
-  constructor(sides, { turnTime = 20, target = {}, model = null, pairRotate = {} } = {}) {
+  constructor(sides, { turnTime = 20, target = {}, model = null, pairRotate = {},
+                       counterChance = 0 } = {}) {
     this.turnTime = turnTime;
+    // Контратака (рипост) в ЖИВОМ бою без модели: доля 0..1 — шанс, что получивший
+    // удар сразу бьёт в ответ. По умолчанию 0 (для симулятора/тестов), живой бой
+    // включает её из конфига (manager). В модельном бою шанс считает сама модель.
+    this.counterChance = Math.max(0, Math.min(1, Number(counterChance) || 0));
     // Боевая модель статов (Broken Sun) — опционально. Если задана и у бойцов есть
     // блок stats, удар считается по производным формулам (Мощь/Защита/Точность/…)
     // и включается контратака. Без модели — прежняя логика (зоны/блок ×0.12/крит ×1.8),
@@ -74,6 +79,7 @@ export class Engine {
       damage: def.damage,
       crit: def.crit ?? 0.1,
       dodge: def.dodge ?? 0.06,
+      counter: Number(def.counter ?? 0),   // личный шанс рипоста (0 → берётся engine.counterChance)
       initiative: Number(def.initiative ?? def.level ?? 0),
       // тай-брейк фиксируется при создании: при равной инициативе порядок
       // постоянен между раундами, поэтому никто не бьёт дважды подряд
@@ -304,15 +310,18 @@ export class Engine {
           if (crit) bm *= (m.coef?.critBlockPierce ?? 0.40);
           dmg *= (1 - bm);
         }
-        if (attacker.buffTurns > 0) { dmg *= attacker.buffMult; attacker.buffTurns -= 1; }
+        // мощь «Эликсира» НЕ тратится на контратаку — игрок копит её для своего удара
+        if (!isCounter && attacker.buffTurns > 0) { dmg *= attacker.buffMult; attacker.buffTurns -= 1; }
         damage = Math.max(1, Math.round(dmg));
         damage = Math.min(damage, Math.max(0, Math.round(defender.hp)));
         defender.hp = Math.max(0, defender.hp - damage);
         if (defender.hp <= 0) defender.alive = false;
       }
     } else {
-      // прежняя логика (живой бой): зональный блок ×0.12, крит ×1.8
-      blocked = defender.block === zone;
+      // прежняя логика (живой бой): зональный блок ×0.12, крит ×1.8.
+      // Контратака БЕЗ направления (zone=null) — её нельзя заблокировать по зоне
+      // (только уклон/крит), и она не мешает направленному комбо-удару (#combo).
+      blocked = zone != null && defender.block === zone;
       dodged = !blocked && Math.random() < defender.dodge;
       const critBonus = attacker.critBuffTurns > 0 ? attacker.critBuffAdd : 0;
       crit = !dodged && Math.random() < attacker.crit + critBonus;
@@ -321,8 +330,8 @@ export class Engine {
         if (crit && blocked) damage *= 0.85;
         else if (crit) damage *= 1.8;
         else if (blocked) damage *= 0.12;
-        // «Эликсир мощи»: усиливает удары N раз; заряд тратится на удар
-        if (attacker.buffTurns > 0) { damage *= attacker.buffMult; attacker.buffTurns -= 1; }
+        // «Эликсир мощи»: усиливает удары N раз; на контратаку заряд НЕ тратится
+        if (!isCounter && attacker.buffTurns > 0) { damage *= attacker.buffMult; attacker.buffTurns -= 1; }
         damage = Math.max(1, Math.round(damage));
         damage = Math.min(damage, Math.max(0, Math.round(defender.hp)));
         defender.hp = Math.max(0, defender.hp - damage);
@@ -346,6 +355,19 @@ export class Engine {
     };
   }
 
+  /**
+   * Шанс контратаки бойца `defender` в ответ на удар `attacker` (0..1).
+   * Модельный бой — по статам (Broken Sun). Живой бой — личный стат бойца
+   * (f.counter), иначе общий шанс боя (engine.counterChance из конфига).
+   */
+  _counterChance(defender, attacker) {
+    if (this.model && defender.stats && attacker.stats) {
+      return this.model.counterChance(defender.stats, attacker.stats, defender.statNorm || 1);
+    }
+    const own = Number(defender.counter);
+    return own > 0 ? Math.min(1, own) : this.counterChance;
+  }
+
   /** Разыграть удар активного бойца (один sub-turn). */
   resolveActive() {
     this.phase = 'resolving';
@@ -361,12 +383,13 @@ export class Engine {
       if (actor.alive && target && target.alive) {
         const s = this._strike(actor, target, p.attack);
         strikes.push(s);
-        // контратака (только модельный бой): защитник бьёт в ответ по атакующему,
-        // если выжил и удар попал; ответный удар сам контратаку не вызывает
-        if (this.model && !s.dodged && target.alive && actor.alive
-            && target.stats && actor.stats
-            && Math.random() < this.model.counterChance(target.stats, actor.stats, target.statNorm || 1)) {
-          strikes.push(this._strike(target, actor, ZONES[(Math.random() * 3) | 0], true));
+        // КОНТРАТАКА — немедленный ответ цели тем же sub-turn'ом (рипост): соперник
+        // не успевает ударить дважды подряд, ответ идёт сразу за его ударом. Бьёт
+        // ТОЛЬКО получивший удар (выжил, удар попал); сам ответный удар контратаку
+        // не вызывает (isCounter). Направления у неё нет (zone=null) — см. _strike.
+        if (!s.dodged && target.alive && actor.alive
+            && Math.random() < this._counterChance(target, actor)) {
+          strikes.push(this._strike(target, actor, null, true));
         }
       }
     }

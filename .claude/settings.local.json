@@ -80,7 +80,22 @@
       "PowerShell(docker run --rm -v \"C:\\\\Users\\\\andre\\\\Downloads\\\\new\\\\server\\\\mmorpg-local\\\\backend:/app\" -w /app node:20-alpine sh -c \"node --check src/battle/gear.js && node --check src/battle/sim.js && node --check src/characters.js && node _probe.mjs && echo '=== ����� � ��ਡ�⠬� ===' && node test-gear.mjs\")",
       "PowerShell(docker run --rm -v \"C:\\\\Users\\\\andre\\\\Downloads\\\\new\\\\server\\\\mmorpg-local\\\\backend:/app\" -w /app node:20-alpine sh -c \"node --check src/battle/gear.js && node --check src/battle/sim.js && node --check src/characters.js && echo BACKEND_OK\")",
       "PowerShell(docker run --rm -v \"C:\\\\Users\\\\andre\\\\Downloads\\\\new\\\\server\\\\mmorpg-local\\\\backend:/app\" -w /app node:20-alpine sh -c \"node --check src/battle/gear.js && node --check src/characters.js && node --check src/migrate.js && node _probe.mjs && echo '=== ����� \\(��ਡ���/��������\\) ===' && node test-gear.mjs\")",
-      "PowerShell(docker run --rm -v \"C:\\\\Users\\\\andre\\\\Downloads\\\\new\\\\server\\\\mmorpg-local\\\\backend:/app\" -w /app node:20-alpine sh -c \"node --check src/battle/gear.js && node --check src/characters.js && node --check src/migrate.js && node --check src/shop.js && echo BACKEND_OK\")"
+      "PowerShell(docker run --rm -v \"C:\\\\Users\\\\andre\\\\Downloads\\\\new\\\\server\\\\mmorpg-local\\\\backend:/app\" -w /app node:20-alpine sh -c \"node --check src/battle/gear.js && node --check src/characters.js && node --check src/migrate.js && node --check src/shop.js && echo BACKEND_OK\")",
+      "Bash(node test-effects.mjs)",
+      "Bash(node test-nvn.mjs)",
+      "PowerShell($env:Path; \\(Get-Command node -ErrorAction SilentlyContinue\\).Source)",
+      "PowerShell(docker cp \"C:/Users/andre/Downloads/new/server/mmorpg-local/backend/src/battle/manager.js\" mmo-api:/tmp/manager.js)",
+      "PowerShell(docker exec mmo-api node --check /tmp/manager.js)",
+      "PowerShell(if \\($?\\) { \"manager.js: syntax OK\" })",
+      "PowerShell(docker cp \"C:/Users/andre/Downloads/new/server/mmorpg-local/backend/test-effects.mjs\" mmo-api:/app/test-effects.mjs; docker exec mmo-api node /app/test-effects.mjs; \"exit=$LASTEXITCODE\")",
+      "PowerShell(docker cp \"C:/Users/andre/Downloads/new/arena-game/js/arena/BattleUI.js\" mmo-api:/tmp/BattleUI.js)",
+      "PowerShell(docker cp \"C:/Users/andre/Downloads/new/arena-game/js/main.js\" mmo-api:/tmp/main.js)",
+      "PowerShell(docker exec mmo-api node --check /tmp/BattleUI.js)",
+      "PowerShell(docker exec mmo-api node --check /tmp/main.js)",
+      "PowerShell(if\\($?\\){\"BattleUI.js OK\"})",
+      "PowerShell(if\\($?\\){\"main.js OK\"})",
+      "PowerShell(docker cp \"C:/Users/andre/Downloads/new/server/mmorpg-local/backend/test-counter.mjs\" mmo-api:/app/test-counter.mjs)",
+      "PowerShell(docker exec mmo-api node /app/test-counter.mjs)"
     ]
   }
 }

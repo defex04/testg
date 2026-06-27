@@ -2529,7 +2529,10 @@ body.hints-off .strike-wheel.hint-attack .sw-sprite.sword:not(.thrust):not(.clan
 .sw-timer.low { stroke: #ff5a3c; filter: drop-shadow(0 0 5px rgba(255, 70, 50, .85)); }
 
 /* кликабельные сектора */
-.sw-hit-area { fill: transparent; pointer-events: auto; cursor: pointer; outline: none; }
+/* touch-action: manipulation — убирает 300мс задержку тапа и не даёт жесту/скроллу
+   «съесть» первое касание по сектору (баг «удар не срабатывает с первого раза») */
+.sw-hit-area { fill: transparent; pointer-events: auto; cursor: pointer; outline: none;
+  touch-action: manipulation; }
 .strike-wheel.locked .sw-hit-area { cursor: default; }
 
 /* спрайты меча/щита */
@@ -2638,6 +2641,7 @@ body.hints-off .strike-wheel.hint-attack .sw-sprite.sword:not(.thrust):not(.clan
   cursor: pointer;
   white-space: nowrap;
   pointer-events: auto;
+  touch-action: manipulation;
   transition: color .15s, border-color .15s, box-shadow .15s;
 }
 .sw-skip:hover { color: var(--gold-bright); border-color: rgba(244, 205, 111, .7); box-shadow: 0 0 9px rgba(216, 169, 63, .2); }
