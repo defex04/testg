@@ -802,7 +802,10 @@ function shopErrorText(e) {
   return SHOP_ERRORS[e?.message] || ('Магазин: ' + (e?.message || 'ошибка'));
 }
 
-function shopIcon(kind) {
+function shopIcon(kind, item = null) {
+  if (kind === 'weapon' || kind === 'armor' || kind === 'amulet') {
+    return gearIconFromSlot(item?.slot) || gearIconFromType(kind === 'weapon' ? 1 : kind === 'amulet' ? 5 : 2);
+  }
   return SHOP_EMOJI[kind] || SHOP_EMOJI.elixir;
 }
 
@@ -929,7 +932,7 @@ function shopItemRow(it) {
   const row = document.createElement('div');
   row.className = 'shop-item q' + q + (locked ? ' locked' : '');
   row.innerHTML = `
-    <div class="shop-ico q${q}">${esc(shopIcon(it.kind))}</div>
+    <div class="shop-ico q${q}">${esc(shopIcon(it.kind, it))}</div>
     <div class="shop-info">
       <div class="shop-name">${esc(it.name)}</div>
       <div class="shop-desc">${esc(it.stats ? gearStatsText(it.stats) : (it.description || ''))}</div>
