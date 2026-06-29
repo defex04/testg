@@ -204,10 +204,10 @@ export const api = {
   auctionBid:    (lotId, amount) => rest('/api/auction/bid', { lotId, amount }),
   auctionBuyout: (lotId) => rest('/api/auction/buyout', { lotId }),
   auctionCancel: (lotId) => rest('/api/auction/cancel', { lotId }),
-  auctionEdit:   (lotId, startPrice, buyoutPrice) =>
-    rest('/api/auction/edit', { lotId, startPrice, buyoutPrice }),
+  auctionEdit:   (lotId, startPrice, buyoutPrice, currencyId = null) =>
+    rest('/api/auction/edit', { lotId, startPrice, buyoutPrice, currencyId }),
   // ── биржа (доска заявок на покупку) ──
-  exchange:       () => rest('/api/exchange'),
+  exchange:       (q = {}) => rest('/api/exchange' + qstr(q)),
   exchangeBoard:  (id) => rest('/api/exchange/board/' + Number(id)),
   exchangeOrder:  (payload) => rest('/api/exchange/order', payload),   // создать заявку на покупку
   exchangeSell:   (orderId, quantity) => rest('/api/exchange/sell', { orderId, quantity }),

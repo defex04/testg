@@ -424,6 +424,7 @@ STATEMENTS.push(
 // ---------------------------------------------------------------------------
 STATEMENTS.push(
   `ALTER TABLE auction_lots ADD COLUMN IF NOT EXISTS template_id INT`,
+  `ALTER TABLE auction_lots ADD COLUMN IF NOT EXISTS currency_id SMALLINT NOT NULL DEFAULT 1`,
   `ALTER TABLE auction_lots ADD COLUMN IF NOT EXISTS anonymous  BOOLEAN NOT NULL DEFAULT FALSE`,
   `ALTER TABLE auction_lots ADD COLUMN IF NOT EXISTS featured   BOOLEAN NOT NULL DEFAULT FALSE`,
   `ALTER TABLE auction_lots ADD COLUMN IF NOT EXISTS auto_extend BOOLEAN NOT NULL DEFAULT FALSE`,
@@ -444,6 +445,8 @@ STATEMENTS.push(
   // частями. exchange_orders.ends_at — срок; sell_order_id у заявочной модели
   // нет (продажа идёт «в заявку»), снимаем NOT NULL.
   `ALTER TABLE exchange_orders ADD COLUMN IF NOT EXISTS ends_at TIMESTAMPTZ`,
+  `ALTER TABLE exchange_orders ADD COLUMN IF NOT EXISTS currency_id SMALLINT NOT NULL DEFAULT 1`,
+  `ALTER TABLE exchange_trades ADD COLUMN IF NOT EXISTS currency_id SMALLINT NOT NULL DEFAULT 1`,
   `ALTER TABLE exchange_trades ALTER COLUMN sell_order_id DROP NOT NULL`,
   `INSERT INTO game_config (key, value) VALUES ('exchange.max_orders', '10') ON CONFLICT (key) DO NOTHING`,
   `INSERT INTO game_config (key, value) VALUES ('exchange.durations', '[6, 12, 24, 48]') ON CONFLICT (key) DO NOTHING`,
@@ -453,6 +456,23 @@ STATEMENTS.push(
    VALUES (1,202,1,1,TRUE),(2,203,1,1,TRUE),(3,230,1,1,TRUE),(4,240,1,1,TRUE),
           (5,250,1,1,TRUE),(6,260,1,1,TRUE),(7,270,1,1,TRUE),(8,201,1,1,TRUE)
    ON CONFLICT (instrument_id) DO NOTHING`,
+  `INSERT INTO exchange_instruments (instrument_id, item_template_id, tick_size, lot_size, active)
+     SELECT CASE
+              WHEN EXISTS (
+                SELECT 1 FROM exchange_instruments x
+                 WHERE x.instrument_id = t.id AND x.item_template_id <> t.id
+              ) THEN t.id + 100000
+              ELSE t.id
+            END,
+            t.id, 1, 1, TRUE
+       FROM item_templates t
+      WHERE t.tradable = TRUE
+        AND NOT EXISTS (
+          SELECT 1 FROM exchange_instruments i WHERE i.item_template_id = t.id
+        )
+     ON CONFLICT (instrument_id) DO NOTHING`,
+  `UPDATE exchange_instruments i SET active = t.tradable
+     FROM item_templates t WHERE t.id = i.item_template_id AND i.active <> t.tradable`,
   // Права игровой роли на таблицы рынка (без DELETE — закрытие через status).
   `GRANT SELECT, INSERT, UPDATE ON auction_lots, auction_bids, auction_price_history TO game_rw`,
   `GRANT SELECT, INSERT, UPDATE ON exchange_instruments, exchange_orders, exchange_trades, exchange_candles TO game_rw`,

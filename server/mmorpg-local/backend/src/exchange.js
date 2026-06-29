@@ -3,14 +3,15 @@ import { addCurrency, CUR, wallet } from './economy.js';
 import {
   OWNER, ITEM_REASON, CURR_REASON, REF, bad, moveQty, deliverMail, publishMailNotify,
 } from './escrow.js';
+import { marketCurrencyCode, normalizeMarketCurrency } from './marketCurrency.js';
 
 /**
  * Биржа — доска ЗАЯВОК НА ПОКУПКУ. Игрок выставляет «хочу купить N штук товара
  * по цене P за штуку» на срок; деньги (P×N) сразу блокируются. Другие игроки,
  * у кого есть товар, продают в заявку частями (1..остаток). Продавец получает
- * выручку письмом сразу. Купленный товар копится в escrow заявки и уезжает
+ * выручку сразу в кошелёк. Купленный товар копится в escrow заявки и уезжает
  * покупателю письмом при закрытии (полное исполнение / снятие / истечение срока);
- * непокрытый остаток денег возвращается покупателю письмом.
+ * непокрытый остаток денег возвращается покупателю в кошелёк.
  *
  * Всё транзакционно: деньги — addCurrency (+ ledger), товар — moveQty (+ ledger),
  * доставка ценностей — deliverMail. Сериализация по заявке через FOR UPDATE.
@@ -19,6 +20,11 @@ const SIDE_BUY = 1;
 const PRICE_MAX = 1_000_000_000n;
 const QTY_MAX = 1_000_000;
 const toInt = (v) => Math.trunc(Number(v) || 0);
+function marketCurrencyId(raw) {
+  const id = normalizeMarketCurrency(raw);
+  if (!id) throw bad('bad_currency');
+  return id;
+}
 
 async function exchangeTariffs() {
   const dur = await gameConfig('exchange.durations');
@@ -28,27 +34,76 @@ async function exchangeTariffs() {
   };
 }
 
-/** Список инструментов: последняя цена сделки, лучшая (макс) заявка, число заявок. */
-export async function instruments() {
+async function syncExchangeInstruments(client = game) {
+  await client.query(
+    `INSERT INTO exchange_instruments (instrument_id, item_template_id, tick_size, lot_size, active)
+       SELECT CASE
+                WHEN EXISTS (
+                  SELECT 1 FROM exchange_instruments x
+                   WHERE x.instrument_id = t.id AND x.item_template_id <> t.id
+                ) THEN t.id + 100000
+                ELSE t.id
+              END,
+              t.id, 1, 1, TRUE
+         FROM item_templates t
+        WHERE t.tradable = TRUE
+          AND NOT EXISTS (
+            SELECT 1 FROM exchange_instruments i WHERE i.item_template_id = t.id
+          )
+       ON CONFLICT (instrument_id) DO NOTHING`);
+  await client.query(
+    `UPDATE exchange_instruments i
+        SET active = t.tradable
+       FROM item_templates t
+      WHERE t.id = i.item_template_id AND i.active <> t.tradable`);
+}
+
+/** Список инструментов: последняя цена сделки, лучшие заявки по валютам, число заявок. */
+export async function instruments(q = {}) {
+  await syncExchangeInstruments();
+  const where = ['i.active = TRUE', 't.tradable = TRUE'];
+  const params = [];
+  const search = String(q.q || '').trim().slice(0, 40);
+  if (search) { params.push('%' + search.toLowerCase() + '%'); where.push(`lower(t.name) LIKE $${params.length}`); }
+  const cat = q.cat ?? q.category;
+  if (cat != null && cat !== '' && cat !== 'all') {
+    params.push(toInt(cat)); where.push(`t.type = $${params.length}`);
+  }
+  if (q.quality != null && q.quality !== '' && q.quality !== 'all') {
+    params.push(toInt(q.quality)); where.push(`t.quality = $${params.length}`);
+  }
+  if (q.levelMin != null && q.levelMin !== '') {
+    params.push(toInt(q.levelMin)); where.push(`t.level_req >= $${params.length}`);
+  }
+  if (q.levelMax != null && q.levelMax !== '') {
+    params.push(toInt(q.levelMax)); where.push(`t.level_req <= $${params.length}`);
+  }
+
   const { rows } = await game.query(
     `SELECT i.instrument_id, i.item_template_id, i.tick_size, i.lot_size, i.active,
-            t.name, t.icon, t.type, t.base_stats, t.quality, t.level_req,
+            t.name, t.icon, t.type, t.slot, t.base_stats, t.quality, t.level_req,
             (SELECT price FROM exchange_trades x WHERE x.instrument_id = i.instrument_id
                ORDER BY ts DESC LIMIT 1) AS last,
-            (SELECT max(price) FROM exchange_orders o WHERE o.instrument_id = i.instrument_id
-               AND o.side = 1 AND o.status IN (1,2)) AS best_bid,
+            (SELECT jsonb_object_agg(currency_id, best_bid) FROM (
+               SELECT currency_id, max(price) AS best_bid
+                 FROM exchange_orders o
+                WHERE o.instrument_id = i.instrument_id
+                  AND o.side = 1 AND o.status IN (1,2)
+                GROUP BY currency_id
+             ) b) AS best_bids,
             (SELECT count(*)::int FROM exchange_orders o WHERE o.instrument_id = i.instrument_id
                AND o.side = 1 AND o.status IN (1,2)) AS open_orders
        FROM exchange_instruments i JOIN item_templates t ON t.id = i.item_template_id
-      WHERE i.active = TRUE
-      ORDER BY t.level_req, t.name`);
+      WHERE ${where.join(' AND ')}
+      ORDER BY t.level_req, t.quality, t.name`, params);
   return rows.map((r) => ({
     instrumentId: Number(r.instrument_id), templateId: Number(r.item_template_id),
-    name: r.name, icon: r.icon, type: Number(r.type), quality: Number(r.quality) || 1,
+    name: r.name, icon: r.icon, type: Number(r.type), slot: r.slot != null ? Number(r.slot) : null,
+    quality: Number(r.quality) || 1,
     stats: r.base_stats || null, level: Number(r.level_req) || 1,
     tickSize: Number(r.tick_size) || 1, lotSize: Number(r.lot_size) || 1,
     last: r.last != null ? Number(r.last) : null,
-    bestBid: r.best_bid != null ? Number(r.best_bid) : null,
+    bestBids: r.best_bids || {},
     openOrders: Number(r.open_orders) || 0,
   }));
 }
@@ -59,6 +114,8 @@ function orderPublic(r, viewerId) {
     id: Number(r.id),
     buyerId: r.buyer_anon ? null : Number(r.character_id),
     buyerName: r.buyer_name || '—',
+    currencyId: Number(r.currency_id) || CUR.copper,
+    currency: marketCurrencyCode(r.currency_id),
     price: Number(r.price),
     quantity, filled, remaining: quantity - filled,
     status: Number(r.status),
@@ -69,27 +126,31 @@ function orderPublic(r, viewerId) {
 
 /** Доска одного инструмента: открытые заявки, мои заявки, мой запас товара, сделки. */
 export async function board(charId, instrumentId) {
+  await syncExchangeInstruments();
   instrumentId = toInt(instrumentId);
   const t = await exchangeTariffs();
   const instr = (await game.query(
     `SELECT i.instrument_id, i.item_template_id, i.tick_size, i.lot_size, i.active,
-            tt.name, tt.icon, tt.type, tt.base_stats, tt.quality, tt.level_req
+            tt.name, tt.icon, tt.type, tt.slot, tt.base_stats, tt.quality, tt.level_req, tt.tradable
        FROM exchange_instruments i JOIN item_templates tt ON tt.id = i.item_template_id
       WHERE i.instrument_id = $1`, [instrumentId])).rows[0];
   if (!instr) throw bad('instrument_not_found', 404);
+  if (!instr.active || instr.tradable === false) throw bad('instrument_inactive');
 
   const orders = (await game.query(
-    `SELECT o.id, o.character_id, o.price, o.quantity, o.filled, o.status, o.ends_at,
+    `SELECT o.id, o.character_id, o.currency_id, o.price, o.quantity, o.filled, o.status, o.ends_at,
             c.name AS buyer_name
        FROM exchange_orders o LEFT JOIN characters c ON c.id = o.character_id
       WHERE o.instrument_id = $1 AND o.side = 1 AND o.status IN (1,2)
-      ORDER BY o.price DESC, o.created_at ASC LIMIT 60`, [instrumentId])).rows
+      ORDER BY o.currency_id ASC, o.price DESC, o.created_at ASC LIMIT 60`, [instrumentId])).rows
     .map((r) => orderPublic({ ...r, buyer_anon: false }, charId));
 
   const trades = (await game.query(
-    `SELECT price, quantity, ts FROM exchange_trades
+    `SELECT currency_id, price, quantity, ts FROM exchange_trades
       WHERE instrument_id = $1 ORDER BY ts DESC LIMIT 30`, [instrumentId])).rows
-    .map((r) => ({ price: Number(r.price), qty: Number(r.quantity), ts: new Date(r.ts).getTime() }));
+    .map((r) => ({ currencyId: Number(r.currency_id) || CUR.copper,
+      currency: marketCurrencyCode(r.currency_id),
+      price: Number(r.price), qty: Number(r.quantity), ts: new Date(r.ts).getTime() }));
 
   const owned = Number((await game.query(
     `SELECT COALESCE(SUM(quantity),0)::bigint AS q FROM item_instances
@@ -104,7 +165,8 @@ export async function board(charId, instrumentId) {
     tariffs: t,
     instrument: {
       instrumentId: Number(instr.instrument_id), templateId: Number(instr.item_template_id),
-      name: instr.name, icon: instr.icon, type: Number(instr.type), stats: instr.base_stats || null,
+      name: instr.name, icon: instr.icon, type: Number(instr.type),
+      slot: instr.slot != null ? Number(instr.slot) : null, stats: instr.base_stats || null,
       quality: Number(instr.quality) || 1, level: Number(instr.level_req) || 1,
       tickSize: Number(instr.tick_size) || 1, lotSize: Number(instr.lot_size) || 1, active: !!instr.active,
     },
@@ -113,10 +175,10 @@ export async function board(charId, instrumentId) {
 }
 
 /** Записать сделку (для «последней цены»; sell_order_id у заявочной модели нет). */
-function recordTrade(c, instrumentId, buyOrderId, price, qty) {
+function recordTrade(c, instrumentId, buyOrderId, currencyId, price, qty) {
   return c.query(
-    `INSERT INTO exchange_trades (instrument_id, buy_order_id, sell_order_id, price, quantity)
-     VALUES ($1, $2, NULL, $3, $4)`, [instrumentId, buyOrderId, price, qty]);
+    `INSERT INTO exchange_trades (instrument_id, buy_order_id, sell_order_id, currency_id, price, quantity)
+     VALUES ($1, $2, NULL, $3, $4, $5)`, [instrumentId, buyOrderId, currencyId, price, qty]);
 }
 
 /** Создать заявку на покупку: блокируем деньги P×N, ставим срок. */
@@ -124,12 +186,14 @@ export async function createBuyOrder(buyer, raw) {
   const instrumentId = toInt(raw.instrumentId);
   const price = toInt(raw.price);
   const quantity = toInt(raw.quantity);
+  const currencyId = marketCurrencyId(raw.currencyId ?? raw.currency);
   const durationHours = toInt(raw.durationHours);
   const t = await exchangeTariffs();
 
   if (!(price >= 1) || BigInt(price) > PRICE_MAX) throw bad('bad_price');
   if (!(quantity >= 1) || quantity > QTY_MAX) throw bad('bad_quantity');
   const hours = t.durations.includes(durationHours) ? durationHours : t.durations[0];
+  await syncExchangeInstruments();
 
   let orderId;
   await tx(async (c) => {
@@ -148,13 +212,13 @@ export async function createBuyOrder(buyer, raw) {
     if (open >= t.maxOrders) throw bad('order_limit_reached');
 
     const order = (await c.query(
-      `INSERT INTO exchange_orders (character_id, instrument_id, side, price, quantity, status, ends_at)
-       VALUES ($1, $2, 1, $3, $4, 1, now() + ($5 || ' hours')::interval) RETURNING id`,
-      [buyer.id, instrumentId, price, quantity, String(hours)])).rows[0];
+      `INSERT INTO exchange_orders (character_id, instrument_id, side, currency_id, price, quantity, status, ends_at)
+       VALUES ($1, $2, 1, $3, $4, $5, 1, now() + ($6 || ' hours')::interval) RETURNING id`,
+      [buyer.id, instrumentId, currencyId, price, quantity, String(hours)])).rows[0];
     orderId = Number(order.id);
 
     // блокируем всю сумму заявки (insufficient_funds откатит создание)
-    await addCurrency(c, buyer.id, CUR.copper, -(price * quantity), CURR_REASON.exchange,
+    await addCurrency(c, buyer.id, currencyId, -(price * quantity), CURR_REASON.exchange,
       { type: REF.exchangeOrder, id: orderId });
   });
   return { ok: true, orderId, wallet: await wallet(game, buyer.id), board: await board(buyer.id, instrumentId) };
@@ -179,7 +243,7 @@ async function escrowSell(c, sellerId, templateId, qty, orderId) {
   }
 }
 
-/** Доставить покупателю всё, что в escrow заявки (+ опц. возврат денег), письмом. */
+/** Доставить покупателю всё, что в escrow заявки, письмом. */
 async function deliverOrderToBuyer(c, order, { subject, body, money = 0 }) {
   const escrow = (await c.query(
     `SELECT id, quantity FROM item_instances
@@ -222,11 +286,10 @@ export async function sellIntoOrder(seller, raw) {
     const price = Number(order.price);
     // товар продавца → escrow заявки
     await escrowSell(c, seller.id, templateId, sellQty, orderId);
-    // выручка продавцу — письмом сразу
-    await deliverMail(c, seller.id, { type: 2, subject: 'Продажа на бирже',
-      body: 'Вы продали товар по заявке — выручка во вложении.', money: price * sellQty });
-    notify.add(String(seller.id));
-    await recordTrade(c, order.instrument_id, orderId, price, sellQty);
+    // выручка продавцу сразу в валюте заявки
+    await addCurrency(c, seller.id, Number(order.currency_id) || CUR.copper,
+      price * sellQty, CURR_REASON.exchange, { type: REF.exchangeOrder, id: orderId });
+    await recordTrade(c, order.instrument_id, orderId, Number(order.currency_id) || CUR.copper, price, sellQty);
 
     const newFilled = Number(order.filled) + sellQty;
     if (newFilled >= Number(order.quantity)) {
@@ -248,7 +311,7 @@ export async function sellIntoOrder(seller, raw) {
     board: await board(seller.id, result.instrumentId) };
 }
 
-/** Снять свою заявку: купленный товар + непокрытые деньги — покупателю письмом. */
+/** Снять свою заявку: купленный товар — письмом, непокрытые деньги — в кошелёк. */
 export async function cancelBuyOrder(buyer, orderId) {
   orderId = toInt(orderId);
   const notify = new Set();
@@ -261,9 +324,12 @@ export async function cancelBuyOrder(buyer, orderId) {
     if (![1, 2].includes(Number(order.status))) throw bad('order_closed');
     instrumentId = Number(order.instrument_id);
     const refund = Number(order.price) * (Number(order.quantity) - Number(order.filled));
+    if (refund > 0) {
+      await addCurrency(c, order.character_id, Number(order.currency_id) || CUR.copper,
+        refund, CURR_REASON.exchange, { type: REF.exchangeOrder, id: orderId });
+    }
     await deliverOrderToBuyer(c, order, { subject: 'Заявка снята',
-      body: 'Вы сняли заявку с биржи — купленный товар и непотраченная медь во вложении.',
-      money: refund });
+      body: 'Вы сняли заявку с биржи — купленный товар во вложении, остаток денег возвращён в кошелёк.' });
     notify.add(String(order.character_id));
     await c.query(`UPDATE exchange_orders SET status = 4 WHERE id = $1`, [orderId]);
   });
@@ -271,7 +337,7 @@ export async function cancelBuyOrder(buyer, orderId) {
   return { ok: true, wallet: await wallet(game, buyer.id), board: await board(buyer.id, instrumentId) };
 }
 
-/** Завершение истёкших заявок: товар + остаток денег покупателю письмом. */
+/** Завершение истёкших заявок: товар — письмом, остаток денег — в кошелёк. */
 export async function processExpiredOrders() {
   const notify = new Set();
   let processed = 0;
@@ -284,9 +350,12 @@ export async function processExpiredOrders() {
       if (!orders.length) return 0;
       for (const order of orders) {
         const refund = Number(order.price) * (Number(order.quantity) - Number(order.filled));
+        if (refund > 0) {
+          await addCurrency(c, order.character_id, Number(order.currency_id) || CUR.copper,
+            refund, CURR_REASON.exchange, { type: REF.exchangeOrder, id: order.id });
+        }
         await deliverOrderToBuyer(c, order, { subject: 'Срок заявки истёк',
-          body: 'Заявка на бирже закрыта по времени — купленный товар и непотраченная медь во вложении.',
-          money: refund });
+          body: 'Заявка на бирже закрыта по времени — купленный товар во вложении, остаток денег возвращён в кошелёк.' });
         notify.add(String(order.character_id));
         await c.query(`UPDATE exchange_orders SET status = 5 WHERE id = $1`, [order.id]);
         processed++;
@@ -310,7 +379,8 @@ export function startExchangeWorker(intervalMs = 20_000) {
 
 export function exchangeRoutes(app, authed, getCharacter) {
   const me = (req) => req.session.character_id;
-  app.get('/api/exchange', authed, async (req, res) => res.json({ instruments: await instruments() }));
+  app.get('/api/exchange', authed, async (req, res) =>
+    res.json({ instruments: await instruments(req.query || {}) }));
   app.get('/api/exchange/board/:id', authed, async (req, res) =>
     res.json(await board(me(req), req.params.id)));
   app.post('/api/exchange/order', authed, async (req, res) => {

@@ -5,12 +5,18 @@ import {
   OWNER, ITEM_REASON, CURR_REASON, REF, bad, moveQty, lockSellableItem,
   deliverMail, publishMailNotify,
 } from './escrow.js';
+import { marketCurrencyCode, normalizeMarketCurrency } from './marketCurrency.js';
 
 const WORLD = 1;
 const PRICE_MAX = 1_000_000_000n;   // потолок цены (анти-переполнение и анти-троллинг)
 
 const num = (v, d) => (Number.isFinite(Number(v)) ? Number(v) : d);
 const toInt = (v) => Math.trunc(Number(v) || 0);
+function marketCurrencyId(raw) {
+  const id = normalizeMarketCurrency(raw);
+  if (!id) throw bad('bad_currency');
+  return id;
+}
 
 /** Тарифы аукциона из game_config (с безопасными значениями по умолчанию). */
 export async function auctionTariffs() {
@@ -58,6 +64,8 @@ function lotPublic(r, viewerId, t) {
     stats: r.base_stats || null,
     description: info.description,
     quantity: Number(r.quantity) || 1,
+    currencyId: Number(r.currency_id) || CUR.copper,
+    currency: marketCurrencyCode(r.currency_id),
     startPrice: Number(r.start_price),
     buyoutPrice: r.buyout_price != null ? Number(r.buyout_price) : null,
     currentBid: r.current_bid != null ? Number(r.current_bid) : null,
@@ -77,7 +85,7 @@ function lotPublic(r, viewerId, t) {
 
 const LOT_SELECT = `
   SELECT l.id, l.seller_id, l.template_id, l.quantity, l.start_price, l.buyout_price,
-         l.current_bid, l.current_bidder_id, l.bid_count, l.anonymous, l.featured,
+         l.current_bid, l.current_bidder_id, l.currency_id, l.bid_count, l.anonymous, l.featured,
          l.auto_extend, l.ends_at, l.status,
          t.name, t.icon, t.base_stats, t.price AS base_price, t.quality, t.level_req,
          t.type, t.slot,
@@ -106,11 +114,19 @@ export async function browse(charId, q = {}) {
   const params = [WORLD];
   const search = String(q.q || '').trim().slice(0, 40);
   if (search) { params.push('%' + search.toLowerCase() + '%'); where.push(`lower(t.name) LIKE $${params.length}`); }
-  if (q.cat != null && q.cat !== '' && q.cat !== 'all') {
-    params.push(toInt(q.cat)); where.push(`l.category = $${params.length}`);
+  const cat = q.cat ?? q.category;
+  if (cat != null && cat !== '' && cat !== 'all') {
+    params.push(toInt(cat)); where.push(`t.type = $${params.length}`);
   }
-  if (q.levelMin) { params.push(toInt(q.levelMin)); where.push(`l.level >= $${params.length}`); }
-  if (q.levelMax) { params.push(toInt(q.levelMax)); where.push(`l.level <= $${params.length}`); }
+  if (q.quality != null && q.quality !== '' && q.quality !== 'all') {
+    params.push(toInt(q.quality)); where.push(`t.quality = $${params.length}`);
+  }
+  if (q.levelMin != null && q.levelMin !== '') {
+    params.push(toInt(q.levelMin)); where.push(`t.level_req >= $${params.length}`);
+  }
+  if (q.levelMax != null && q.levelMax !== '') {
+    params.push(toInt(q.levelMax)); where.push(`t.level_req <= $${params.length}`);
+  }
 
   const SORTS = {
     ends:      'l.featured DESC, l.ends_at ASC',
@@ -167,6 +183,7 @@ export async function createLot(seller, raw) {
   const wantQty = Math.max(1, toInt(raw.qty) || 1);
   const startPrice = toInt(raw.startPrice);
   const buyoutPrice = raw.buyoutPrice == null || raw.buyoutPrice === '' ? null : toInt(raw.buyoutPrice);
+  const currencyId = marketCurrencyId(raw.currencyId ?? raw.currency);
   const durationHours = toInt(raw.durationHours) || t.durations[0];
   const anonymous = !!raw.anonymous;
   const featured = !!raw.featured;
@@ -193,13 +210,13 @@ export async function createLot(seller, raw) {
     const lot = (await c.query(
       `INSERT INTO auction_lots
          (world_id, seller_id, item_instance_id, template_id, quantity, category,
-          subcategory, level, start_price, buyout_price, deposit, anonymous, featured,
+          subcategory, level, currency_id, start_price, buyout_price, deposit, anonymous, featured,
           auto_extend, ends_at, status)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14, now() + ($15 || ' hours')::interval, 1)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15, now() + ($16 || ' hours')::interval, 1)
        RETURNING id`,
       [WORLD, seller.id, itemId, it.template_id, it.want, Number(it.type),
        it.slot != null ? Number(it.slot) : null, Number(it.level_req) || 1,
-       startPrice, buyoutPrice, fee, anonymous, featured, autoExtend,
+       currencyId, startPrice, buyoutPrice, fee, anonymous, featured, autoExtend,
        String(durationHours)])).rows[0];
 
     // вещь в escrow аукциона; для частичной стопки moveQty отщепит новый экземпляр
@@ -239,14 +256,12 @@ export async function placeBid(bidder, lotId, amount) {
     if (BigInt(amount) > PRICE_MAX) throw bad('price_too_high');
 
     // 1) списываем у нового претендента (insufficient_funds откатит всё)
-    await addCurrency(c, bidder.id, CUR.copper, -amount, CURR_REASON.auction,
+    await addCurrency(c, bidder.id, Number(lot.currency_id) || CUR.copper, -amount, CURR_REASON.auction,
       { type: REF.auctionLot, id: lotId });
-    // 2) возвращаем прежнему лидеру его деньги — письмом на почту
+    // 2) возвращаем прежнему лидеру его деньги
     if (lot.current_bidder_id != null) {
-      await deliverMail(c, lot.current_bidder_id, { type: 3, subject: 'Ставка перебита',
-        body: 'Вашу ставку на аукционе перебили — медь возвращена во вложении.',
-        money: Number(lot.current_bid) });
-      notify.add(String(lot.current_bidder_id));
+      await addCurrency(c, lot.current_bidder_id, Number(lot.currency_id) || CUR.copper,
+        Number(lot.current_bid), CURR_REASON.auction, { type: REF.auctionLot, id: lotId });
       await c.query(`UPDATE auction_bids SET status = 2 WHERE lot_id = $1 AND status = 1`, [lotId]);
     }
     // 3) фиксируем новую ставку
@@ -287,26 +302,27 @@ export async function buyout(buyer, lotId) {
     if (String(lot.seller_id) === String(buyer.id)) throw bad('cannot_buy_own');
 
     const price = Number(lot.buyout_price);
-    // вернуть деньги текущему лидеру ставок (если есть) — письмом
+    // вернуть деньги текущему лидеру ставок (если есть)
     if (lot.current_bidder_id != null) {
-      await deliverMail(c, lot.current_bidder_id, { type: 3, subject: 'Ставка перебита',
-        body: 'Лот выкупили — ваша медь возвращена во вложении.', money: Number(lot.current_bid) });
-      notify.add(String(lot.current_bidder_id));
+      await addCurrency(c, lot.current_bidder_id, Number(lot.currency_id) || CUR.copper,
+        Number(lot.current_bid), CURR_REASON.auction, { type: REF.auctionLot, id: lotId });
       await c.query(`UPDATE auction_bids SET status = 4 WHERE lot_id = $1 AND status = 1`, [lotId]);
     }
     // списать с покупателя (это оплата, не доставка — снимаем сразу)
-    await addCurrency(c, buyer.id, CUR.copper, -price, CURR_REASON.auction, { type: REF.auctionLot, id: lotId });
+    await addCurrency(c, buyer.id, Number(lot.currency_id) || CUR.copper, -price,
+      CURR_REASON.auction, { type: REF.auctionLot, id: lotId });
     // выдать вещь покупателю — письмом
     await deliverMail(c, buyer.id, { type: 3, subject: 'Покупка на аукционе',
       body: 'Вы выкупили лот — вещь во вложении.',
       items: [{ itemId: lot.item_instance_id, qty: lot.quantity,
         expectType: OWNER.auction, expectId: lotId, refType: REF.auctionLot, refId: lotId }] });
     notify.add(String(buyer.id));
-    // выплатить продавцу за вычетом налога — письмом
+    // выплатить продавцу за вычетом налога
     const tax = saleTax(price, t);
-    await deliverMail(c, lot.seller_id, { type: 3, subject: 'Лот продан',
-      body: 'Ваш лот выкупили — выручка во вложении (за вычетом налога).', money: price - tax });
-    notify.add(String(lot.seller_id));
+    if (price > tax) {
+      await addCurrency(c, lot.seller_id, Number(lot.currency_id) || CUR.copper, price - tax,
+        CURR_REASON.auction, { type: REF.auctionLot, id: lotId });
+    }
 
     const upd = await c.query(
       `UPDATE auction_lots SET status = 3, current_bid = $2, current_bidder_id = $3,
@@ -352,6 +368,9 @@ export async function editLot(seller, lotId, raw) {
   lotId = toInt(lotId);
   const startPrice = toInt(raw.startPrice);
   const buyoutPrice = raw.buyoutPrice == null || raw.buyoutPrice === '' ? null : toInt(raw.buyoutPrice);
+  const currencyId = raw.currencyId == null && raw.currency == null
+    ? null
+    : marketCurrencyId(raw.currencyId ?? raw.currency);
   if (!(startPrice >= 1)) throw bad('bad_start_price');
   if (buyoutPrice != null && !(buyoutPrice >= startPrice)) throw bad('buyout_below_start');
   if (BigInt(startPrice) > PRICE_MAX || (buyoutPrice != null && BigInt(buyoutPrice) > PRICE_MAX)) {
@@ -365,8 +384,9 @@ export async function editLot(seller, lotId, raw) {
     if (lot.status !== 1) throw bad('lot_closed');
     if (lot.bid_count > 0) throw bad('has_bids');
     const upd = await c.query(
-      `UPDATE auction_lots SET start_price = $2, buyout_price = $3, version = version + 1
-        WHERE id = $1 AND version = $4`, [lotId, startPrice, buyoutPrice, lot.version]);
+      `UPDATE auction_lots SET start_price = $2, buyout_price = $3,
+              currency_id = COALESCE($4, currency_id), version = version + 1
+        WHERE id = $1 AND version = $5`, [lotId, startPrice, buyoutPrice, currencyId, lot.version]);
     if (upd.rowCount === 0) throw bad('conflict', 409);
     return { ok: true };
   });
@@ -406,17 +426,18 @@ export async function processExpiredLots() {
       if (!lots.length) return 0;
       for (const lot of lots) {
         if (lot.current_bidder_id != null) {
-          // продано лидеру ставок: вещь — победителю, выручка — продавцу (письмами)
+          // продано лидеру ставок: вещь — победителю, выручка — продавцу
           await deliverMail(c, lot.current_bidder_id, { type: 3, subject: 'Вы выиграли торги',
             body: 'Поздравляем! Лот ваш — вещь во вложении.',
             items: [{ itemId: lot.item_instance_id, qty: lot.quantity,
               expectType: OWNER.auction, expectId: lot.id, refType: REF.auctionLot, refId: lot.id }] });
           notify.add(String(lot.current_bidder_id));
           const tax = saleTax(Number(lot.current_bid), t);
-          await deliverMail(c, lot.seller_id, { type: 3, subject: 'Лот продан',
-            body: 'Ваш лот продан на торгах — выручка во вложении (за вычетом налога).',
-            money: Number(lot.current_bid) - tax });
-          notify.add(String(lot.seller_id));
+          if (Number(lot.current_bid) > tax) {
+            await addCurrency(c, lot.seller_id, Number(lot.currency_id) || CUR.copper,
+              Number(lot.current_bid) - tax, CURR_REASON.auction,
+              { type: REF.auctionLot, id: lot.id });
+          }
           await c.query(`UPDATE auction_bids SET status = 3 WHERE lot_id = $1 AND status = 1`, [lot.id]);
           await c.query(
             `UPDATE auction_lots SET status = 2, version = version + 1 WHERE id = $1`, [lot.id]);
