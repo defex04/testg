@@ -5298,7 +5298,17 @@ body.hide-sys-chat .chat-line.system:not(.chat-error) { display: none; }
   .auc-price-row { justify-content: flex-start; }
   .auc-lot-actions { grid-column: 1 / -1; flex-direction: row; min-width: 0; flex-wrap: wrap; }
   .auc-bid { flex: 1; }
+  .exch-list { max-height: 30vh; }
+  /* форма заявки: цена и количество в ряд, «Срок» — на всю ширину под ними */
   .exch-newform-row { grid-template-columns: 1fr 1fr; }
+  .exch-newform-row .auc-field:nth-child(3) { grid-column: 1 / -1; }
+  .exch-newform-foot { flex-wrap: wrap; }
+  .exch-newform-foot .auc-field.row { flex: 1 1 100%; }
+  .exch-newform-foot .auc-btn { flex: 1 1 100%; }
+  /* заявка: цена/инфо сверху, действие — отдельной строкой во всю ширину */
+  .exch-bo-row { flex-wrap: wrap; }
+  .exch-bo-act { width: 100%; }
+  .exch-sell-qty { flex: 1; width: auto; }
 }
 
 /* биржа: доска заявок на покупку */
