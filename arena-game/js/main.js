@@ -2927,7 +2927,7 @@ function aucLotCard(lot) {
   }
 
   card.innerHTML = `
-    <div class="auc-lot-ico${qClass(true, q)}">${esc(itemIconText(lot.icon, lot.type, lot.stats, lot.slot))}</div>
+    <button type="button" class="auc-lot-ico${qClass(true, q)}">${esc(itemIconText(lot.icon, lot.type, lot.stats, lot.slot))}</button>
     <div class="auc-lot-main">
       <div class="auc-lot-name">${esc(lot.name)}${lot.quantity > 1 ? `<span class="auc-lot-qty">×${lot.quantity}</span>` : ''}</div>
       <div class="auc-lot-sub">
@@ -2935,7 +2935,6 @@ function aucLotCard(lot) {
         <span class="auc-chip">${esc(lot.sellerName)}</span>
         <span class="auc-chip time">${aucTimeLeft(lot.endsAt)}</span>
         ${lot.bidCount ? `<span class="auc-chip">ставок: ${lot.bidCount}</span>` : ''}
-        <button type="button" class="auc-chip auc-preview-toggle">Превью</button>
       </div>
     </div>
     <div class="auc-lot-prices">
@@ -2951,7 +2950,7 @@ function aucLotCard(lot) {
   card.querySelector('.auc-bidbtn')?.addEventListener('click', (ev) => {
     aucDoBid(lot, readPriceEditor(`auc-bid-${lot.id}`), ev.target);
   });
-  card.querySelector('.auc-preview-toggle')?.addEventListener('click', () =>
+  card.querySelector('.auc-lot-ico')?.addEventListener('click', () =>
     card.querySelector('.auc-lot-preview')?.classList.toggle('hidden'));
   card.querySelector('.auc-cancel')?.addEventListener('click', (ev) => aucDoCancel(lot, ev.target));
   card.querySelector('.auc-edit')?.addEventListener('click', () => aucInlineEdit(lot, card));
@@ -3177,10 +3176,11 @@ async function renderExchange() {
   let data;
   try { data = await api.exchange(marketFilterPayload(exchSearch, exchFilters)); }
   catch (e) { $('exch-list').innerHTML = `<div class="auc-empty">Ошибка: ${esc(e.message)}</div>`; return; }
-  exchInstruments = data.instruments || [];
-  renderExchList();
+  exchInstruments = (data.instruments || []).filter((i) => Number(i.openOrders) > 0);
   if (!exchInstruments.some((i) => i.instrumentId === exchSel)) exchSel = exchInstruments[0]?.instrumentId ?? null;
+  renderExchList();
   if (exchSel != null) loadExchBoard(exchSel);
+  else $('exch-detail').innerHTML = '<div class="auc-empty">Нет активных заявок</div>';
 }
 function bindExchTools() {
   const doSearch = () => {
@@ -3212,7 +3212,7 @@ function renderExchList() {
     row.type = 'button';
     row.className = 'exch-irow' + (ins.instrumentId === exchSel ? ' sel' : '');
     const best = exchBestBidHtml(ins.bestBids);
-    const meta = ins.openOrders ? `${ins.openOrders} заявок${best ? ' · ' + best : ''}` : 'нет заявок';
+    const meta = `${ins.openOrders} заявок${best ? ' · ' + best : ''}`;
     row.innerHTML = `
       <span class="exch-i-ico${qClass(true, ins.quality)}">${esc(itemIconText(ins.icon, ins.type, ins.stats, ins.slot))}</span>
       <span class="exch-i-name">${esc(ins.name)}</span>
@@ -3236,7 +3236,7 @@ async function loadExchBoard(instrumentId) {
   catch (e) { host.innerHTML = `<div class="auc-empty">Ошибка: ${esc(e.message)}</div>`; return; }
   renderExchBoard(d);
 }
-function exchOrderRow(o, owned) {
+function exchOrderRow(o, owned, ins) {
   let act;
   if (o.isMine) {
     act = `<button type="button" class="auc-btn ghost sm exch-cancel" data-order="${o.id}">Снять</button>`;
@@ -3248,6 +3248,7 @@ function exchOrderRow(o, owned) {
     act = `<span class="exch-o-none">нет товара</span>`;
   }
   return `<div class="exch-bo-row${o.isMine ? ' mine' : ''}">
+    <button type="button" class="exch-bo-ico${qClass(true, ins.quality)}">${esc(itemIconText(ins.icon, ins.type, ins.stats, ins.slot))}</button>
     <div class="exch-bo-main">
       <div class="exch-bo-price">${coinsHtml(o.price, o.currency)} <span class="exch-bo-per">/ шт</span></div>
       <div class="exch-bo-sub">${esc(o.buyerName)} · куплено ${aucFmt(o.filled)}/${aucFmt(o.quantity)}${o.endsAt ? ' · ' + aucTimeLeft(o.endsAt) : ''}</div>
@@ -3262,11 +3263,11 @@ function renderExchBoard(d) {
     `<option value="${h}">${h < 24 ? h + ' ч' : Math.floor(h / 24) + ' дн'}</option>`).join('');
   host.innerHTML = `
     <div class="exch-d-head">
-      <span class="exch-d-ico${qClass(true, ins.quality)}">${esc(itemIconText(ins.icon, ins.type, ins.stats, ins.slot))}</span>
+      <button type="button" class="exch-d-ico${qClass(true, ins.quality)}">${esc(itemIconText(ins.icon, ins.type, ins.stats, ins.slot))}</button>
       <span class="exch-d-name">${esc(ins.name)}</span>
       <span class="exch-d-owned">В рюкзаке: <b>${aucFmt(d.owned)}</b></span>
     </div>
-    <div class="exch-preview">${marketItemPreviewHtml(ins)}</div>
+    <div class="exch-preview hidden">${marketItemPreviewHtml(ins)}</div>
     <div class="exch-newform">
       <div class="exch-newform-title">Новая заявка на покупку</div>
       <div class="exch-newform-row">
@@ -3282,7 +3283,7 @@ function renderExchBoard(d) {
     </div>
     <div class="exch-board">
       <div class="exch-board-title">Заявки на покупку (${d.orders.length})</div>
-      ${d.orders.length ? d.orders.map((o) => exchOrderRow(o, d.owned)).join('')
+      ${d.orders.length ? d.orders.map((o) => exchOrderRow(o, d.owned, ins)).join('')
         : '<div class="exch-book-empty">Заявок пока нет — выставьте первую.</div>'}
     </div>`;
 
@@ -3294,6 +3295,9 @@ function renderExchBoard(d) {
   bindPriceEditor('exch-price', recalc);
   qtyEl.addEventListener('input', recalc); recalc();
   $('exch-submit').addEventListener('click', () => exchCreateOrder(ins, qtyEl, $('exch-dur')));
+  const togglePreview = () => host.querySelector('.exch-preview')?.classList.toggle('hidden');
+  host.querySelector('.exch-d-ico')?.addEventListener('click', togglePreview);
+  host.querySelectorAll('.exch-bo-ico').forEach((b) => b.addEventListener('click', togglePreview));
   host.querySelectorAll('.exch-cancel').forEach((b) =>
     b.addEventListener('click', () => exchCancelOrder(b.dataset.order, b)));
   host.querySelectorAll('.exch-sell').forEach((b) => b.addEventListener('click', () => {
