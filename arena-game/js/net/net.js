@@ -196,9 +196,33 @@ export const api = {
   mailTake:   (id) => rest('/api/mail/' + Number(id) + '/take', {}),
   mailDelete: (id) => rest('/api/mail/' + Number(id) + '/delete', {}),
   mailDeleteSent: (id) => rest('/api/mail/sent/' + Number(id) + '/delete', {}),
+  // ── аукцион ──
+  auction:       (q = {}) => rest('/api/auction' + qstr(q)),
+  auctionMyLots: () => rest('/api/auction/mylots'),
+  auctionMyBids: () => rest('/api/auction/mybids'),
+  auctionCreate: (payload) => rest('/api/auction/lot', payload),
+  auctionBid:    (lotId, amount) => rest('/api/auction/bid', { lotId, amount }),
+  auctionBuyout: (lotId) => rest('/api/auction/buyout', { lotId }),
+  auctionCancel: (lotId) => rest('/api/auction/cancel', { lotId }),
+  auctionEdit:   (lotId, startPrice, buyoutPrice) =>
+    rest('/api/auction/edit', { lotId, startPrice, buyoutPrice }),
+  // ── биржа (доска заявок на покупку) ──
+  exchange:       () => rest('/api/exchange'),
+  exchangeBoard:  (id) => rest('/api/exchange/board/' + Number(id)),
+  exchangeOrder:  (payload) => rest('/api/exchange/order', payload),   // создать заявку на покупку
+  exchangeSell:   (orderId, quantity) => rest('/api/exchange/sell', { orderId, quantity }),
+  exchangeCancel: (orderId) => rest('/api/exchange/cancel', { orderId }),
   /** Регистрировать ДО login: cb получит ServerBattle, если бой ещё идёт. */
   onBattleResume: (fn) => { resumeCb = fn; },
 };
+
+/** Сборка query-строки (?a=1&b=2), пустые значения опускаются. */
+function qstr(q) {
+  const parts = Object.entries(q || {})
+    .filter(([, v]) => v != null && v !== '')
+    .map(([k, v]) => encodeURIComponent(k) + '=' + encodeURIComponent(v));
+  return parts.length ? '?' + parts.join('&') : '';
+}
 
 /** Страховка к push battleResume: сами спрашиваем сервер про идущий бой. */
 async function checkResumeBattle() {

@@ -37,7 +37,7 @@ function describeGear(type, slot) {
   return `Экипировка · ${where}.`;
 }
 
-function product(row) {
+export function product(row) {
   const type = Number(row.type);
   if (type === 1 || type === 2 || type === 5) {   // экипировка: оружие/броня/амулет
     return {

@@ -3,7 +3,7 @@ import http from 'http';
 import { connectAll } from './db.js';
 import { cfg } from './config.js';
 import { authRoutes } from './auth.js';
-import { ensureCharacter, characterRoutes } from './characters.js';
+import { ensureCharacter, characterRoutes, getCharacter } from './characters.js';
 import { sessionByToken } from './auth.js';
 import { clearAllPresence, locationRoutes } from './locations.js';
 import { inventoryRoutes, grantStarterItems } from './inventory.js';
@@ -11,6 +11,8 @@ import { beltRoutes } from './belt.js';
 import { chatRoutes } from './chat.js';
 import { mailRoutes } from './mail.js';
 import { shopRoutes } from './shop.js';
+import { auctionRoutes, startAuctionWorker } from './auction.js';
+import { exchangeRoutes, startExchangeWorker } from './exchange.js';
 import { createHub } from './ws.js';
 import { adminRoutes } from './admin.js';
 import { runMigrations } from './migrate.js';
@@ -65,6 +67,8 @@ battleRoutes(app, authed);
 chatRoutes(app, authed);
 mailRoutes(app, authed, hub);
 shopRoutes(app, authed);
+auctionRoutes(app, authed, getCharacter);
+exchangeRoutes(app, authed, getCharacter);
 adminRoutes(app);
 const pub = fileURLToPath(new URL('../public', import.meta.url));
 app.get('/admin', (req, res) => res.sendFile(pub + '/admin.html'));
@@ -91,5 +95,7 @@ await connectAll();
 await clearAllPresence();
 await runMigrations();
 await battleBoot();
+startAuctionWorker();   // фоновое завершение истёкших лотов
+startExchangeWorker();  // фоновое завершение истёкших заявок биржи
 server.listen(cfg.port, () =>
   console.log(`API на http://localhost:${cfg.port} (dev-вход: POST /api/auth/dev)`));

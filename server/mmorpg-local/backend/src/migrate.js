@@ -417,6 +417,48 @@ STATEMENTS.push(
      END IF;
    END $$`);
 
+// ---------------------------------------------------------------------------
+// Аукцион и биржа. Таблицы заведены ещё в initdb (30_game_schema.sql); здесь —
+// идемпотентные добавки: флаги лота, денормализация template_id, тарифы в
+// game_config, инструменты биржи и явные GRANT'ы (на случай рантайм-создания).
+// ---------------------------------------------------------------------------
+STATEMENTS.push(
+  `ALTER TABLE auction_lots ADD COLUMN IF NOT EXISTS template_id INT`,
+  `ALTER TABLE auction_lots ADD COLUMN IF NOT EXISTS anonymous  BOOLEAN NOT NULL DEFAULT FALSE`,
+  `ALTER TABLE auction_lots ADD COLUMN IF NOT EXISTS featured   BOOLEAN NOT NULL DEFAULT FALSE`,
+  `ALTER TABLE auction_lots ADD COLUMN IF NOT EXISTS auto_extend BOOLEAN NOT NULL DEFAULT FALSE`,
+  // старым лотам (если есть) проставим template_id из их экземпляра
+  `UPDATE auction_lots l SET template_id = i.template_id
+     FROM item_instances i WHERE l.item_instance_id = i.id AND l.template_id IS NULL`,
+  `CREATE INDEX IF NOT EXISTS ix_lots_template ON auction_lots (template_id) WHERE status = 1`,
+  // Тарифы аукциона (медь): сбор за выставление = listing_fee_pct × стартовой,
+  // налог с продажи = sale_tax_pct × финальной. max_lots — лимит активных лотов.
+  `INSERT INTO game_config (key, value) VALUES ('auction.listing_fee_pct', '0.05') ON CONFLICT (key) DO NOTHING`,
+  `INSERT INTO game_config (key, value) VALUES ('auction.sale_tax_pct', '0.15') ON CONFLICT (key) DO NOTHING`,
+  `INSERT INTO game_config (key, value) VALUES ('auction.max_lots', '3') ON CONFLICT (key) DO NOTHING`,
+  `INSERT INTO game_config (key, value) VALUES ('auction.min_bid_increment_pct', '0.05') ON CONFLICT (key) DO NOTHING`,
+  `INSERT INTO game_config (key, value) VALUES ('auction.featured_fee', '500') ON CONFLICT (key) DO NOTHING`,
+  `INSERT INTO game_config (key, value) VALUES ('auction.anti_snipe_min', '5') ON CONFLICT (key) DO NOTHING`,
+  `INSERT INTO game_config (key, value) VALUES ('auction.durations', '[2, 6, 12, 24, 48]') ON CONFLICT (key) DO NOTHING`,
+  // Биржа = доска заявок на покупку: у заявки есть срок, товар к ней приходит
+  // частями. exchange_orders.ends_at — срок; sell_order_id у заявочной модели
+  // нет (продажа идёт «в заявку»), снимаем NOT NULL.
+  `ALTER TABLE exchange_orders ADD COLUMN IF NOT EXISTS ends_at TIMESTAMPTZ`,
+  `ALTER TABLE exchange_trades ALTER COLUMN sell_order_id DROP NOT NULL`,
+  `INSERT INTO game_config (key, value) VALUES ('exchange.max_orders', '10') ON CONFLICT (key) DO NOTHING`,
+  `INSERT INTO game_config (key, value) VALUES ('exchange.durations', '[6, 12, 24, 48]') ON CONFLICT (key) DO NOTHING`,
+  // Инструменты биржи — расходники-«ресурсы» (зависят от шаблонов, добавленных
+  // выше в этом же прогоне). item_template_id ссылается на item_templates.
+  `INSERT INTO exchange_instruments (instrument_id, item_template_id, tick_size, lot_size, active)
+   VALUES (1,202,1,1,TRUE),(2,203,1,1,TRUE),(3,230,1,1,TRUE),(4,240,1,1,TRUE),
+          (5,250,1,1,TRUE),(6,260,1,1,TRUE),(7,270,1,1,TRUE),(8,201,1,1,TRUE)
+   ON CONFLICT (instrument_id) DO NOTHING`,
+  // Права игровой роли на таблицы рынка (без DELETE — закрытие через status).
+  `GRANT SELECT, INSERT, UPDATE ON auction_lots, auction_bids, auction_price_history TO game_rw`,
+  `GRANT SELECT, INSERT, UPDATE ON exchange_instruments, exchange_orders, exchange_trades, exchange_candles TO game_rw`,
+  `GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO game_rw`,
+);
+
 export async function runMigrations() {
   for (const sql of STATEMENTS) await adminPg().query(sql);
   console.log('Миграции применены:', STATEMENTS.length);

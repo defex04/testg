@@ -59,7 +59,9 @@ export async function inbox(charId) {
     hasAttachments: r.has_attachments,
     attachmentsTaken: r.attachments_taken,
     attCount: r.att_count,
-    canClaim: r.has_attachments && !r.attachments_taken,
+    // забрать можно письмо с вложениями ИЛИ с деньгами (системные письма
+    // аукциона/биржи часто несут только медь — её тоже надо отдать получателю)
+    canClaim: (r.has_attachments || (Number(r.money_attached) || 0) > 0) && !r.attachments_taken,
     ts: new Date(r.created_at).getTime(),
   }));
 }
@@ -128,7 +130,7 @@ export async function readMail(charId, mailId) {
     money: Number(m.money_attached) || 0,
     hasAttachments: m.has_attachments,
     attachmentsTaken: m.attachments_taken,
-    canClaim: m.has_attachments && !m.attachments_taken,
+    canClaim: (m.has_attachments || (Number(m.money_attached) || 0) > 0) && !m.attachments_taken,
     ts: new Date(m.created_at).getTime(),
     attachments,
   };
@@ -310,7 +312,8 @@ export async function takeAttachments(charId, mailId) {
         WHERE id = $1 AND recipient_id = $2 AND deleted_by_recipient = FALSE
         FOR UPDATE`, [mailId, charId])).rows[0];
     if (!m) throw bad('not_found', 404);
-    if (!m.has_attachments || m.attachments_taken) return { taken: 0 };
+    const hasMoney = (Number(m.money_attached) || 0) > 0;
+    if ((!m.has_attachments && !hasMoney) || m.attachments_taken) return { taken: 0 };
 
     const att = (await c.query(
       `SELECT a.item_instance_id, a.quantity, i.template_id, i.version
@@ -342,11 +345,12 @@ export async function takeAttachments(charId, mailId) {
 /** Удалить письмо у получателя; невзятые вложения сначала падают в рюкзак. */
 export async function deleteMail(charId, mailId) {
   const pre = (await game.query(
-    `SELECT has_attachments, attachments_taken FROM mail_messages
+    `SELECT has_attachments, attachments_taken, money_attached FROM mail_messages
       WHERE id = $1 AND recipient_id = $2 AND deleted_by_recipient = FALSE`,
     [mailId, charId])).rows[0];
   if (!pre) throw bad('not_found', 404);
-  if (pre.has_attachments && !pre.attachments_taken) {
+  // невзятые ценности (вложения ИЛИ деньги) сначала падают получателю
+  if ((pre.has_attachments || (Number(pre.money_attached) || 0) > 0) && !pre.attachments_taken) {
     await takeAttachments(charId, mailId);
   }
   await game.query(
