@@ -11,7 +11,7 @@ import { displayMarketPrice, normalizeMarketPrice } from './marketCurrency.js';
  * у кого есть товар, продают в заявку частями (1..остаток). Продавец получает
  * выручку сразу в кошелёк. Купленный товар копится в escrow заявки и уезжает
  * покупателю письмом при закрытии (полное исполнение / снятие / истечение срока);
- * непокрытый остаток денег возвращается покупателю в кошелёк.
+ * непокрытый остаток обычных денег возвращается покупателю письмом.
  *
  * Всё транзакционно: деньги — addCurrency (+ ledger), товар — moveQty (+ ledger),
  * доставка ценностей — deliverMail. Сериализация по заявке через FOR UPDATE.
@@ -253,7 +253,8 @@ async function deliverOrderToBuyer(c, order, { subject, body, money = 0 }) {
   const items = escrow.map((r) => ({ itemId: r.id, qty: Number(r.quantity),
     expectType: OWNER.exchange, expectId: Number(order.id),
     refType: REF.exchangeOrder, refId: Number(order.id) }));
-  return deliverMail(c, order.character_id, { type: 2, subject, body, money, items });
+  return deliverMail(c, order.character_id, { type: 2, subject, body,
+    money: Number(order.refundMailMoney ?? money) || 0, items });
 }
 
 /** Продать в чужую заявку (1..остаток, не больше своего запаса). */
@@ -312,7 +313,7 @@ export async function sellIntoOrder(seller, raw) {
     board: await board(seller.id, result.instrumentId) };
 }
 
-/** Снять свою заявку: купленный товар — письмом, непокрытые деньги — в кошелёк. */
+/** Снять свою заявку: купленный товар и непокрытые обычные деньги — письмом. */
 export async function cancelBuyOrder(buyer, orderId) {
   orderId = toInt(orderId);
   const notify = new Set();
@@ -324,13 +325,19 @@ export async function cancelBuyOrder(buyer, orderId) {
     if (String(order.character_id) !== String(buyer.id)) throw bad('not_owner', 403);
     if (![1, 2].includes(Number(order.status))) throw bad('order_closed');
     instrumentId = Number(order.instrument_id);
+    const currencyId = Number(order.currency_id) || CUR.copper;
     const refund = Number(order.price) * (Number(order.quantity) - Number(order.filled));
+    let mailMoney = 0;
     if (refund > 0) {
-      await addCurrency(c, order.character_id, Number(order.currency_id) || CUR.copper,
-        refund, CURR_REASON.exchange, { type: REF.exchangeOrder, id: orderId });
+      if (currencyId === CUR.copper) mailMoney = refund;
+      else {
+        await addCurrency(c, order.character_id, currencyId,
+          refund, CURR_REASON.exchange, { type: REF.exchangeOrder, id: orderId });
+      }
     }
+    order.refundMailMoney = mailMoney;
     await deliverOrderToBuyer(c, order, { subject: 'Заявка снята',
-      body: 'Вы сняли заявку с биржи — купленный товар во вложении, остаток денег возвращён в кошелёк.' });
+      body: 'Вы сняли заявку с биржи — купленный товар и остаток денег во вложении.' });
     notify.add(String(order.character_id));
     await c.query(`UPDATE exchange_orders SET status = 4 WHERE id = $1`, [orderId]);
   });
@@ -338,7 +345,7 @@ export async function cancelBuyOrder(buyer, orderId) {
   return { ok: true, wallet: await wallet(game, buyer.id), board: await board(buyer.id, instrumentId) };
 }
 
-/** Завершение истёкших заявок: товар — письмом, остаток денег — в кошелёк. */
+/** Завершение истёкших заявок: товар и непокрытые обычные деньги — письмом. */
 export async function processExpiredOrders() {
   const notify = new Set();
   let processed = 0;
@@ -350,13 +357,19 @@ export async function processExpiredOrders() {
           ORDER BY ends_at ASC LIMIT 20 FOR UPDATE SKIP LOCKED`)).rows;
       if (!orders.length) return 0;
       for (const order of orders) {
+        const currencyId = Number(order.currency_id) || CUR.copper;
         const refund = Number(order.price) * (Number(order.quantity) - Number(order.filled));
+        let mailMoney = 0;
         if (refund > 0) {
-          await addCurrency(c, order.character_id, Number(order.currency_id) || CUR.copper,
-            refund, CURR_REASON.exchange, { type: REF.exchangeOrder, id: order.id });
+          if (currencyId === CUR.copper) mailMoney = refund;
+          else {
+            await addCurrency(c, order.character_id, currencyId,
+              refund, CURR_REASON.exchange, { type: REF.exchangeOrder, id: order.id });
+          }
         }
+        order.refundMailMoney = mailMoney;
         await deliverOrderToBuyer(c, order, { subject: 'Срок заявки истёк',
-          body: 'Заявка на бирже закрыта по времени — купленный товар во вложении, остаток денег возвращён в кошелёк.' });
+          body: 'Заявка на бирже закрыта по времени — купленный товар и остаток денег во вложении.' });
         notify.add(String(order.character_id));
         await c.query(`UPDATE exchange_orders SET status = 5 WHERE id = $1`, [order.id]);
         processed++;

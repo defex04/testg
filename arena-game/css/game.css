@@ -5312,6 +5312,44 @@ button.auc-chip:hover { color: var(--gold-bright); border-color: rgba(216, 169, 
 
 /* ── биржа ── */
 .exch { display: grid; grid-template-columns: 250px minmax(0, 1fr); gap: 12px; min-height: 0; }
+.exch-create { display: grid; grid-template-columns: minmax(250px, .9fr) minmax(0, 1.1fr); gap: 12px; min-height: 0; }
+.exch-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  min-width: 0;
+  padding: 11px;
+  background: rgba(0, 0, 0, .2);
+  border: 1px solid var(--line-soft);
+  border-radius: 12px;
+}
+.exch-suggest-wrap { position: relative; }
+.exch-suggest {
+  max-height: 260px;
+  overflow-y: auto;
+  margin-top: 6px;
+  border: 1px solid rgba(138, 111, 60, .28);
+  border-radius: 10px;
+  background: rgba(6, 10, 4, .78);
+}
+.exch-suggest-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 8px 9px;
+  color: var(--text);
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid rgba(138, 111, 60, .14);
+  cursor: pointer;
+}
+.exch-suggest-row:hover { background: rgba(216, 169, 63, .09); }
+.exch-suggest-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.exch-suggest-empty { padding: 12px; color: var(--muted); text-align: center; font-size: 12px; }
+.exch-pick-selected .auc-item-preview { border-color: rgba(216, 169, 63, .28); }
+.exch-picker .auc-filters { grid-template-columns: 1fr 1fr; }
 .exch-side { display: flex; flex-direction: column; background: rgba(0, 0, 0, .2);
   border: 1px solid var(--line-soft); border-radius: 12px; overflow: hidden; }
 .exch-side-head { padding: 9px 11px; border-bottom: 1px solid var(--line-soft);
@@ -5454,6 +5492,7 @@ button.auc-chip:hover { color: var(--gold-bright); border-color: rgba(216, 169, 
   .auc-filters { grid-template-columns: 1fr 1fr; }
   .auc-filter-field.lvl { min-width: 0; }
   .exch { grid-template-columns: 1fr; }
+  .exch-create { grid-template-columns: 1fr; }
   .exch-list { max-height: 30vh; }
   .exch-newform-row { grid-template-columns: 1fr 1fr; }
   .exch-price-cell { grid-column: 1 / -1; }

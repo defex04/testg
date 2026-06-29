@@ -2815,7 +2815,11 @@ function closeAuction() { auctionEl.classList.add('hidden'); }
 function syncAucTabs() {
   auctionEl.querySelectorAll('.auc-tab').forEach((t) =>
     t.classList.toggle('active', t.dataset.aucTab === aucTab));
-  $('auc-new').style.display = aucTab === 'auction' ? '' : 'none';
+  const btn = $('auc-new');
+  btn.style.display = '';
+  btn.textContent = aucTab === 'exchange'
+    ? (aucView === 'exch-new' ? '← К бирже' : '＋ Выставить заявку')
+    : (aucView === 'new' ? '← К аукциону' : '＋ Новый лот');
 }
 
 $('auction-close').addEventListener('click', closeAuction);
@@ -2824,10 +2828,15 @@ auctionEl.querySelector('.auc-tabs').addEventListener('click', (e) => {
   const b = e.target.closest('.auc-tab'); if (!b) return;
   aucTab = b.dataset.aucTab; aucView = 'browse'; syncAucTabs(); renderAuction();
 });
-$('auc-new').addEventListener('click', () => { aucView = 'new'; renderAuction(); });
+$('auc-new').addEventListener('click', () => {
+  if (aucTab === 'exchange') aucView = aucView === 'exch-new' ? 'browse' : 'exch-new';
+  else aucView = aucView === 'new' ? 'browse' : 'new';
+  syncAucTabs();
+  renderAuction();
+});
 
 function renderAuction() {
-  if (aucTab === 'exchange') return renderExchange();
+  if (aucTab === 'exchange') return aucView === 'exch-new' ? renderExchNew() : renderExchange();
   if (aucView === 'new') return renderNewLot();
   return renderAucBrowse();
 }
@@ -3150,11 +3159,133 @@ async function aucSubmitNew() {
 
 // --- биржа: доска ЗАЯВОК НА ПОКУПКУ -----------------------------------------
 // Игрок выставляет «хочу купить N по P», другие продают в заявку. Товар приходит
-// покупателю письмом при закрытии заявки; деньги возвращаются/зачисляются в кошелёк.
+// покупателю письмом при закрытии заявки; возвраты приходят письмом, выручка зачисляется в кошелёк.
 let exchSel = null;
 let exchInstruments = [];
 let exchSearch = '';
 let exchFilters = { category: '', quality: '', levelMin: '', levelMax: '' };
+let exchPickSearch = '';
+let exchPickFilters = { category: '', quality: '', levelMin: '', levelMax: '' };
+let exchPickOptions = [];
+let exchPickSel = null;
+let exchPickItem = null;
+let exchSuggestTimer = null;
+
+function exchPickHasCriteria() {
+  return !!(exchPickSearch || exchPickFilters.category || exchPickFilters.quality
+    || exchPickFilters.levelMin || exchPickFilters.levelMax);
+}
+
+function clearExchPickDetail() {
+  const detail = $('exch-detail');
+  if (detail) detail.innerHTML = '<div class="auc-empty">Выберите товар для заявки</div>';
+}
+
+async function renderExchNew() {
+  aucBody.innerHTML = `<div class="exch-create">
+    <div class="exch-picker">
+      <div class="auc-new-title">Новая заявка на покупку</div>
+      <label class="auc-field exch-suggest-wrap"><span>Товар</span>
+        <input class="auc-search" id="exch-pick-search" type="search" placeholder="Начните вводить название" value="${esc(exchPickSearch)}" autocomplete="off">
+        <div class="exch-suggest" id="exch-suggest"></div>
+      </label>
+      ${marketFilterHtml('exch-pick', exchPickFilters)}
+      <button type="button" class="auc-btn ghost" id="exch-pick-reset">Сбросить</button>
+      <div class="exch-pick-selected" id="exch-pick-selected"><div class="auc-empty">Выберите товар из списка</div></div>
+    </div>
+    <div class="exch-detail" id="exch-detail"><div class="auc-empty">Выберите товар для заявки</div></div>
+  </div>`;
+  bindExchPickTools();
+  renderExchPickOptions();
+  renderExchPickSelected(exchPickItem);
+  if (exchPickSel != null) loadExchBoard(exchPickSel, { showForm: true, showOrders: false });
+  if (exchPickHasCriteria()) loadExchPickOptions();
+}
+
+function bindExchPickTools() {
+  const input = $('exch-pick-search');
+  const schedule = () => {
+    clearTimeout(exchSuggestTimer);
+    exchSuggestTimer = setTimeout(loadExchPickOptions, 180);
+  };
+  input.addEventListener('input', () => {
+    exchPickSearch = input.value.trim();
+    exchPickSel = null;
+    exchPickItem = null;
+    renderExchPickSelected(null);
+    clearExchPickDetail();
+    schedule();
+  });
+  input.addEventListener('focus', () => { if (exchPickHasCriteria()) loadExchPickOptions(); });
+  $('exch-pick-reset').addEventListener('click', () => {
+    exchPickSearch = ''; clearMarketFilters(exchPickFilters); exchPickSel = null; exchPickItem = null; exchPickOptions = [];
+    renderExchNew();
+  });
+  ['exch-pick-cat', 'exch-pick-quality', 'exch-pick-lvl-min', 'exch-pick-lvl-max'].forEach((id) => {
+    const el = $(id); if (!el) return;
+    const ev = el.tagName === 'SELECT' ? 'change' : 'input';
+    el.addEventListener(ev, () => {
+      readMarketFilters('exch-pick', exchPickFilters);
+      exchPickSel = null;
+      exchPickItem = null;
+      renderExchPickSelected(null);
+      clearExchPickDetail();
+      schedule();
+    });
+  });
+}
+
+async function loadExchPickOptions() {
+  readMarketFilters('exch-pick', exchPickFilters);
+  if (!exchPickHasCriteria()) { exchPickOptions = []; renderExchPickOptions(); return; }
+  const box = $('exch-suggest');
+  if (box) box.innerHTML = '<div class="exch-suggest-empty">Поиск…</div>';
+  try {
+    const data = await api.exchange(marketFilterPayload(exchPickSearch, exchPickFilters));
+    exchPickOptions = (data.instruments || []).slice(0, 24);
+  } catch {
+    exchPickOptions = [];
+  }
+  renderExchPickOptions();
+}
+
+function renderExchPickOptions() {
+  const box = $('exch-suggest'); if (!box) return;
+  if (!exchPickHasCriteria()) {
+    box.innerHTML = '<div class="exch-suggest-empty">Введите название или выберите фильтр</div>';
+    return;
+  }
+  if (!exchPickOptions.length) {
+    box.innerHTML = '<div class="exch-suggest-empty">Нет вариантов</div>';
+    return;
+  }
+  box.innerHTML = '';
+  for (const ins of exchPickOptions) {
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.className = 'exch-suggest-row';
+    row.innerHTML = `
+      <span class="exch-i-ico${qClass(true, ins.quality)}">${esc(itemIconText(ins.icon, ins.type, ins.stats, ins.slot))}</span>
+      <span class="exch-suggest-name">${esc(ins.name)}</span>
+      <span class="exch-i-meta">ур. ${aucFmt(ins.level || 1)}</span>`;
+    row.addEventListener('click', () => {
+      exchPickSel = ins.instrumentId;
+      exchPickItem = ins;
+      exchPickSearch = ins.name;
+      $('exch-pick-search').value = ins.name;
+      exchPickOptions = [ins];
+      renderExchPickSelected(ins);
+      box.innerHTML = '';
+      loadExchBoard(ins.instrumentId, { showForm: true, showOrders: false });
+    });
+    box.appendChild(row);
+  }
+}
+
+function renderExchPickSelected(ins) {
+  const host = $('exch-pick-selected'); if (!host) return;
+  host.innerHTML = ins ? marketItemPreviewHtml(ins) : '<div class="auc-empty">Выберите товар из списка</div>';
+}
 
 async function renderExchange() {
   aucBody.innerHTML = `<div class="exch">
@@ -3179,7 +3310,7 @@ async function renderExchange() {
   exchInstruments = (data.instruments || []).filter((i) => Number(i.openOrders) > 0);
   if (!exchInstruments.some((i) => i.instrumentId === exchSel)) exchSel = exchInstruments[0]?.instrumentId ?? null;
   renderExchList();
-  if (exchSel != null) loadExchBoard(exchSel);
+  if (exchSel != null) loadExchBoard(exchSel, { showForm: false, showOrders: true });
   else $('exch-detail').innerHTML = '<div class="auc-empty">Нет активных заявок</div>';
 }
 function bindExchTools() {
@@ -3217,7 +3348,11 @@ function renderExchList() {
       <span class="exch-i-ico${qClass(true, ins.quality)}">${esc(itemIconText(ins.icon, ins.type, ins.stats, ins.slot))}</span>
       <span class="exch-i-name">${esc(ins.name)}</span>
       <span class="exch-i-meta">${meta}</span>`;
-    row.addEventListener('click', () => { exchSel = ins.instrumentId; renderExchList(); loadExchBoard(ins.instrumentId); });
+    row.addEventListener('click', () => {
+      exchSel = ins.instrumentId;
+      renderExchList();
+      loadExchBoard(ins.instrumentId, { showForm: false, showOrders: true });
+    });
     list.appendChild(row);
   }
 }
@@ -3228,13 +3363,13 @@ function exchBestBidHtml(bestBids) {
   const [currencyId, price] = entries[0];
   return 'до ' + coinsHtml(price, Number(currencyId));
 }
-async function loadExchBoard(instrumentId) {
+async function loadExchBoard(instrumentId, opts = {}) {
   const host = $('exch-detail'); if (!host) return;
   host.innerHTML = '<div class="auc-empty">Загрузка заявок…</div>';
   let d;
   try { d = await api.exchangeBoard(instrumentId); }
   catch (e) { host.innerHTML = `<div class="auc-empty">Ошибка: ${esc(e.message)}</div>`; return; }
-  renderExchBoard(d);
+  renderExchBoard(d, opts);
 }
 function exchOrderRow(o, owned, ins) {
   let act;
@@ -3256,9 +3391,11 @@ function exchOrderRow(o, owned, ins) {
     <div class="exch-bo-act">${act}</div>
   </div>`;
 }
-function renderExchBoard(d) {
+function renderExchBoard(d, opts = {}) {
   const host = $('exch-detail'); if (!host) return;
   const ins = d.instrument;
+  const showForm = opts.showForm === true;
+  const showOrders = opts.showOrders !== false;
   const durOpts = (d.tariffs?.durations || [6, 12, 24, 48]).map((h) =>
     `<option value="${h}">${h < 24 ? h + ' ч' : Math.floor(h / 24) + ' дн'}</option>`).join('');
   host.innerHTML = `
@@ -3287,14 +3424,18 @@ function renderExchBoard(d) {
         : '<div class="exch-book-empty">Заявок пока нет — выставьте первую.</div>'}
     </div>`;
 
-  const qtyEl = $('exch-qty'), totalEl = $('exch-total');
-  const recalc = () => {
-    const price = priceEditorValue('exch-price');
-    totalEl.innerHTML = coinsHtml(price.price * (Math.trunc(+qtyEl.value || 0)), price.currency);
-  };
-  bindPriceEditor('exch-price', recalc);
-  qtyEl.addEventListener('input', recalc); recalc();
-  $('exch-submit').addEventListener('click', () => exchCreateOrder(ins, qtyEl, $('exch-dur')));
+  if (!showForm) host.querySelector('.exch-newform')?.remove();
+  if (!showOrders) host.querySelector('.exch-board')?.remove();
+  if (showForm) {
+    const qtyEl = $('exch-qty'), totalEl = $('exch-total');
+    const recalc = () => {
+      const price = priceEditorValue('exch-price');
+      totalEl.innerHTML = coinsHtml(price.price * (Math.trunc(+qtyEl.value || 0)), price.currency);
+    };
+    bindPriceEditor('exch-price', recalc);
+    qtyEl.addEventListener('input', recalc); recalc();
+    $('exch-submit').addEventListener('click', () => exchCreateOrder(ins, qtyEl, $('exch-dur')));
+  }
   const togglePreview = () => host.querySelector('.exch-preview')?.classList.toggle('hidden');
   host.querySelector('.exch-d-ico')?.addEventListener('click', togglePreview);
   host.querySelectorAll('.exch-bo-ico').forEach((b) => b.addEventListener('click', togglePreview));
@@ -3318,7 +3459,13 @@ async function exchCreateOrder(ins, qtyEl, durEl) {
       durationHours: Math.trunc(+durEl.value || 0) });
     applyWallet(r.wallet); refreshMailUnread();
     showToast('Заявка на покупку выставлена');
-    if (r.board) renderExchBoard(r.board); else loadExchBoard(ins.instrumentId);
+    if (aucTab === 'exchange' && aucView === 'exch-new') {
+      exchSel = ins.instrumentId;
+      aucView = 'browse';
+      syncAucTabs();
+      renderExchange();
+    } else if (r.board) renderExchBoard(r.board);
+    else loadExchBoard(ins.instrumentId);
   } catch (e) { btn.disabled = false; errEl.textContent = aucErr(e); errEl.classList.remove('hidden'); }
 }
 async function exchSellInto(orderId, quantity, btn) {
@@ -3328,7 +3475,8 @@ async function exchSellInto(orderId, quantity, btn) {
     const r = await api.exchangeSell(orderId, quantity);
     applyWallet(r.wallet); await refreshSelf(); refreshMailUnread();
     showToast(`Продано ${r.sold} шт · выручка зачислена`);
-    if (r.board) renderExchBoard(r.board);
+    if (aucTab === 'exchange' && aucView === 'browse') renderExchange();
+    else if (r.board) renderExchBoard(r.board);
   } catch (e) { btn.disabled = false; showToast(aucErr(e)); }
 }
 async function exchCancelOrder(orderId, btn) {
@@ -3336,8 +3484,9 @@ async function exchCancelOrder(orderId, btn) {
   try {
     const r = await api.exchangeCancel(orderId);
     applyWallet(r.wallet); refreshMailUnread();
-    showToast('Заявка снята · товар придёт письмом, деньги вернулись в кошелёк');
-    if (r.board) renderExchBoard(r.board);
+    showToast('Заявка снята · возврат придёт письмом');
+    if (aucTab === 'exchange' && aucView === 'browse') renderExchange();
+    else if (r.board) renderExchBoard(r.board);
   } catch (e) { btn.disabled = false; showToast(aucErr(e)); }
 }
 
