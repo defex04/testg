@@ -448,6 +448,26 @@ STATEMENTS.push(
   `ALTER TABLE exchange_orders ADD COLUMN IF NOT EXISTS currency_id SMALLINT NOT NULL DEFAULT 1`,
   `ALTER TABLE exchange_trades ADD COLUMN IF NOT EXISTS currency_id SMALLINT NOT NULL DEFAULT 1`,
   `ALTER TABLE exchange_trades ALTER COLUMN sell_order_id DROP NOT NULL`,
+  `UPDATE auction_bids b SET amount = b.amount *
+       CASE l.currency_id WHEN 2 THEN 1000 WHEN 3 THEN 1000000 ELSE 1 END
+     FROM auction_lots l
+     WHERE b.lot_id = l.id AND l.currency_id IN (2, 3)`,
+  `UPDATE auction_lots SET
+       start_price = start_price * CASE currency_id WHEN 2 THEN 1000 WHEN 3 THEN 1000000 ELSE 1 END,
+       buyout_price = CASE WHEN buyout_price IS NULL THEN NULL
+         ELSE buyout_price * CASE currency_id WHEN 2 THEN 1000 WHEN 3 THEN 1000000 ELSE 1 END END,
+       current_bid = CASE WHEN current_bid IS NULL THEN NULL
+         ELSE current_bid * CASE currency_id WHEN 2 THEN 1000 WHEN 3 THEN 1000000 ELSE 1 END END,
+       currency_id = 1
+     WHERE currency_id IN (2, 3)`,
+  `UPDATE exchange_orders SET
+       price = price * CASE currency_id WHEN 2 THEN 1000 WHEN 3 THEN 1000000 ELSE 1 END,
+       currency_id = 1
+     WHERE currency_id IN (2, 3)`,
+  `UPDATE exchange_trades SET
+       price = price * CASE currency_id WHEN 2 THEN 1000 WHEN 3 THEN 1000000 ELSE 1 END,
+       currency_id = 1
+     WHERE currency_id IN (2, 3)`,
   `INSERT INTO game_config (key, value) VALUES ('exchange.max_orders', '10') ON CONFLICT (key) DO NOTHING`,
   `INSERT INTO game_config (key, value) VALUES ('exchange.durations', '[6, 12, 24, 48]') ON CONFLICT (key) DO NOTHING`,
   // Инструменты биржи — расходники-«ресурсы» (зависят от шаблонов, добавленных

@@ -201,11 +201,10 @@ export const api = {
   auctionMyLots: () => rest('/api/auction/mylots'),
   auctionMyBids: () => rest('/api/auction/mybids'),
   auctionCreate: (payload) => rest('/api/auction/lot', payload),
-  auctionBid:    (lotId, amount) => rest('/api/auction/bid', { lotId, amount }),
+  auctionBid:    (lotId, price) => rest('/api/auction/bid', { lotId, ...(price || {}) }),
   auctionBuyout: (lotId) => rest('/api/auction/buyout', { lotId }),
   auctionCancel: (lotId) => rest('/api/auction/cancel', { lotId }),
-  auctionEdit:   (lotId, startPrice, buyoutPrice, currencyId = null) =>
-    rest('/api/auction/edit', { lotId, startPrice, buyoutPrice, currencyId }),
+  auctionEdit:   (lotId, payload) => rest('/api/auction/edit', { lotId, ...(payload || {}) }),
   // ── биржа (доска заявок на покупку) ──
   exchange:       (q = {}) => rest('/api/exchange' + qstr(q)),
   exchangeBoard:  (id) => rest('/api/exchange/board/' + Number(id)),

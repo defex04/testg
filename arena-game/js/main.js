@@ -2596,6 +2596,7 @@ const MARKET_CURRENCIES = [
   { id: 3, code: 'gold', label: 'Золото', gen: 'золота', icon: '<span class="coin coin-gold auc-coin"></span>' },
   { id: 4, code: 'diamond', label: 'Бриллианты', gen: 'бриллиантов', icon: '<span class="gem auc-coin"></span>' },
 ];
+const MARKET_MONEY_BASE = 1000;
 const MARKET_CURRENCY_BY_ID = Object.fromEntries(MARKET_CURRENCIES.map((c) => [c.id, c]));
 const MARKET_CURRENCY_BY_CODE = Object.fromEntries(MARKET_CURRENCIES.map((c) => [c.code, c]));
 const MARKET_CATEGORY_OPTIONS = [
@@ -2641,12 +2642,107 @@ function marketCurrency(cur) {
   if (cur && typeof cur === 'object') return cur;
   return MARKET_CURRENCY_BY_CODE[cur] || MARKET_CURRENCY_BY_ID[Number(cur)] || MARKET_CURRENCY_BY_CODE.copper;
 }
-const coinsHtml = (n, cur = 'copper') => `${aucFmt(n)}${marketCurrency(cur).icon}`;
-const moneyText = (n, cur = 'copper') => `${aucFmt(n)} ${marketCurrency(cur).gen}`;
+function splitMarketMoney(total) {
+  const n = Math.max(0, Math.trunc(Number(total) || 0));
+  return {
+    gold: Math.floor(n / (MARKET_MONEY_BASE * MARKET_MONEY_BASE)),
+    silver: Math.floor(n / MARKET_MONEY_BASE) % MARKET_MONEY_BASE,
+    copper: n % MARKET_MONEY_BASE,
+  };
+}
+function priceModeFor(cur) {
+  return marketCurrency(cur).code === 'diamond' || cur === 'diamond' ? 'diamond' : 'money';
+}
+function priceHtml(n, cur = 'money') {
+  if (priceModeFor(cur) === 'diamond') return `${aucFmt(n)}${marketCurrency('diamond').icon}`;
+  const p = splitMarketMoney(n);
+  const parts = [];
+  if (p.gold) parts.push(`${aucFmt(p.gold)}${marketCurrency('gold').icon}`);
+  if (p.silver) parts.push(`${aucFmt(p.silver)}${marketCurrency('silver').icon}`);
+  if (p.copper || !parts.length) parts.push(`${aucFmt(p.copper)}${marketCurrency('copper').icon}`);
+  return parts.join(' ');
+}
+const coinsHtml = priceHtml;
+function moneyText(n, cur = 'money') {
+  if (priceModeFor(cur) === 'diamond') return `${aucFmt(n)} бриллиантов`;
+  const p = splitMarketMoney(n);
+  const parts = [];
+  if (p.gold) parts.push(`${aucFmt(p.gold)} золота`);
+  if (p.silver) parts.push(`${aucFmt(p.silver)} серебра`);
+  if (p.copper || !parts.length) parts.push(`${aucFmt(p.copper)} меди`);
+  return parts.join(' ');
+}
 function currencyOptionsHtml(selected = 'copper') {
   const cur = marketCurrency(selected);
   return MARKET_CURRENCIES.map((c) =>
     `<option value="${c.id}" ${c.id === cur.id ? 'selected' : ''}>${c.label}</option>`).join('');
+}
+function priceFieldsHtml(prefix, price = 0, cur = 'money', opts = {}) {
+  const mode = priceModeFor(cur);
+  const p = mode === 'diamond' ? { gold: 0, silver: 0, copper: 0, diamond: Math.max(0, Math.trunc(Number(price) || 0)) }
+    : { ...splitMarketMoney(price), diamond: 0 };
+  const small = opts.small ? ' small' : '';
+  const optional = opts.optional ? ' optional' : '';
+  const locked = opts.lockMode ? ' locked' : '';
+  return `<div class="auc-price-editor ${mode}${small}${optional}${locked}" data-price-editor="${prefix}">
+    <label class="auc-price-mode"><span>Валюта</span><select id="${prefix}-mode">
+      <option value="money" ${mode === 'money' ? 'selected' : ''}>Золото / серебро / медь</option>
+      <option value="diamond" ${mode === 'diamond' ? 'selected' : ''}>Бриллианты</option>
+    </select></label>
+    <div class="auc-money-fields">
+      <label><span>Золото</span><input id="${prefix}-gold" type="number" min="0" inputmode="numeric" value="${p.gold}"></label>
+      <label><span>Серебро</span><input id="${prefix}-silver" type="number" min="0" max="999" inputmode="numeric" value="${p.silver}"></label>
+      <label><span>Медь</span><input id="${prefix}-copper" type="number" min="0" max="999" inputmode="numeric" value="${p.copper}"></label>
+    </div>
+    <label class="auc-diamond-field"><span>Бриллианты</span><input id="${prefix}-diamond" type="number" min="0" inputmode="numeric" value="${p.diamond}"></label>
+  </div>`;
+}
+function bindPriceEditor(prefix, onChange = null) {
+  const root = document.querySelector(`[data-price-editor="${prefix}"]`);
+  if (!root) return;
+  const modeEl = $(`${prefix}-mode`);
+  const sync = () => {
+    const mode = modeEl?.value === 'diamond' ? 'diamond' : 'money';
+    root.classList.toggle('diamond', mode === 'diamond');
+    root.classList.toggle('money', mode === 'money');
+    if (onChange) onChange();
+  };
+  modeEl?.addEventListener('change', sync);
+  ['silver', 'copper'].forEach((k) => $(`${prefix}-${k}`)?.addEventListener('input', (e) => {
+    const v = Math.max(0, Math.min(999, Math.trunc(+e.target.value || 0)));
+    if (String(v) !== e.target.value) e.target.value = v;
+    if (onChange) onChange();
+  }));
+  ['gold', 'diamond'].forEach((k) => $(`${prefix}-${k}`)?.addEventListener('input', () => { if (onChange) onChange(); }));
+  sync();
+}
+function setPriceEditorMode(prefix, mode) {
+  const el = $(`${prefix}-mode`);
+  if (!el) return;
+  el.value = mode === 'diamond' ? 'diamond' : 'money';
+  el.dispatchEvent(new Event('change'));
+}
+function readPriceEditor(prefix) {
+  const mode = $(`${prefix}-mode`)?.value === 'diamond' ? 'diamond' : 'money';
+  if (mode === 'diamond') return {
+    priceMode: 'diamond',
+    diamond: Math.max(0, Math.trunc(+$(`${prefix}-diamond`)?.value || 0)),
+  };
+  return {
+    priceMode: 'money',
+    money: {
+      gold: Math.max(0, Math.trunc(+$(`${prefix}-gold`)?.value || 0)),
+      silver: Math.max(0, Math.min(999, Math.trunc(+$(`${prefix}-silver`)?.value || 0))),
+      copper: Math.max(0, Math.min(999, Math.trunc(+$(`${prefix}-copper`)?.value || 0))),
+    },
+  };
+}
+function priceEditorValue(prefix) {
+  const p = readPriceEditor(prefix);
+  if (p.priceMode === 'diamond') return { price: p.diamond, currency: 'diamond' };
+  const m = p.money;
+  return { price: (m.gold * MARKET_MONEY_BASE * MARKET_MONEY_BASE) + (m.silver * MARKET_MONEY_BASE) + m.copper,
+    currency: 'money' };
 }
 function filterOptionsHtml(options, selected) {
   return options.map(([value, label]) =>
@@ -2673,6 +2769,29 @@ function clearMarketFilters(filters) {
 function marketFilterPayload(search, filters) {
   return { q: search, cat: filters.category, quality: filters.quality,
     levelMin: filters.levelMin, levelMax: filters.levelMax };
+}
+function marketCategoryName(type) {
+  const hit = MARKET_CATEGORY_OPTIONS.find(([id]) => Number(id) === Number(type));
+  return hit ? hit[1] : 'Предмет';
+}
+function marketItemPreviewHtml(it) {
+  if (!it) return '';
+  const q = it.quality || 1;
+  const desc = Number(it.type) === 4
+    ? elixirEffectText(elixirKindFromStats(it.stats), it.stats)
+    : gearStatsText(it.stats);
+  return `<div class="auc-item-preview${qClass(true, q)}">
+    <div class="auc-preview-ico${qClass(true, q)}">${esc(itemIconText(it.icon, it.type, it.stats, it.slot))}</div>
+    <div class="auc-preview-info">
+      <div class="auc-preview-name${qClass(true, q)}">${esc(it.name)}</div>
+      <div class="auc-preview-meta">
+        <span>${esc(QUALITY_NAME[q] || 'Обычный')}</span>
+        <span>${esc(marketCategoryName(it.type))}</span>
+        <span>ур. ${aucFmt(it.level || it.levelReq || 1)}</span>
+      </div>
+      ${desc ? `<div class="auc-preview-desc">${esc(desc)}</div>` : ''}
+    </div>
+  </div>`;
 }
 
 function aucTimeLeft(endsAt) {
@@ -2798,8 +2917,9 @@ function aucLotCard(lot) {
       <button type="button" class="auc-btn ghost auc-edit">Изменить</button>
       <button type="button" class="auc-btn danger auc-cancel">Снять</button></div>`;
   } else {
+    const bidPrefix = `auc-bid-${lot.id}`;
     const bid = `<div class="auc-bid">
-      <input class="auc-bid-input" type="number" min="${lot.minNextBid}" value="${lot.minNextBid}" inputmode="numeric">
+      ${priceFieldsHtml(bidPrefix, lot.minNextBid, lot.currency, { small: true, lockMode: true })}
       <button type="button" class="auc-btn auc-bidbtn">Повысить</button></div>`;
     const buy = lot.buyoutPrice != null
       ? `<button type="button" class="auc-btn buy auc-buyout">Купить</button>` : '';
@@ -2815,6 +2935,7 @@ function aucLotCard(lot) {
         <span class="auc-chip">${esc(lot.sellerName)}</span>
         <span class="auc-chip time">${aucTimeLeft(lot.endsAt)}</span>
         ${lot.bidCount ? `<span class="auc-chip">ставок: ${lot.bidCount}</span>` : ''}
+        <button type="button" class="auc-chip auc-preview-toggle">Превью</button>
       </div>
     </div>
     <div class="auc-lot-prices">
@@ -2822,25 +2943,31 @@ function aucLotCard(lot) {
       ${lot.currentBid != null ? `<div class="auc-price-row bid"><span>Ставка</span><b>${coinsHtml(lot.currentBid, lot.currency)}</b></div>` : ''}
       ${lot.buyoutPrice != null ? `<div class="auc-price-row buyout"><span>Выкуп</span><b>${coinsHtml(lot.buyoutPrice, lot.currency)}</b></div>` : ''}
     </div>
-    ${actions}`;
+    ${actions}
+    <div class="auc-lot-preview hidden">${marketItemPreviewHtml(lot)}</div>`;
 
+  bindPriceEditor(`auc-bid-${lot.id}`);
   card.querySelector('.auc-buyout')?.addEventListener('click', (ev) => aucDoBuyout(lot, ev.target));
   card.querySelector('.auc-bidbtn')?.addEventListener('click', (ev) => {
-    const amount = Math.trunc(+card.querySelector('.auc-bid-input').value || 0);
-    aucDoBid(lot, amount, ev.target);
+    aucDoBid(lot, readPriceEditor(`auc-bid-${lot.id}`), ev.target);
   });
+  card.querySelector('.auc-preview-toggle')?.addEventListener('click', () =>
+    card.querySelector('.auc-lot-preview')?.classList.toggle('hidden'));
   card.querySelector('.auc-cancel')?.addEventListener('click', (ev) => aucDoCancel(lot, ev.target));
   card.querySelector('.auc-edit')?.addEventListener('click', () => aucInlineEdit(lot, card));
   return card;
 }
 
-async function aucDoBid(lot, amount, btn) {
-  if (!(amount > 0)) { showToast('Введите сумму ставки'); return; }
+async function aucDoBid(lot, pricePayload, btn) {
+  const value = pricePayload.priceMode === 'diamond'
+    ? { price: pricePayload.diamond, currency: 'diamond' }
+    : priceEditorValue(`auc-bid-${lot.id}`);
+  if (!(value.price > 0)) { showToast('Введите сумму ставки'); return; }
   btn.disabled = true;
   try {
-    const r = await api.auctionBid(lot.id, amount);
+    const r = await api.auctionBid(lot.id, pricePayload);
     applyWallet(r.wallet); refreshSelf();
-    showToast(`Ставка ${moneyText(amount, lot.currency)} принята`);
+    showToast(`Ставка ${moneyText(value.price, value.currency)} принята`);
     renderAuction();
   } catch (e) { btn.disabled = false; showToast(aucErr(e)); }
 }
@@ -2864,21 +2991,24 @@ async function aucDoCancel(lot, btn) {
 }
 function aucInlineEdit(lot, card) {
   const box = card.querySelector('.auc-lot-actions');
+  const startPrefix = `ae-start-${lot.id}`;
+  const buyoutPrefix = `ae-buyout-${lot.id}`;
   box.innerHTML = `<div class="auc-edit-form">
-    <label>Старт <input class="ae-start" type="number" min="1" value="${lot.startPrice}"></label>
-    <label>Выкуп <input class="ae-buyout" type="number" min="0" value="${lot.buyoutPrice ?? ''}"></label>
-    <label>Валюта <select class="ae-currency">${currencyOptionsHtml(lot.currency)}</select></label>
+    <div class="auc-edit-price"><span>Старт</span>${priceFieldsHtml(startPrefix, lot.startPrice, lot.currency, { small: true })}</div>
+    <div class="auc-edit-price"><span>Выкуп</span>${priceFieldsHtml(buyoutPrefix, lot.buyoutPrice || 0, lot.currency, { small: true, optional: true })}</div>
     <button type="button" class="auc-btn buy ae-save">Сохранить</button>
     <button type="button" class="auc-btn ghost ae-cancel">Отмена</button></div>`;
+  bindPriceEditor(startPrefix, () => setPriceEditorMode(buyoutPrefix, $(`${startPrefix}-mode`)?.value));
+  bindPriceEditor(buyoutPrefix);
   box.querySelector('.ae-cancel').addEventListener('click', () => renderAuction());
   box.querySelector('.ae-save').addEventListener('click', async (ev) => {
-    const start = Math.trunc(+box.querySelector('.ae-start').value || 0);
-    const bv = box.querySelector('.ae-buyout').value.trim();
-    const buyout = bv === '' ? null : Math.trunc(+bv || 0);
-    const currencyId = Math.trunc(+box.querySelector('.ae-currency').value || 1);
+    const start = readPriceEditor(startPrefix);
+    const buyout = readPriceEditor(buyoutPrefix);
     ev.target.disabled = true;
     try {
-      await api.auctionEdit(lot.id, start, buyout, currencyId);
+      await api.auctionEdit(lot.id, { priceMode: start.priceMode,
+        startMoney: start.money, startDiamond: start.diamond,
+        buyoutMoney: buyout.money, buyoutDiamond: buyout.diamond });
       showToast('Лот изменён'); renderAuction();
     } catch (e) { ev.target.disabled = false; showToast(aucErr(e)); }
   });
@@ -2895,12 +3025,8 @@ function renderNewLot() {
       <div class="auc-new-form">
         <div class="auc-new-title">Новый лот продажи</div>
         <div class="auc-sel-preview" id="auc-sel-preview"></div>
-        <label class="auc-field"><span>Стартовая цена</span>
-          <input id="anc-start" type="number" min="1" inputmode="numeric"></label>
-        <label class="auc-field"><span>Цена выкупа</span>
-          <input id="anc-buyout" type="number" min="0" inputmode="numeric" placeholder="нет"></label>
-        <label class="auc-field"><span>Валюта цены</span>
-          <select id="anc-currency">${currencyOptionsHtml('copper')}</select></label>
+        <div class="auc-field"><span>Стартовая цена</span>${priceFieldsHtml('anc-start', 0, 'money')}</div>
+        <div class="auc-field"><span>Цена выкупа</span>${priceFieldsHtml('anc-buyout', 0, 'money', { optional: true })}</div>
         <div class="auc-field row"><span>Налог с продажи</span><b id="anc-saletax">—</b></div>
         <label class="auc-field"><span>Длительность торгов</span>
           <select id="anc-duration">${durOpts}</select></label>
@@ -2923,8 +3049,11 @@ function renderNewLot() {
     </div>`;
   $('anc-cancel').addEventListener('click', () => { aucView = 'browse'; renderAuction(); });
   $('anc-submit').addEventListener('click', aucSubmitNew);
-  ['anc-start', 'anc-buyout'].forEach((id) => $(id).addEventListener('input', aucRecalcFees));
-  $('anc-currency').addEventListener('change', aucRecalcFees);
+  bindPriceEditor('anc-start', () => {
+    setPriceEditorMode('anc-buyout', $('anc-start-mode')?.value);
+    aucRecalcFees();
+  });
+  bindPriceEditor('anc-buyout', aucRecalcFees);
   $('anc-featured').addEventListener('change', aucRecalcFees);
   $('anc-search').addEventListener('input', () => aucRenderInvGrid());
   aucRenderSelPreview();
@@ -2954,7 +3083,6 @@ function aucRenderInvGrid() {
       aucNew = { item: it, qty: 1 };
       grid.querySelectorAll('.auc-shop-cell').forEach((c) => c.classList.remove('sel'));
       cell.classList.add('sel');
-      if (!$('anc-start').value) $('anc-start').value = it.price || 1;
       aucRenderSelPreview(); aucRecalcFees();
     });
     grid.appendChild(cell);
@@ -2985,27 +3113,27 @@ function aucRenderSelPreview() {
 }
 function aucRecalcFees() {
   if (!$('anc-listfee')) return;
-  const start = Math.max(0, Math.trunc(+$('anc-start').value || 0));
-  const bv = $('anc-buyout').value.trim();
-  const buyout = bv === '' ? null : Math.max(0, Math.trunc(+bv || 0));
+  const startVal = priceEditorValue('anc-start');
+  const buyoutVal = priceEditorValue('anc-buyout');
+  const start = startVal.price;
+  const buyout = buyoutVal.price > 0 ? buyoutVal.price : null;
   const t = aucTariffs;
   const listFee = (start > 0 ? Math.max(1, Math.ceil(start * t.listingPct)) : 0)
     + ($('anc-featured').checked ? (t.featuredFee || 0) : 0);
   const saleTax = Math.ceil((buyout != null ? buyout : start) * t.salePct);
-  const currencyId = Math.trunc(+$('anc-currency').value || 1);
   $('anc-listfee').innerHTML = coinsHtml(listFee, 'copper');
-  $('anc-saletax').innerHTML = coinsHtml(saleTax, currencyId);
+  $('anc-saletax').innerHTML = coinsHtml(saleTax, startVal.currency);
 }
 async function aucSubmitNew() {
   const errEl = $('anc-error');
   errEl.classList.add('hidden');
   if (!aucNew.item) { errEl.textContent = 'Выберите вещь'; errEl.classList.remove('hidden'); return; }
-  const startPrice = Math.trunc(+$('anc-start').value || 0);
-  const bv = $('anc-buyout').value.trim();
-  const buyoutPrice = bv === '' ? null : Math.trunc(+bv || 0);
+  const start = readPriceEditor('anc-start');
+  const buyout = readPriceEditor('anc-buyout');
   const payload = {
-    itemId: aucNew.item.id, qty: aucNew.qty, startPrice, buyoutPrice,
-    currencyId: Math.trunc(+$('anc-currency').value || 1),
+    itemId: aucNew.item.id, qty: aucNew.qty,
+    priceMode: start.priceMode, startMoney: start.money, startDiamond: start.diamond,
+    buyoutMoney: buyout.money, buyoutDiamond: buyout.diamond,
     durationHours: Math.trunc(+$('anc-duration').value || 0),
     anonymous: $('anc-anon').checked, featured: $('anc-featured').checked,
     autoExtend: $('anc-extend').checked,
@@ -3022,13 +3150,12 @@ async function aucSubmitNew() {
 }
 
 // --- биржа: доска ЗАЯВОК НА ПОКУПКУ -----------------------------------------
-// Игрок выставляет «хочу купить N по P», другие продают в заявку. Товар и возврат
-// денег приходят покупателю ПИСЬМОМ при закрытии заявки; выручка продавцу — письмом.
+// Игрок выставляет «хочу купить N по P», другие продают в заявку. Товар приходит
+// покупателю письмом при закрытии заявки; деньги возвращаются/зачисляются в кошелёк.
 let exchSel = null;
 let exchInstruments = [];
 let exchSearch = '';
 let exchFilters = { category: '', quality: '', levelMin: '', levelMax: '' };
-let exchCurrencyId = 1;
 
 async function renderExchange() {
   aucBody.innerHTML = `<div class="exch">
@@ -3139,12 +3266,12 @@ function renderExchBoard(d) {
       <span class="exch-d-name">${esc(ins.name)}</span>
       <span class="exch-d-owned">В рюкзаке: <b>${aucFmt(d.owned)}</b></span>
     </div>
+    <div class="exch-preview">${marketItemPreviewHtml(ins)}</div>
     <div class="exch-newform">
       <div class="exch-newform-title">Новая заявка на покупку</div>
       <div class="exch-newform-row">
-        <label class="auc-field"><span>Цена за шт</span><input id="exch-price" type="number" min="${ins.tickSize}" step="${ins.tickSize}" inputmode="numeric"></label>
+        <div class="auc-field exch-price-cell"><span>Цена за шт</span>${priceFieldsHtml('exch-price', 0, 'money')}</div>
         <label class="auc-field"><span>Количество</span><input id="exch-qty" type="number" min="${ins.lotSize}" step="${ins.lotSize}" inputmode="numeric" value="${ins.lotSize}"></label>
-        <label class="auc-field"><span>Валюта</span><select id="exch-currency">${currencyOptionsHtml(exchCurrencyId)}</select></label>
         <label class="auc-field"><span>Срок</span><select id="exch-dur">${durOpts}</select></label>
       </div>
       <div class="exch-newform-foot">
@@ -3159,14 +3286,14 @@ function renderExchBoard(d) {
         : '<div class="exch-book-empty">Заявок пока нет — выставьте первую.</div>'}
     </div>`;
 
-  const priceEl = $('exch-price'), qtyEl = $('exch-qty'), curEl = $('exch-currency'), totalEl = $('exch-total');
+  const qtyEl = $('exch-qty'), totalEl = $('exch-total');
   const recalc = () => {
-    exchCurrencyId = Math.trunc(+curEl.value || 1);
-    totalEl.innerHTML = coinsHtml((Math.trunc(+priceEl.value || 0)) * (Math.trunc(+qtyEl.value || 0)), exchCurrencyId);
+    const price = priceEditorValue('exch-price');
+    totalEl.innerHTML = coinsHtml(price.price * (Math.trunc(+qtyEl.value || 0)), price.currency);
   };
-  priceEl.addEventListener('input', recalc); qtyEl.addEventListener('input', recalc);
-  curEl.addEventListener('change', recalc); recalc();
-  $('exch-submit').addEventListener('click', () => exchCreateOrder(ins, priceEl, qtyEl, curEl, $('exch-dur')));
+  bindPriceEditor('exch-price', recalc);
+  qtyEl.addEventListener('input', recalc); recalc();
+  $('exch-submit').addEventListener('click', () => exchCreateOrder(ins, qtyEl, $('exch-dur')));
   host.querySelectorAll('.exch-cancel').forEach((b) =>
     b.addEventListener('click', () => exchCancelOrder(b.dataset.order, b)));
   host.querySelectorAll('.exch-sell').forEach((b) => b.addEventListener('click', () => {
@@ -3174,15 +3301,16 @@ function renderExchBoard(d) {
     exchSellInto(b.dataset.order, Math.trunc(+qtyInput.value || 0), b);
   }));
 }
-async function exchCreateOrder(ins, priceEl, qtyEl, curEl, durEl) {
+async function exchCreateOrder(ins, qtyEl, durEl) {
   const errEl = $('exch-error'); errEl.classList.add('hidden');
-  const price = Math.trunc(+priceEl.value || 0);
+  const price = priceEditorValue('exch-price');
   const quantity = Math.trunc(+qtyEl.value || 0);
-  if (!(price > 0) || !(quantity > 0)) { errEl.textContent = 'Укажите цену и количество'; errEl.classList.remove('hidden'); return; }
+  if (!(price.price > 0) || !(quantity > 0)) { errEl.textContent = 'Укажите цену и количество'; errEl.classList.remove('hidden'); return; }
   const btn = $('exch-submit'); btn.disabled = true;
   try {
-    const r = await api.exchangeOrder({ instrumentId: ins.instrumentId, price, quantity,
-      currencyId: Math.trunc(+curEl.value || 1),
+    const p = readPriceEditor('exch-price');
+    const r = await api.exchangeOrder({ instrumentId: ins.instrumentId, quantity,
+      priceMode: p.priceMode, money: p.money, diamond: p.diamond,
       durationHours: Math.trunc(+durEl.value || 0) });
     applyWallet(r.wallet); refreshMailUnread();
     showToast('Заявка на покупку выставлена');

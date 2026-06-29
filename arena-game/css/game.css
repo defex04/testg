@@ -5059,6 +5059,7 @@ body.hide-sys-chat .chat-line.system:not(.chat-error) { display: none; }
 .auction {
   position: fixed; inset: 0; z-index: 74;
   display: flex; align-items: center; justify-content: center;
+  box-sizing: border-box;
   background: rgba(5, 7, 3, .76); backdrop-filter: blur(2px);
 }
 .auction.hidden { display: none; }
@@ -5110,6 +5111,29 @@ body.hide-sys-chat .chat-line.system:not(.chat-error) { display: none; }
 .auc-btn.sm { padding: 4px 9px; font-size: 11px; }
 .auc-coin { display: inline-block; width: 12px; height: 12px; vertical-align: -2px; margin-left: 3px; }
 .auc-empty { padding: 28px 12px; text-align: center; color: var(--muted); font-size: 13px; }
+
+.auc-price-editor { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.auc-price-editor.small { gap: 4px; }
+.auc-price-mode { display: flex; flex-direction: column; gap: 3px; font-size: 11px; color: var(--muted); }
+.auc-price-mode select,
+.auc-money-fields input,
+.auc-diamond-field input {
+  width: 100%; min-width: 0; box-sizing: border-box;
+  padding: 7px 8px; font-size: 12px; color: var(--text);
+  background: rgba(0, 0, 0, .3); border: 1px solid var(--line-soft); border-radius: 8px;
+}
+.auc-money-fields { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.auc-money-fields label,
+.auc-diamond-field { display: flex; flex-direction: column; gap: 3px; font-size: 11px; color: var(--muted); }
+.auc-price-editor.money .auc-diamond-field { display: none; }
+.auc-price-editor.diamond .auc-money-fields { display: none; }
+.auc-price-editor.optional .auc-price-mode { display: none; }
+.auc-price-editor.locked .auc-price-mode { display: none; }
+.auc-price-editor.small .auc-price-mode select,
+.auc-price-editor.small .auc-money-fields input,
+.auc-price-editor.small .auc-diamond-field input { padding: 5px 6px; font-size: 11.5px; }
+.auc-price-editor.small .auc-money-fields { grid-template-columns: repeat(3, minmax(38px, 1fr)); }
+.auc-bid .auc-price-editor.small { flex: 1 1 auto; }
 
 /* панель инструментов списка */
 .auc-toolbar { display: flex; flex-direction: column; gap: 9px; margin-bottom: 11px; }
@@ -5178,6 +5202,8 @@ body.hide-sys-chat .chat-line.system:not(.chat-error) { display: none; }
   font-size: 11px; color: #b9ad84; padding: 2px 7px; border-radius: 7px;
   background: rgba(255, 255, 255, .04); border: 1px solid rgba(138, 111, 60, .25);
 }
+button.auc-chip { cursor: pointer; font-family: inherit; }
+button.auc-chip:hover { color: var(--gold-bright); border-color: rgba(216, 169, 63, .55); }
 .auc-chip.time { color: var(--ember); }
 .auc-lot-prices { display: flex; flex-direction: column; gap: 2px; text-align: right; font-size: 12px; }
 .auc-price-row { display: flex; gap: 8px; justify-content: flex-end; color: var(--muted); }
@@ -5185,18 +5211,21 @@ body.hide-sys-chat .chat-line.system:not(.chat-error) { display: none; }
 .auc-price-row.bid b { color: var(--gold-bright); }
 .auc-price-row.buyout b { color: #8fd07a; }
 .auc-lot-actions { display: flex; flex-direction: column; gap: 5px; align-items: stretch; min-width: 116px; }
+.auc-lot-preview { grid-column: 1 / -1; }
+.auc-lot-preview.hidden { display: none; }
 .auc-lot-status { color: var(--muted); font-size: 12px; font-style: italic; text-align: right; }
-.auc-bid { display: flex; gap: 4px; }
+.auc-bid { display: flex; gap: 6px; align-items: flex-end; }
 .auc-bid-input {
   width: 0; flex: 1; min-width: 60px; padding: 6px 7px; font-size: 12px; color: var(--text);
   background: rgba(0, 0, 0, .3); border: 1px solid var(--line-soft); border-radius: 8px;
 }
 .auc-bidbtn { padding: 6px 9px; font-size: 11.5px; }
-.auc-edit-form { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; }
+.auc-edit-form { display: flex; flex-wrap: wrap; gap: 7px; align-items: flex-end; }
 .auc-edit-form label { display: flex; gap: 4px; align-items: center; font-size: 11px; color: var(--muted); }
 .auc-edit-form input,
 .auc-edit-form select { width: 76px; padding: 5px 6px; font-size: 12px; color: var(--text);
   background: rgba(0, 0, 0, .3); border: 1px solid var(--line-soft); border-radius: 7px; }
+.auc-edit-price { display: flex; flex-direction: column; gap: 3px; font-size: 11px; color: var(--muted); }
 
 /* создание лота: две колонки */
 .auc-new { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr); gap: 14px; }
@@ -5219,6 +5248,22 @@ body.hide-sys-chat .chat-line.system:not(.chat-error) { display: none; }
 .auc-sel-qty { font-size: 11.5px; color: var(--muted); display: flex; gap: 6px; align-items: center; margin-top: 3px; }
 .auc-sel-qty input { width: 66px; padding: 4px 6px; font-size: 12px; color: var(--text);
   background: rgba(0, 0, 0, .3); border: 1px solid var(--line-soft); border-radius: 7px; }
+.auc-item-preview {
+  display: flex; gap: 10px; padding: 10px;
+  background: linear-gradient(180deg, rgba(var(--qc, 154 160 166), .12), rgba(0, 0, 0, .22));
+  border: 1px solid rgba(var(--qc, 154 160 166), .45);
+  border-radius: 10px;
+}
+.auc-preview-ico {
+  width: 42px; height: 42px; flex: 0 0 auto; display: flex; align-items: center; justify-content: center;
+  font-size: 23px; border-radius: 9px; border: 1px solid rgba(var(--qc), .82);
+  background: radial-gradient(circle at 38% 26%, rgba(var(--qc), .5), rgba(0, 0, 0, .25));
+}
+.auc-preview-info { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.auc-preview-name { font-size: 13px; font-weight: 700; color: rgba(var(--qc), 1); }
+.auc-preview-meta { display: flex; flex-wrap: wrap; gap: 5px; font-size: 11px; color: #b9ad84; }
+.auc-preview-meta span { padding: 1px 6px; border-radius: 6px; background: rgba(255,255,255,.04); border: 1px solid rgba(138,111,60,.24); }
+.auc-preview-desc { font-size: 11.5px; color: #d1c59d; line-height: 1.35; }
 .auc-field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
 .auc-field.row { flex-direction: row; justify-content: space-between; align-items: center; }
 .auc-field.row b { color: var(--gold-bright); font-size: 13px; }
@@ -5284,6 +5329,7 @@ body.hide-sys-chat .chat-line.system:not(.chat-error) { display: none; }
 .exch-d-name { font-size: 15px; color: var(--text); font-weight: 600; }
 .exch-d-owned { margin-left: auto; font-size: 12px; color: var(--muted); }
 .exch-d-owned b { color: var(--gold-bright); }
+.exch-preview .auc-item-preview { border-color: rgba(216, 169, 63, .28); }
 .exch-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
 .exch-book { display: flex; flex-direction: column; gap: 3px; }
 .exch-book-title { font-size: 11.5px; font-family: var(--font-display); padding: 2px 0; }
@@ -5348,6 +5394,7 @@ body.hide-sys-chat .chat-line.system:not(.chat-error) { display: none; }
   border: 1px solid var(--line-soft); border-radius: 11px; display: flex; flex-direction: column; gap: 9px; }
 .exch-newform-title { font-size: 13px; color: var(--gold-bright); font-family: var(--font-display); }
 .exch-newform-row { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 8px; }
+.exch-price-cell { grid-column: span 2; }
 .exch-newform-foot { display: flex; align-items: center; gap: 12px; }
 .exch-newform-foot .auc-field.row { flex: 1; }
 .exch-board { display: flex; flex-direction: column; gap: 6px; }
@@ -5366,7 +5413,16 @@ body.hide-sys-chat .chat-line.system:not(.chat-error) { display: none; }
 .exch-o-none { font-size: 11px; color: var(--muted); font-style: italic; }
 
 @media (max-width: 860px) {
-  .auction-card { width: calc(100vw - 12px); height: calc(100dvh - 18px); border-radius: 12px; }
+  .auction {
+    align-items: flex-start;
+    padding: max(74px, env(safe-area-inset-top)) 8px max(10px, env(safe-area-inset-bottom));
+  }
+  .auction-card {
+    width: 100%;
+    height: calc(100dvh - 88px - env(safe-area-inset-bottom));
+    max-height: calc(100dvh - 88px - env(safe-area-inset-bottom));
+    border-radius: 12px;
+  }
   .auction-body { padding: 10px; }
   .auc-searchbar { flex-wrap: wrap; }
   .auc-searchbar .auc-search { flex-basis: 100%; }
@@ -5376,6 +5432,7 @@ body.hide-sys-chat .chat-line.system:not(.chat-error) { display: none; }
   .exch { grid-template-columns: 1fr; }
   .exch-list { max-height: 30vh; }
   .exch-newform-row { grid-template-columns: 1fr 1fr; }
+  .exch-price-cell { grid-column: 1 / -1; }
   .exch-newform-row .auc-field:nth-child(3) { grid-column: auto; }
   .exch-newform-foot { flex-wrap: wrap; align-items: stretch; gap: 8px; }
   .exch-newform-foot .auc-field.row { flex: 1 1 100%; }
@@ -5383,10 +5440,12 @@ body.hide-sys-chat .chat-line.system:not(.chat-error) { display: none; }
   .exch-bo-row { flex-wrap: wrap; }
   .exch-bo-act { width: 100%; }
   .exch-sell-qty { flex: 1; width: auto; }
+  .auc-price-editor.small .auc-money-fields { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 
 @media (max-width: 420px) {
   .auc-filters,
   .exch-tools .auc-filters { grid-template-columns: 1fr; }
   .exch-newform-row { grid-template-columns: 1fr; }
+  .auc-bid { flex-direction: column; align-items: stretch; }
 }

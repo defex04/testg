@@ -5,18 +5,13 @@ import {
   OWNER, ITEM_REASON, CURR_REASON, REF, bad, moveQty, lockSellableItem,
   deliverMail, publishMailNotify,
 } from './escrow.js';
-import { marketCurrencyCode, normalizeMarketCurrency } from './marketCurrency.js';
+import { displayMarketPrice, normalizeMarketPrice } from './marketCurrency.js';
 
 const WORLD = 1;
 const PRICE_MAX = 1_000_000_000n;   // потолок цены (анти-переполнение и анти-троллинг)
 
 const num = (v, d) => (Number.isFinite(Number(v)) ? Number(v) : d);
 const toInt = (v) => Math.trunc(Number(v) || 0);
-function marketCurrencyId(raw) {
-  const id = normalizeMarketCurrency(raw);
-  if (!id) throw bad('bad_currency');
-  return id;
-}
 
 /** Тарифы аукциона из game_config (с безопасными значениями по умолчанию). */
 export async function auctionTariffs() {
@@ -44,6 +39,10 @@ function minNextBid(lot, t) {
 
 /** Публичный вид лота для клиента (с учётом анонимности и зрителя). */
 function lotPublic(r, viewerId, t) {
+  const priceInfo = displayMarketPrice(r.currency_id, r.start_price);
+  const buyoutInfo = r.buyout_price != null ? displayMarketPrice(r.currency_id, r.buyout_price) : null;
+  const bidInfo = r.current_bid != null ? displayMarketPrice(r.currency_id, r.current_bid) : null;
+  const minBidInfo = displayMarketPrice(r.currency_id, minNextBid(r, t));
   const info = itemCard({
     id: r.template_id, name: r.name, icon: r.icon, base_stats: r.base_stats,
     price: r.base_price, quality: r.quality, level_req: r.level_req,
@@ -64,13 +63,17 @@ function lotPublic(r, viewerId, t) {
     stats: r.base_stats || null,
     description: info.description,
     quantity: Number(r.quantity) || 1,
-    currencyId: Number(r.currency_id) || CUR.copper,
-    currency: marketCurrencyCode(r.currency_id),
-    startPrice: Number(r.start_price),
-    buyoutPrice: r.buyout_price != null ? Number(r.buyout_price) : null,
-    currentBid: r.current_bid != null ? Number(r.current_bid) : null,
+    currencyId: priceInfo.currencyId,
+    currency: priceInfo.currency,
+    money: priceInfo.money || null,
+    startPrice: priceInfo.price,
+    buyoutPrice: buyoutInfo ? buyoutInfo.price : null,
+    buyoutMoney: buyoutInfo?.money || null,
+    currentBid: bidInfo ? bidInfo.price : null,
+    currentBidMoney: bidInfo?.money || null,
     bidCount: Number(r.bid_count) || 0,
-    minNextBid: minNextBid(r, t),
+    minNextBid: minBidInfo.price,
+    minNextBidMoney: minBidInfo.money || null,
     sellerId: r.anonymous && !isMine ? null : (r.seller_id != null ? Number(r.seller_id) : null),
     sellerName: r.anonymous && !isMine ? 'Аноним' : (r.seller_name || '—'),
     anonymous: !!r.anonymous,
@@ -181,15 +184,27 @@ export async function createLot(seller, raw) {
   const t = await auctionTariffs();
   const itemId = toInt(raw.itemId);
   const wantQty = Math.max(1, toInt(raw.qty) || 1);
-  const startPrice = toInt(raw.startPrice);
-  const buyoutPrice = raw.buyoutPrice == null || raw.buyoutPrice === '' ? null : toInt(raw.buyoutPrice);
-  const currencyId = marketCurrencyId(raw.currencyId ?? raw.currency);
+  const start = normalizeMarketPrice({
+    priceMode: raw.priceMode, money: raw.startMoney ?? raw.money,
+    diamond: raw.startDiamond ?? raw.diamond, price: raw.startPrice, currencyId: raw.currencyId ?? raw.currency,
+  });
+  const buyoutRaw = raw.buyoutMoney != null || raw.buyoutDiamond != null || raw.buyoutPrice != null
+    ? normalizeMarketPrice({
+      priceMode: raw.priceMode, money: raw.buyoutMoney,
+      diamond: raw.buyoutDiamond, price: raw.buyoutPrice, currencyId: start?.currencyId,
+    })
+    : null;
   const durationHours = toInt(raw.durationHours) || t.durations[0];
   const anonymous = !!raw.anonymous;
   const featured = !!raw.featured;
   const autoExtend = !!raw.autoExtend;
 
   if (!itemId) throw bad('item_required');
+  if (!start) throw bad('bad_start_price');
+  const startPrice = start.price;
+  const currencyId = start.currencyId;
+  const buyoutPrice = buyoutRaw ? buyoutRaw.price : null;
+  if (buyoutRaw && buyoutRaw.currencyId !== currencyId) throw bad('bad_currency');
   if (!(startPrice >= 1)) throw bad('bad_start_price');
   if (BigInt(startPrice) > PRICE_MAX) throw bad('price_too_high');
   if (buyoutPrice != null) {
@@ -234,9 +249,8 @@ export async function createLot(seller, raw) {
 }
 
 /** Поставить/повысить ставку. Деньги предыдущего лидера возвращаются. */
-export async function placeBid(bidder, lotId, amount) {
+export async function placeBid(bidder, lotId, raw) {
   lotId = toInt(lotId);
-  amount = toInt(amount);
   const t = await auctionTariffs();
   const notify = new Set();
 
@@ -250,6 +264,10 @@ export async function placeBid(bidder, lotId, amount) {
     if (lot.current_bidder_id != null && String(lot.current_bidder_id) === String(bidder.id)) {
       throw bad('already_high_bidder');
     }
+    const priceInput = raw && typeof raw === 'object' ? raw : { price: raw, currencyId: lot.currency_id };
+    const normalized = normalizeMarketPrice(priceInput, { currencyId: lot.currency_id, price: minNextBid(lot, t) });
+    if (!normalized || Number(normalized.currencyId) !== Number(lot.currency_id || CUR.copper)) throw bad('bad_currency');
+    const amount = normalized.price;
     const minBid = minNextBid(lot, t);
     if (amount < minBid) throw bad('bid_too_low');
     if (lot.buyout_price != null && amount >= Number(lot.buyout_price)) throw bad('use_buyout');
@@ -366,11 +384,21 @@ export async function cancelLot(seller, lotId) {
 /** Изменить цены лота (пока нет ставок). */
 export async function editLot(seller, lotId, raw) {
   lotId = toInt(lotId);
-  const startPrice = toInt(raw.startPrice);
-  const buyoutPrice = raw.buyoutPrice == null || raw.buyoutPrice === '' ? null : toInt(raw.buyoutPrice);
-  const currencyId = raw.currencyId == null && raw.currency == null
-    ? null
-    : marketCurrencyId(raw.currencyId ?? raw.currency);
+  const start = normalizeMarketPrice({
+    priceMode: raw.priceMode, money: raw.startMoney ?? raw.money,
+    diamond: raw.startDiamond ?? raw.diamond, price: raw.startPrice, currencyId: raw.currencyId ?? raw.currency,
+  });
+  const buyoutRaw = raw.buyoutMoney != null || raw.buyoutDiamond != null || raw.buyoutPrice != null
+    ? normalizeMarketPrice({
+      priceMode: raw.priceMode, money: raw.buyoutMoney,
+      diamond: raw.buyoutDiamond, price: raw.buyoutPrice, currencyId: start?.currencyId,
+    })
+    : null;
+  if (!start) throw bad('bad_start_price');
+  const startPrice = start.price;
+  const currencyId = start.currencyId;
+  const buyoutPrice = buyoutRaw ? buyoutRaw.price : null;
+  if (buyoutRaw && buyoutRaw.currencyId !== currencyId) throw bad('bad_currency');
   if (!(startPrice >= 1)) throw bad('bad_start_price');
   if (buyoutPrice != null && !(buyoutPrice >= startPrice)) throw bad('buyout_below_start');
   if (BigInt(startPrice) > PRICE_MAX || (buyoutPrice != null && BigInt(buyoutPrice) > PRICE_MAX)) {
@@ -485,7 +513,7 @@ export function auctionRoutes(app, authed, getCharacter) {
   });
   app.post('/api/auction/bid', authed, async (req, res) => {
     const bidder = await getCharacter(me(req));
-    const r = await placeBid(bidder, req.body?.lotId, req.body?.amount);
+    const r = await placeBid(bidder, req.body?.lotId, req.body || {});
     res.json({ ...r, wallet: await wallet(game, bidder.id) });
   });
   app.post('/api/auction/buyout', authed, async (req, res) => {

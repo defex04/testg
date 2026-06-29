@@ -3,7 +3,7 @@ import { addCurrency, CUR, wallet } from './economy.js';
 import {
   OWNER, ITEM_REASON, CURR_REASON, REF, bad, moveQty, deliverMail, publishMailNotify,
 } from './escrow.js';
-import { marketCurrencyCode, normalizeMarketCurrency } from './marketCurrency.js';
+import { displayMarketPrice, normalizeMarketPrice } from './marketCurrency.js';
 
 /**
  * Биржа — доска ЗАЯВОК НА ПОКУПКУ. Игрок выставляет «хочу купить N штук товара
@@ -20,11 +20,6 @@ const SIDE_BUY = 1;
 const PRICE_MAX = 1_000_000_000n;
 const QTY_MAX = 1_000_000;
 const toInt = (v) => Math.trunc(Number(v) || 0);
-function marketCurrencyId(raw) {
-  const id = normalizeMarketCurrency(raw);
-  if (!id) throw bad('bad_currency');
-  return id;
-}
 
 async function exchangeTariffs() {
   const dur = await gameConfig('exchange.durations');
@@ -110,13 +105,15 @@ export async function instruments(q = {}) {
 
 function orderPublic(r, viewerId) {
   const quantity = Number(r.quantity), filled = Number(r.filled);
+  const priceInfo = displayMarketPrice(r.currency_id, r.price);
   return {
     id: Number(r.id),
     buyerId: r.buyer_anon ? null : Number(r.character_id),
     buyerName: r.buyer_name || '—',
-    currencyId: Number(r.currency_id) || CUR.copper,
-    currency: marketCurrencyCode(r.currency_id),
-    price: Number(r.price),
+    currencyId: priceInfo.currencyId,
+    currency: priceInfo.currency,
+    money: priceInfo.money || null,
+    price: priceInfo.price,
     quantity, filled, remaining: quantity - filled,
     status: Number(r.status),
     endsAt: r.ends_at ? new Date(r.ends_at).getTime() : null,
@@ -148,9 +145,8 @@ export async function board(charId, instrumentId) {
   const trades = (await game.query(
     `SELECT currency_id, price, quantity, ts FROM exchange_trades
       WHERE instrument_id = $1 ORDER BY ts DESC LIMIT 30`, [instrumentId])).rows
-    .map((r) => ({ currencyId: Number(r.currency_id) || CUR.copper,
-      currency: marketCurrencyCode(r.currency_id),
-      price: Number(r.price), qty: Number(r.quantity), ts: new Date(r.ts).getTime() }));
+    .map((r) => ({ ...displayMarketPrice(r.currency_id, r.price),
+      qty: Number(r.quantity), ts: new Date(r.ts).getTime() }));
 
   const owned = Number((await game.query(
     `SELECT COALESCE(SUM(quantity),0)::bigint AS q FROM item_instances
@@ -184,12 +180,17 @@ function recordTrade(c, instrumentId, buyOrderId, currencyId, price, qty) {
 /** Создать заявку на покупку: блокируем деньги P×N, ставим срок. */
 export async function createBuyOrder(buyer, raw) {
   const instrumentId = toInt(raw.instrumentId);
-  const price = toInt(raw.price);
+  const normalized = normalizeMarketPrice({
+    priceMode: raw.priceMode, money: raw.money,
+    diamond: raw.diamond, price: raw.price, currencyId: raw.currencyId ?? raw.currency,
+  });
   const quantity = toInt(raw.quantity);
-  const currencyId = marketCurrencyId(raw.currencyId ?? raw.currency);
   const durationHours = toInt(raw.durationHours);
   const t = await exchangeTariffs();
 
+  if (!normalized) throw bad('bad_price');
+  const price = normalized.price;
+  const currencyId = normalized.currencyId;
   if (!(price >= 1) || BigInt(price) > PRICE_MAX) throw bad('bad_price');
   if (!(quantity >= 1) || quantity > QTY_MAX) throw bad('bad_quantity');
   const hours = t.durations.includes(durationHours) ? durationHours : t.durations[0];
