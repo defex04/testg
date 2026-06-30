@@ -338,6 +338,7 @@ export async function startHunt(ch, send, npcId = null) {
     `SELECT t.id, t.name, t.level, t.stats FROM npc_spawns s
        JOIN npc_templates t ON t.id = s.npc_template_id
       WHERE s.location_id = $1 ${tid ? 'AND t.id = $2' : ''}
+        AND t.active = TRUE AND t.kind IN (1, 3)
       ORDER BY t.id LIMIT 1`, tid ? [ch.location_id, tid] : [ch.location_id])).rows[0];
   if (!npc) throw err('no_hunt_here', 400);
 
@@ -388,6 +389,7 @@ export async function startHunt(ch, send, npcId = null) {
        counterChance: numCfg(await gameConfig('battle.counter_chance'), 1) });
 
   const b = makeBattle(battleId, 'hunt', ch.location_id, policy, engine);
+  b.npcId = npc.id;
   b.reward = huntReward;   // null → endBattle возьмёт battle.reward.hunt из конфига
   const p = addPlayer(b, ch.id, send, 'left');
   live.set(battleId, b);
@@ -1153,7 +1155,7 @@ async function endBattle(b) {
 
   if (b.kind === 'hunt' && winner === 'left') {
     const lp = playerList(b).find((p) => p.side === 'left');
-    if (lp) onHuntVictory(lp.charId, (text) =>
+    if (lp) onHuntVictory(lp.charId, { npcId: b.npcId }, (text) =>
       lp.send({ type: 'chat', from: 'Система', text })).catch(console.error);
   }
 }

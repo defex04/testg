@@ -11,6 +11,54 @@ const STATEMENTS = [
   `ALTER TABLE quest_templates ADD COLUMN IF NOT EXISTS image TEXT`,
   `ALTER TABLE quest_templates ADD COLUMN IF NOT EXISTS level_req SMALLINT NOT NULL DEFAULT 1`,
   `ALTER TABLE quest_templates ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT TRUE`,
+  `ALTER TABLE quest_templates ADD COLUMN IF NOT EXISTS giver_npc_id INT`,
+  `ALTER TABLE quest_templates ADD COLUMN IF NOT EXISTS turnin_npc_id INT`,
+  `ALTER TABLE quest_templates ADD COLUMN IF NOT EXISTS dialogue JSONB NOT NULL DEFAULT '{}'::jsonb`,
+  // NPC: kind 1 = боевая цель, 2 = диалоговый житель, 3 = оба режима.
+  `ALTER TABLE npc_templates ADD COLUMN IF NOT EXISTS kind SMALLINT NOT NULL DEFAULT 1`,
+  `ALTER TABLE npc_templates ADD COLUMN IF NOT EXISTS description TEXT`,
+  `ALTER TABLE npc_templates ADD COLUMN IF NOT EXISTS image TEXT`,
+  `ALTER TABLE npc_templates ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT TRUE`,
+  `UPDATE npc_templates SET kind = 1 WHERE kind IS NULL`,
+  `CREATE INDEX IF NOT EXISTS ix_npc_spawns_template ON npc_spawns (npc_template_id)`,
+  `CREATE INDEX IF NOT EXISTS ix_quests_giver ON quest_templates (giver_npc_id)`,
+  `GRANT SELECT ON npc_templates, npc_spawns, quest_templates TO game_rw`,
+  `GRANT SELECT, INSERT, UPDATE ON character_quests TO game_rw`,
+  `GRANT INSERT ON quest_history TO game_rw`,
+  `INSERT INTO npc_templates (id, name, level, kind, description, image, stats, props)
+   VALUES
+     (100, 'Староста Мирай', 1, 2,
+      'Староста Города Надежды собирает новости, выдаёт поручения новичкам и принимает отчёты.',
+      NULL, '{}'::jsonb, '{}'::jsonb),
+     (101, 'Травница Лея', 1, 2,
+      'Лея знает окрестные тропы и помогает понять, где искать первые следы разбойников.',
+      NULL, '{}'::jsonb, '{}'::jsonb)
+   ON CONFLICT (id) DO NOTHING`,
+  `DO $$
+   DECLARE next_id INT;
+   BEGIN
+     IF NOT EXISTS (SELECT 1 FROM npc_spawns WHERE npc_template_id = 100 AND location_id = 1) THEN
+       SELECT COALESCE(max(id), 0) + 1 INTO next_id FROM npc_spawns;
+       INSERT INTO npc_spawns (id, npc_template_id, location_id, config)
+       VALUES (next_id, 100, 1, '{"order":10}'::jsonb);
+     END IF;
+     IF NOT EXISTS (SELECT 1 FROM npc_spawns WHERE npc_template_id = 101 AND location_id = 2) THEN
+       SELECT COALESCE(max(id), 0) + 1 INTO next_id FROM npc_spawns;
+       INSERT INTO npc_spawns (id, npc_template_id, location_id, config)
+       VALUES (next_id, 101, 2, '{"order":10}'::jsonb);
+     END IF;
+   END $$`,
+  `INSERT INTO quest_templates (id, type, repeatable, name, description, image, level_req,
+      active, giver_npc_id, turnin_npc_id, dialogue, prereq, objectives, rewards)
+   VALUES
+     (1000, 1, 1, 'Первые поручения старосты',
+      'Короткая цепочка для новичка: поговорить с Леей, отбить нападение разбойников и принести взнос на стражу.',
+      NULL, 1, TRUE, 100, 100,
+      '{"greeting":"Нужны быстрые ноги и крепкая рука. Сходи к Лее в Зеленое поселение, она подскажет, где видели разбойников.","progress":"Сначала поговори с Леей, затем разберись с разбойниками и принеси 20 меди на стражу.","ready":"Вижу, ты вернулся с делом. Покажи, что собрал для стражи.","done":"Хорошая работа. Город запомнит тех, кто начал с помощи людям."}'::jsonb,
+      '{}'::jsonb,
+      '{"mode":"sequence","stages":[{"title":"Весть из поселения","objectives":[{"kind":"talk","npcId":101,"count":1}]},{"title":"Разбойники на дороге","objectives":[{"kind":"kill","npcId":1,"count":2}]},{"title":"Взнос на стражу","objectives":[{"kind":"money","currency":"copper","amount":20,"consume":true}]}]}'::jsonb,
+      '{"copper":150,"exp":150,"items":[{"templateId":202,"count":1}]}'::jsonb)
+   ON CONFLICT (id) DO NOTHING`,
   // Требования к надеванию предметов (уровень, класс, ...)
   `ALTER TABLE item_templates ADD COLUMN IF NOT EXISTS requirements JSONB`,
   // 3D-модель предмета (URL загруженного GLB/FBX или ключ из content.js) —

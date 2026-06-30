@@ -378,9 +378,14 @@ const castlePerimeter = $('castle-perimeter');
 const castleMainMenu = $('castle-main-menu');
 const dockEl = $('bottom-dock');
 const battleForeground = $('battle-foreground');
+const npcDialogEl = $('npc-dialog');
+const npcDialogTitle = $('npc-dialog-title');
+const npcDialogBody = $('npc-dialog-body');
 
 let mode = 'location';   // 'location' | 'battle'
 let currentLoc = 'village';
+let locationNpcs = [];
+let locationNpcLocId = null;
 
 // канвас живёт в скрытом до боя arena-stage; Arena сама подхватит размер,
 // когда экран боя станет видимым (ResizeObserver). Рендер-цикл запускается
@@ -722,6 +727,44 @@ function renderActionGroup(title, buttons) {
   locActions.appendChild(group);
 }
 
+function mediaUrl(src) {
+  if (!src) return '';
+  if (/^(https?:|data:|blob:)/.test(src)) return src;
+  if (src.startsWith('/')) return (window.API_URL || 'http://localhost:8080') + src;
+  return src;
+}
+
+function npcInitial(npc) {
+  return String(npc?.name || '?').trim().slice(0, 1).toUpperCase() || '?';
+}
+
+function npcAvatarHtml(npc, cls = 'npc-ava') {
+  const img = mediaUrl(npc?.image);
+  return `<span class="${cls}">${img
+    ? `<img src="${esc(img)}" alt="">`
+    : esc(npcInitial(npc))}</span>`;
+}
+
+function npcsForLocation(loc) {
+  if (online && loc.id && locationNpcLocId === loc.id) return locationNpcs;
+  return (loc.npc || []).map((n, i) => ({ id: null, name: n.name, image: n.image || null,
+    description: n.description || '', _fallback: i }));
+}
+
+async function refreshLocationNpcs() {
+  if (!online || !serverLocId) return;
+  const expected = serverLocId;
+  try {
+    const rows = await api.locationNpcs();
+    if (expected !== serverLocId) return;
+    locationNpcs = rows;
+    locationNpcLocId = expected;
+    if (mode === 'location' && locPanelOpen) renderLocationActions(LOCATIONS[currentLoc]);
+  } catch (e) {
+    console.warn('NPC локации:', e);
+  }
+}
+
 function renderLocationActions(loc) {
   shopOpen = false;
   locBody.classList.remove('shop-open');
@@ -748,11 +791,116 @@ function renderLocationActions(loc) {
         else showToast(`«${a.label}» — заглушка: модуль действий подключается отдельно`);
       })));
 
-  renderActionGroup('Жители', (loc.npc || []).map((n) =>
+  renderActionGroup('Жители', npcsForLocation(loc).map((n) =>
     makeButton('npc-chip',
-      `<span class="npc-ava">${esc(n.name.trim()[0])}</span><span>${esc(n.name)}</span>`,
-      () => showToast(`Диалог с «${n.name}» — заглушка: модуль NPC подключается отдельно`))));
+      `${npcAvatarHtml(n)}<span>${esc(n.name)}</span>`,
+      () => n.id ? openNpcDialog(n.id)
+        : showToast(`Диалог с «${n.name}» доступен только онлайн`))));
 }
+
+function objectiveLine(o) {
+  const done = o.done ? ' done' : '';
+  return `<div class="npc-objective${done}">
+    <span>${o.done ? '✓' : '•'}</span>
+    <span>${esc(o.text || o.kind)}</span>
+    <b>${esc(o.current ?? 0)} / ${esc(o.need ?? 1)}</b>
+  </div>`;
+}
+
+function renderNpcQuest(q, npc) {
+  const p = q.progress || {};
+  const objectives = (p.objectives || []).map(objectiveLine).join('');
+  const stage = p.stages > 1
+    ? `<div class="npc-quest-reward">Этап ${p.stage + 1} из ${p.stages}${p.stageTitle ? ': ' + esc(p.stageTitle) : ''}</div>`
+    : '';
+  const reward = q.rewardText
+    ? `<div class="npc-quest-reward">Награда: ${esc(q.rewardText)}</div>` : '';
+  let action = '';
+  if (q.canAccept) action = `<button class="npc-quest-btn" data-quest-accept="${q.id}">Принять</button>`;
+  else if (q.canComplete || q.canAdvance) action =
+    `<button class="npc-quest-btn" data-quest-complete="${q.id}">${q.canAdvance ? 'Продолжить' : 'Завершить'}</button>`;
+  else if (q.status === 'active') action = `<button class="npc-quest-btn" disabled>В процессе</button>`;
+  else if (q.status === 'ready') action = `<button class="npc-quest-btn" disabled>Вернитесь к нужному NPC</button>`;
+  return `<div class="npc-quest">
+    <div class="npc-quest-head">
+      <div class="npc-quest-title">${esc(q.name)}</div>
+      <div class="npc-quest-state">${esc(q.statusText || '')}</div>
+    </div>
+    ${q.dialogue ? `<div class="npc-quest-text">${esc(q.dialogue)}</div>` : ''}
+    ${stage}
+    ${p.stageText ? `<div class="npc-quest-text">${esc(p.stageText)}</div>` : ''}
+    ${objectives ? `<div class="npc-objectives">${objectives}</div>` : ''}
+    ${reward}
+    ${action ? `<div class="npc-quest-actions">${action}</div>` : ''}
+  </div>`;
+}
+
+function renderNpcDialog(data) {
+  const npc = data.npc || {};
+  npcDialogTitle.textContent = npc.name || 'NPC';
+  const portrait = npcAvatarHtml(npc, 'npc-portrait');
+  const dialogs = data.dialogs || [];
+  npcDialogBody.innerHTML = `
+    <div class="npc-profile">
+      ${portrait}
+      <div>
+        <h3>${esc(npc.name || 'NPC')}</h3>
+        <p>${esc(npc.description || 'Этот персонаж пока молчит, но уже присутствует в мире.')}</p>
+      </div>
+    </div>
+    <div class="npc-quests">
+      ${dialogs.length ? dialogs.map((q) => renderNpcQuest(q, npc)).join('')
+        : '<div class="npc-empty">Доступных диалогов сейчас нет.</div>'}
+    </div>`;
+  npcDialogBody.querySelectorAll('[data-quest-accept]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      try {
+        await api.questAccept(btn.dataset.questAccept, npc.id);
+        showToast('Задание принято');
+        await openNpcDialog(npc.id, true);
+      } catch (e) {
+        showToast('Не удалось принять: ' + (e.message || ''));
+        btn.disabled = false;
+      }
+    });
+  });
+  npcDialogBody.querySelectorAll('[data-quest-complete]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      try {
+        const r = await api.questComplete(btn.dataset.questComplete, npc.id);
+        showToast(r.completed ? 'Задание завершено' : 'Этап выполнен');
+        applyCharacter(await api.me());
+        try { registerServerItems(await api.inventory()); } catch {}
+        await openNpcDialog(npc.id, true);
+        refreshLocationNpcs();
+      } catch (e) {
+        showToast('Не удалось завершить: ' + (e.message || ''));
+        btn.disabled = false;
+      }
+    });
+  });
+}
+
+async function openNpcDialog(id, quiet = false) {
+  if (!online) { showToast('Диалоги доступны только онлайн'); return; }
+  npcDialogEl.classList.remove('hidden');
+  if (!quiet) {
+    npcDialogTitle.textContent = 'NPC';
+    npcDialogBody.innerHTML = '<div class="npc-empty">Загрузка...</div>';
+  }
+  try {
+    renderNpcDialog(await api.npcDialog(id));
+  } catch (e) {
+    npcDialogBody.innerHTML = `<div class="npc-empty">Не удалось открыть диалог: ${esc(e.message || '')}</div>`;
+  }
+}
+
+$('npc-dialog-close')?.addEventListener('click', () => npcDialogEl.classList.add('hidden'));
+npcDialogEl?.addEventListener('click', (e) => {
+  if (e.target === npcDialogEl) npcDialogEl.classList.add('hidden');
+});
 
 /** Испить живой воды: бафф +10% к HP и урону на 10 минут (применяется в бою/панели). */
 async function drinkLivingWater() {
@@ -984,6 +1132,10 @@ async function buyShopItem(it, qtyEl, btn) {
 function setLocation(key, { quiet = false } = {}) {
   currentLoc = key;
   const loc = LOCATIONS[key];
+  if (loc.id !== locationNpcLocId) {
+    locationNpcs = [];
+    locationNpcLocId = null;
+  }
   if (!quiet) chatMessage('Система', `Вы вошли в локацию «${loc.name}».`, true);
   closeLocPanel();
   closeBattlesPanel();
@@ -992,6 +1144,7 @@ function setLocation(key, { quiet = false } = {}) {
   if (mode !== 'battle') closeCastleDock();
   applyUILayout();
   renderLocationActions(loc);
+  refreshLocationNpcs();
 }
 
 // ---------------------------------------------------------------------------

@@ -42,7 +42,11 @@ export async function moveCharacter(charId, toId) {
 export async function locationsList() {
   const locs = await game.query(`SELECT id, name, type FROM locations ORDER BY id`);
   const links = await game.query(`SELECT from_id, to_id FROM location_links`);
-  const hunts = await game.query(`SELECT DISTINCT location_id FROM npc_spawns`);
+  const hunts = await game.query(
+    `SELECT DISTINCT s.location_id
+       FROM npc_spawns s
+       JOIN npc_templates t ON t.id = s.npc_template_id
+      WHERE t.active = TRUE AND t.kind IN (1, 3)`);
   const huntSet = new Set(hunts.rows.map(r => r.location_id));
   return locs.rows.map(l => ({
     ...l,

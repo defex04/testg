@@ -563,6 +563,7 @@ const D = {
   result:{1:'победа',2:'поражение',3:'ничья',4:'покинул',5:'таймаут'},
   itemType:{1:'оружие',2:'броня',3:'ресурс',4:'эликсир',5:'артефакт',6:'скальп',7:'подарок'},
   slot:{1:'торс',2:'шлем',3:'поножи',4:'ботинки',5:'наручи',6:'плечи',7:'оружие',8:'щит',9:'кольчуга',10:'амулет'},
+  npcKind:{1:'боевой',2:'диалоговый',3:'боевой + диалог'},
   school:{natisk:'Натиск',uklon:'Уклон',oplot:'Оплот'},
   zone:{high:'голову',mid:'корпус',low:'ноги'},
   rep:{1:'однократное',2:'ежедневное',3:'еженедельное'},
@@ -583,6 +584,22 @@ function table(cols, rows, rowAttr){
     cols.map((c)=>c.html ? c.html(r) : `<td>${esc(c.v(r))}</td>`).join('')
   }</tr>`).join('')}</tbody></table>`;
 }
+const jsonPretty = (v) => esc(JSON.stringify(v ?? {}, null, 2));
+function readJsonField(id, fallback = {}){
+  const raw = $('#' + id).value.trim();
+  if (!raw) return fallback;
+  try { return JSON.parse(raw); }
+  catch (e) { stamp('Отказано · JSON в поле #' + id + ' не читается', true); throw e; }
+}
+function objectiveSummary(o){
+  if (!o) return '—';
+  if (o.kind === 'hunt_wins') return `побед в охоте: ${o.count || 1}`;
+  const stages = Array.isArray(o.stages) ? o.stages : null;
+  if (stages) return `цепочка: ${stages.length} этап(а)`;
+  const list = Array.isArray(o.all) ? o.all : (Array.isArray(o.objectives) ? o.objectives : null);
+  if (list) return `целей: ${list.length}`;
+  return o.kind || 'сложная цель';
+}
 function barChart(rows, labelKey, valueKey){
   if (!rows.length) return '<p class="muted">Данных пока нет.</p>';
   const max = Math.max(...rows.map((r) => +r[valueKey]), 1);
@@ -596,7 +613,7 @@ const SECTIONS = [
   ['stats','Общая статистика'],['chars','Персонажи'],['accounts','Аккаунты'],
   ['battles','Бои'],['battlecfg','Настройки боёв'],['simulate','Симуляция боёв'],
   ['livesim','Живой бой'],['balance','Баланс'],
-  ['ledger','Гроссбух'],['items','Предметы'],['quests','Задания'],
+  ['ledger','Гроссбух'],['items','Предметы'],['npcs','NPC'],['quests','Задания'],
   ['market','Аукцион'],['mail','Почта'],['chat','Чат'],['config','Конфиг'],['audit','Аудит'],
 ];
 let current = 'stats';
@@ -2001,18 +2018,91 @@ window.tplInstances = async (tplId) => {
   ], rows)}</div>`;
 };
 
+/* ================= NPC ================= */
+R.npcs = async () => {
+  const rows = await api('/npcs');
+  return `<div class="toolbar"><button class="brass" onclick="editNpc()">Новый NPC</button>
+    <button onclick="show('quests')">К заданиям</button></div>
+  ${table([
+    {h:'ID',v:r=>r.id},{h:'Имя',v:r=>r.name},{h:'Тип',v:r=>dict(D.npcKind,r.kind)},
+    {h:'Ур.',v:r=>r.level},
+    {h:'Вкл',html:r=>`<td>${r.active?'<span class="credit">да</span>':'<span class="muted">нет</span>'}</td>`},
+    {h:'Локации',v:r=>(r.location_ids||[]).join(', ') || '—'},
+    {h:'Квесты',v:r=>r.quests || 0},
+  ], rows, (r)=>`class="click" onclick="openNpc(${r.id})"`)}`;
+};
+window.openNpc = async (id) => {
+  const rows = await api('/npcs');
+  editNpc(rows.find((x) => x.id === id));
+};
+window.editNpc = async (r) => {
+  const locs = await locationsCached();
+  const n = r || { id:'', name:'', level:1, kind:2, active:true,
+    description:'', image:'', stats:{}, props:{}, location_ids:[] };
+  const selected = new Set((n.location_ids || []).map(String));
+  const locChecks = locs.map((l) => `<label style="display:flex;gap:7px;align-items:center">
+    <input type="checkbox" data-npc-loc="${l.id}" ${selected.has(String(l.id))?'checked':''}>
+    ${esc(l.name)} <span class="muted">#${l.id}</span></label>`).join('');
+  $('#main').innerHTML = `
+  <div class="toolbar"><button onclick="show('npcs')">← К списку</button>
+    <h2 style="margin:0;font-family:Georgia,serif;font-variant:small-caps">
+      ${r ? 'NPC #' + n.id : 'Новый NPC'}</h2></div>
+  <div class="panel"><div class="form">
+    <div><label>Уникальный ID</label><input id="npc-id" type="number" value="${n.id}" ${r?'disabled':''}></div>
+    <div><label>Тип</label><select id="npc-kind">${opt(D.npcKind, n.kind)}</select></div>
+    <div><label>Уровень</label><input id="npc-level" type="number" value="${n.level || 1}"></div>
+    <div><label>Включено</label><select id="npc-active">
+      <option value="1" ${n.active!==false?'selected':''}>да</option>
+      <option value="0" ${n.active===false?'selected':''}>нет</option></select></div>
+    <div class="wide"><label>Имя</label><input id="npc-name" value="${esc(n.name)}" style="width:100%"></div>
+    <div class="wide"><label>Описание</label><textarea id="npc-desc" rows="3">${esc(n.description||'')}</textarea></div>
+    <div class="wide"><label>Фото</label>
+      <input id="npc-file" type="file" accept="image/*">
+      <input id="npc-image" value="${esc(n.image||'')}" placeholder="/uploads/..." style="width:60%">
+      ${n.image ? `<div style="margin-top:8px"><img src="${esc(n.image)}"
+        style="max-height:120px;border:1px solid var(--line);border-radius:3px"></div>` : ''}</div>
+    <div class="wide"><label>Локации</label><div class="grid2">${locChecks}</div></div>
+    <div class="wide"><label>Боевые stats JSON</label><textarea id="npc-stats" rows="7">${jsonPretty(n.stats||{})}</textarea></div>
+    <div class="wide"><label>Props JSON</label><textarea id="npc-props" rows="4">${jsonPretty(n.props||{})}</textarea></div>
+  </div>
+  <div class="toolbar" style="margin-top:12px">
+    <button class="brass" onclick="saveNpc()">Сохранить NPC</button></div></div>`;
+  $('#npc-file').addEventListener('change', async (e) => {
+    const f = e.target.files[0]; if (!f) return;
+    try { $('#npc-image').value = await upload(f); ok('фото загружено'); }
+    catch (err) { fail(err); }
+  });
+};
+window.saveNpc = async () => {
+  let stats, props;
+  try { stats = readJsonField('npc-stats'); props = readJsonField('npc-props'); } catch { return; }
+  const body = {
+    id:+$('#npc-id').value, name:$('#npc-name').value.trim(),
+    level:+$('#npc-level').value || 1, kind:+$('#npc-kind').value || 2,
+    active:$('#npc-active').value === '1',
+    description:$('#npc-desc').value.trim(), image:$('#npc-image').value.trim() || null,
+    location_ids:[...document.querySelectorAll('[data-npc-loc]:checked')].map((x)=>+x.dataset.npcLoc),
+    stats, props,
+  };
+  if (!body.id || !body.name) return stamp('Отказано · нужны ID и имя', true);
+  try { await api('/npcs', body); ok('NPC #' + body.id); show('npcs'); }
+  catch (e) { fail(e); }
+};
+
 /* ================= Задания ================= */
 R.quests = async () => {
   const rows = await api('/quests');
   return `<div class="toolbar"><button class="brass" onclick="editQuest()">Новое задание</button>
-    <span class="muted">Задания отслеживаются у игроков автоматически; награда приходит сразу.</span></div>
+    <button onclick="show('npcs')">NPC</button></div>
   ${table([
     {h:'ID',v:r=>r.id},{h:'Название',v:r=>r.name},
+    {h:'NPC',v:r=>(r.giver_name || '—') + (r.turnin_name && r.turnin_name !== r.giver_name ? ' → ' + r.turnin_name : '')},
     {h:'Вкл',html:r=>`<td>${r.active?'<span class="credit">да</span>':'<span class="muted">нет</span>'}</td>`},
     {h:'Уровень',v:r=>r.level_req},{h:'Повтор',v:r=>dict(D.rep,r.repeatable)},
-    {h:'Цель',v:r=>`побед в охоте: ${(r.objectives||{}).count ?? 1}`},
+    {h:'Цель',v:r=>objectiveSummary(r.objectives || {})},
     {h:'Награда',v:r=>{const w=r.rewards||{};return [w.copper&&w.copper+' меди',
-      w.exp&&w.exp+' опыта',(w.items||[]).length&&'предметы'].filter(Boolean).join(', ')||'—';}},
+      w.silver&&w.silver+' серебра',w.gold&&w.gold+' золота',w.exp&&w.exp+' опыта',
+      (w.items||[]).length&&'предметы'].filter(Boolean).join(', ')||'—';}},
     {h:'Выполнили',v:r=>r.completed_by},
   ], rows, (r)=>`class="click" onclick="openQuest(${r.id})"`)}`;
 };
@@ -2020,10 +2110,28 @@ window.openQuest = async (id) => {
   const rows = await api('/quests');
   editQuest(rows.find((x) => x.id === id));
 };
-window.editQuest = (r) => {
+window.editQuest = async (r) => {
+  const npcs = await api('/npcs');
+  const npcOpt = (sel, empty = '—') => opt(Object.fromEntries(npcs.map((n)=>[n.id, n.name + ' #' + n.id])), sel, empty);
+  const sampleObjectives = {
+    mode:'sequence',
+    stages:[
+      { title:'Разговор', objectives:[{ kind:'talk', npcId:101, count:1 }] },
+      { title:'Охота', objectives:[{ kind:'kill', npcId:1, count:3 }] },
+      { title:'Доставка', objectives:[
+        { kind:'item', templateId:202, count:1, consume:true },
+        { kind:'money', currency:'copper', amount:20, consume:true },
+      ] },
+    ],
+  };
   const q = r || { id:'', name:'', description:'', image:'', level_req:1,
-    repeatable:2, active:true, objectives:{kind:'hunt_wins',count:3},
-    rewards:{copper:100,exp:200,items:[]} };
+    repeatable:1, active:true, giver_npc_id:null, turnin_npc_id:null,
+    objectives:sampleObjectives, prereq:{}, dialogue:{
+      greeting:'Мне нужна помощь. Возьмёшься?',
+      progress:'Вернись, когда выполнишь поручение.',
+      ready:'Отлично, покажи результат.',
+      done:'Спасибо. Дело сделано.',
+    }, rewards:{copper:100,exp:100,items:[]} };
   const w = q.rewards || {};
   $('#main').innerHTML = `
   <div class="toolbar"><button onclick="show('quests')">← К списку</button>
@@ -2031,20 +2139,24 @@ window.editQuest = (r) => {
       ${r ? 'Задание #' + q.id : 'Новое задание'}</h2></div>
   <div class="panel"><div class="form">
     <div><label>Уникальный ID</label><input id="q-id" type="number" value="${q.id}" ${r?'disabled':''}></div>
-    <div class="wide"><label>Название</label><input id="q-name" value="${esc(q.name)}" style="width:100%"></div>
-    <div class="wide"><label>Описание (видно игроку)</label>
-      <textarea id="q-desc" rows="3">${esc(q.description||'')}</textarea></div>
+    <div><label>NPC выдаёт</label><select id="q-giver">${npcOpt(q.giver_npc_id)}</select></div>
+    <div><label>NPC принимает</label><select id="q-turnin">${npcOpt(q.turnin_npc_id)}</select></div>
     <div><label>Мин. уровень</label><input id="q-lvl" type="number" value="${q.level_req}"></div>
     <div><label>Повторяемость</label><select id="q-rep">${opt(D.rep, q.repeatable)}</select></div>
     <div><label>Включено</label><select id="q-active">
       <option value="1" ${q.active?'selected':''}>да</option>
       <option value="0" ${!q.active?'selected':''}>нет</option></select></div>
-    <div><label>Цель: побед в охоте</label>
-      <input id="q-count" type="number" value="${(q.objectives||{}).count ?? 1}"></div>
+    <div class="wide"><label>Название</label><input id="q-name" value="${esc(q.name)}" style="width:100%"></div>
+    <div class="wide"><label>Описание</label><textarea id="q-desc" rows="3">${esc(q.description||'')}</textarea></div>
+    <div class="wide"><label>Диалоги JSON</label><textarea id="q-dialogue" rows="6">${jsonPretty(q.dialogue||{})}</textarea></div>
+    <div class="wide"><label>Цели JSON</label><textarea id="q-objectives" rows="13">${jsonPretty(q.objectives||{})}</textarea></div>
+    <div class="wide"><label>Условия prereq JSON</label><textarea id="q-prereq" rows="4">${jsonPretty(q.prereq||{})}</textarea></div>
     <div><label>Награда: медь</label><input id="q-copper" type="number" value="${w.copper ?? 0}"></div>
+    <div><label>Награда: серебро</label><input id="q-silver" type="number" value="${w.silver ?? 0}"></div>
+    <div><label>Награда: золото</label><input id="q-gold" type="number" value="${w.gold ?? 0}"></div>
     <div><label>Награда: опыт</label><input id="q-exp" type="number" value="${w.exp ?? 0}"></div>
     <div class="wide"><label>Награда: ID предметов через запятую</label>
-      <input id="q-items" value="${esc((w.items||[]).join(', '))}" style="width:100%"></div>
+      <input id="q-items" value="${esc((w.items||[]).map((x)=>x.templateId||x.id||x).join(', '))}" style="width:100%"></div>
     <div class="wide"><label>Картинка</label>
       <input id="q-file" type="file" accept="image/*">
       <input id="q-image" value="${esc(q.image||'')}" placeholder="/uploads/..." style="width:60%">
@@ -2060,14 +2172,25 @@ window.editQuest = (r) => {
   });
 };
 window.saveQuest = async () => {
+  let objectives, prereq, dialogue;
+  try {
+    objectives = readJsonField('q-objectives');
+    prereq = readJsonField('q-prereq');
+    dialogue = readJsonField('q-dialogue');
+  } catch { return; }
   const body = {
-    id: +$('#q-id').value, name: $('#q-name').value.trim(),
-    description: $('#q-desc').value.trim(), image: $('#q-image').value.trim() || null,
-    level_req: +$('#q-lvl').value || 1, repeatable: +$('#q-rep').value,
-    active: $('#q-active').value === '1',
-    objectives: { kind: 'hunt_wins', count: +$('#q-count').value || 1 },
-    rewards: { copper: +$('#q-copper').value || 0, exp: +$('#q-exp').value || 0,
-      items: $('#q-items').value.split(',').map((s)=>+s.trim()).filter(Boolean) },
+    id:+$('#q-id').value, name:$('#q-name').value.trim(),
+    description:$('#q-desc').value.trim(), image:$('#q-image').value.trim() || null,
+    level_req:+$('#q-lvl').value || 1, repeatable:+$('#q-rep').value,
+    active:$('#q-active').value === '1',
+    giver_npc_id:+$('#q-giver').value || null,
+    turnin_npc_id:+$('#q-turnin').value || null,
+    objectives, prereq, dialogue,
+    rewards: {
+      copper:+$('#q-copper').value || 0, silver:+$('#q-silver').value || 0,
+      gold:+$('#q-gold').value || 0, exp:+$('#q-exp').value || 0,
+      items:$('#q-items').value.split(',').map((s)=>+s.trim()).filter(Boolean),
+    },
   };
   if (!body.id || !body.name) return stamp('Отказано · нужны ID и название', true);
   try { await api('/quests', body); ok('задание #' + body.id); show('quests'); }

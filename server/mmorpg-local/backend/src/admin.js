@@ -646,12 +646,75 @@ export function adminRoutes(app) {
     res.json({ ok: true });
   });
 
+  // ================= NPC: жители, боевые цели и смешанные персонажи =================
+  app.get('/admin/api/npcs', guard, async (req, res) => {
+    const { rows } = await game.query(
+      `SELECT t.*,
+              COALESCE(json_agg(DISTINCT s.location_id ORDER BY s.location_id)
+                FILTER (WHERE s.location_id IS NOT NULL), '[]') AS location_ids,
+              count(DISTINCT q.id)::int AS quests
+         FROM npc_templates t
+         LEFT JOIN npc_spawns s ON s.npc_template_id = t.id
+         LEFT JOIN quest_templates q
+           ON q.giver_npc_id = t.id OR q.turnin_npc_id = t.id
+        GROUP BY t.id
+        ORDER BY t.id`);
+    res.json(rows);
+  });
+
+  app.post('/admin/api/npcs', guard, async (req, res) => {
+    const b = req.body || {};
+    const id = Number(b.id);
+    const name = String(b.name || '').trim();
+    if (!id || !name) throw bad(400, 'id_and_name_required');
+    const kind = Math.max(1, Math.min(3, Number(b.kind) || 2));
+    const locations = [...new Set((b.location_ids || b.locations || [])
+      .map((x) => Number(x)).filter(Boolean))];
+    const client = await adminPg().connect();
+    try {
+      await client.query('BEGIN');
+      await client.query(
+        `INSERT INTO npc_templates (id, name, level, kind, description, image,
+            active, stats, props)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+         ON CONFLICT (id) DO UPDATE SET
+            name = $2, level = $3, kind = $4, description = $5, image = $6,
+            active = $7, stats = $8, props = $9,
+            version = npc_templates.version + 1`,
+        [id, name, Number(b.level) || 1, kind, b.description || null,
+         b.image || null, b.active !== false, JSON.stringify(b.stats || {}),
+         JSON.stringify(b.props || {})]);
+      await client.query(`DELETE FROM npc_spawns WHERE npc_template_id = $1`, [id]);
+      let next = Number((await client.query(
+        `SELECT COALESCE(max(id), 0) + 1 AS id FROM npc_spawns`)).rows[0].id);
+      for (const locId of locations) {
+        await client.query(
+          `INSERT INTO npc_spawns (id, npc_template_id, location_id, config)
+           VALUES ($1, $2, $3, $4)`,
+          [next, id, locId, JSON.stringify({ order: next })]);
+        next++;
+      }
+      await client.query('COMMIT');
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
+    }
+    await audit('npc.save', 8, id, b);
+    res.json({ ok: true });
+  });
+
   // ================= квесты =================
   app.get('/admin/api/quests', guard, async (req, res) => {
     const { rows } = await game.query(
-      `SELECT q.*, (SELECT count(*) FROM character_quests cq
-                     WHERE cq.quest_id = q.id AND cq.status = 2) AS completed_by
-         FROM quest_templates q ORDER BY q.id`);
+      `SELECT q.*, gn.name AS giver_name, tn.name AS turnin_name,
+              (SELECT count(*) FROM character_quests cq
+                WHERE cq.quest_id = q.id AND cq.status = 2) AS completed_by
+         FROM quest_templates q
+         LEFT JOIN npc_templates gn ON gn.id = q.giver_npc_id
+         LEFT JOIN npc_templates tn ON tn.id = q.turnin_npc_id
+        ORDER BY q.id`);
     res.json(rows);
   });
 
@@ -661,15 +724,19 @@ export function adminRoutes(app) {
     if (!id || !b.name) throw bad(400, 'id_and_name_required');
     await adminPg().query(
       `INSERT INTO quest_templates (id, type, repeatable, name, description, image,
-          level_req, active, objectives, rewards, prereq)
-       VALUES ($1, 1, $2, $3, $4, $5, $6, $7, $8, $9, '{}')
+          level_req, active, objectives, rewards, prereq,
+          giver_npc_id, turnin_npc_id, dialogue)
+       VALUES ($1, 1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
        ON CONFLICT (id) DO UPDATE SET
           repeatable = $2, name = $3, description = $4, image = $5,
           level_req = $6, active = $7, objectives = $8, rewards = $9,
+          prereq = $10, giver_npc_id = $11, turnin_npc_id = $12, dialogue = $13,
           version = quest_templates.version + 1`,
       [id, Number(b.repeatable) || 1, b.name, b.description || null, b.image || null,
        Number(b.level_req) || 1, b.active !== false,
-       JSON.stringify(b.objectives || {}), JSON.stringify(b.rewards || {})]);
+       JSON.stringify(b.objectives || {}), JSON.stringify(b.rewards || {}),
+       JSON.stringify(b.prereq || {}), Number(b.giver_npc_id) || null,
+       Number(b.turnin_npc_id) || null, JSON.stringify(b.dialogue || {})]);
     await audit('quest.save', 6, id, b);
     res.json({ ok: true });
   });

@@ -98,11 +98,23 @@ CREATE TABLE quest_templates (
     id INT PRIMARY KEY,
     type SMALLINT NOT NULL,
     repeatable SMALLINT NOT NULL DEFAULT 1,  -- 1 once, 2 daily, 3 weekly, 4 event
+    name TEXT NOT NULL DEFAULT '',
+    description TEXT,
+    image TEXT,
+    level_req SMALLINT NOT NULL DEFAULT 1,
+    active BOOLEAN NOT NULL DEFAULT TRUE,
+    giver_npc_id INT,
+    turnin_npc_id INT,
+    dialogue JSONB NOT NULL DEFAULT '{}'::jsonb,
     prereq JSONB, objectives JSONB NOT NULL, rewards JSONB,
     version INT NOT NULL DEFAULT 1
 );
 CREATE TABLE npc_templates (
     id INT PRIMARY KEY, name TEXT NOT NULL, level SMALLINT NOT NULL,
+    kind SMALLINT NOT NULL DEFAULT 1, -- 1 combat, 2 dialog, 3 both
+    description TEXT,
+    image TEXT,
+    active BOOLEAN NOT NULL DEFAULT TRUE,
     stats JSONB, loot_table JSONB,
     props JSONB,                    -- в т.ч. injury_chance — шанс травмы в PvE
     version INT NOT NULL DEFAULT 1
