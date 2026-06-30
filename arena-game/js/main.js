@@ -386,6 +386,8 @@ let mode = 'location';   // 'location' | 'battle'
 let currentLoc = 'village';
 let locationNpcs = [];
 let locationNpcLocId = null;
+let locationNpcsLoading = false;
+let locationNpcsError = '';
 
 // канвас живёт в скрытом до боя arena-stage; Arena сама подхватит размер,
 // когда экран боя станет видимым (ResizeObserver). Рендер-цикл запускается
@@ -747,6 +749,11 @@ function npcAvatarHtml(npc, cls = 'npc-ava') {
 
 function npcsForLocation(loc) {
   if (online && loc.id && locationNpcLocId === loc.id) return locationNpcs;
+  if (online && loc.id) {
+    if (locationNpcsLoading) return [{ name: 'Жители загружаются...', _loading: true }];
+    if (locationNpcsError) return [{ name: 'Не удалось загрузить жителей', _error: true }];
+    return [{ name: 'Жители загружаются...', _loading: true }];
+  }
   return (loc.npc || []).map((n, i) => ({ id: null, name: n.name, image: n.image || null,
     description: n.description || '', _fallback: i }));
 }
@@ -754,14 +761,26 @@ function npcsForLocation(loc) {
 async function refreshLocationNpcs() {
   if (!online || !serverLocId) return;
   const expected = serverLocId;
+  locationNpcsLoading = true;
+  locationNpcsError = '';
+  if (mode === 'location' && !shopOpen) renderLocationActions(LOCATIONS[currentLoc]);
   try {
     const rows = await api.locationNpcs();
     if (expected !== serverLocId) return;
     locationNpcs = rows;
     locationNpcLocId = expected;
-    if (mode === 'location' && locPanelOpen) renderLocationActions(LOCATIONS[currentLoc]);
   } catch (e) {
     console.warn('NPC локации:', e);
+    if (expected === serverLocId) {
+      locationNpcs = [];
+      locationNpcLocId = null;
+      locationNpcsError = e.message || 'server_error';
+    }
+  } finally {
+    if (expected === serverLocId) {
+      locationNpcsLoading = false;
+      if (mode === 'location' && !shopOpen) renderLocationActions(LOCATIONS[currentLoc]);
+    }
   }
 }
 
@@ -791,11 +810,27 @@ function renderLocationActions(loc) {
         else showToast(`«${a.label}» — заглушка: модуль действий подключается отдельно`);
       })));
 
-  renderActionGroup('Жители', npcsForLocation(loc).map((n) =>
-    makeButton('npc-chip',
+  renderActionGroup('Жители', npcsForLocation(loc).map((n) => {
+    const b = makeButton('npc-chip' + (n._loading || n._error ? ' muted' : ''),
       `${npcAvatarHtml(n)}<span>${esc(n.name)}</span>`,
-      () => n.id ? openNpcDialog(n.id)
-        : showToast(`Диалог с «${n.name}» доступен только онлайн`))));
+      () => {
+        if (n._loading) return;
+        if (n._error) {
+          showToast('Обновляю список жителей...');
+          refreshLocationNpcs();
+          return;
+        }
+        if (n.id) openNpcDialog(n.id);
+        else if (online) {
+          showToast('NPC ещё не загружен с сервера, попробуйте через секунду');
+          refreshLocationNpcs();
+        } else {
+          showToast(`Диалог с «${n.name}» доступен только при подключении к серверу`);
+        }
+      });
+    if (n._loading) b.disabled = true;
+    return b;
+  }));
 }
 
 function objectiveLine(o) {
@@ -1135,6 +1170,8 @@ function setLocation(key, { quiet = false } = {}) {
   if (loc.id !== locationNpcLocId) {
     locationNpcs = [];
     locationNpcLocId = null;
+    locationNpcsError = '';
+    locationNpcsLoading = online && !!loc.id;
   }
   if (!quiet) chatMessage('Система', `Вы вошли в локацию «${loc.name}».`, true);
   closeLocPanel();
