@@ -5222,8 +5222,6 @@ button.auc-chip:hover { color: var(--gold-bright); border-color: rgba(216, 169, 
 .auc-price-row.bid b { color: var(--gold-bright); }
 .auc-price-row.buyout b { color: #8fd07a; }
 .auc-lot-actions { display: flex; flex-direction: column; gap: 5px; align-items: stretch; min-width: 116px; }
-.auc-lot-preview { grid-column: 1 / -1; }
-.auc-lot-preview.hidden { display: none; }
 .auc-lot-status { color: var(--muted); font-size: 12px; font-style: italic; text-align: right; }
 .auc-bid { display: flex; gap: 6px; align-items: flex-end; }
 .auc-bid-input {
@@ -5255,7 +5253,6 @@ button.auc-chip:hover { color: var(--gold-bright); border-color: rgba(216, 169, 
 .auc-sel-info { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
 .auc-sel-name { font-size: 14px; font-weight: 600; color: rgba(var(--qc), 1); }
 .auc-sel-meta { font-size: 11.5px; color: var(--muted); }
-.auc-sel-desc { font-size: 11.5px; color: #c3b78e; line-height: 1.35; }
 .auc-sel-qty { font-size: 11.5px; color: var(--muted); display: flex; gap: 6px; align-items: center; margin-top: 3px; }
 .auc-sel-qty input { width: 66px; padding: 4px 6px; font-size: 12px; color: var(--text);
   background: rgba(0, 0, 0, .3); border: 1px solid var(--line-soft); border-radius: 7px; }
@@ -5275,6 +5272,34 @@ button.auc-chip:hover { color: var(--gold-bright); border-color: rgba(216, 169, 
 .auc-preview-meta { display: flex; flex-wrap: wrap; gap: 5px; font-size: 11px; color: #b9ad84; }
 .auc-preview-meta span { padding: 1px 6px; border-radius: 6px; background: rgba(255,255,255,.04); border: 1px solid rgba(138,111,60,.24); }
 .auc-preview-desc { font-size: 11.5px; color: #d1c59d; line-height: 1.35; }
+/* превью предмета — отдельное небольшое окно поверх (а не разворот внизу) */
+.market-pop-overlay {
+  position: fixed; inset: 0; z-index: 120;
+  display: flex; align-items: center; justify-content: center;
+  padding: 16px; box-sizing: border-box;
+  background: rgba(5, 7, 3, .55); backdrop-filter: blur(1px);
+}
+.market-pop {
+  position: relative;
+  width: min(340px, calc(100vw - 32px));
+  max-height: calc(100dvh - 60px); overflow-y: auto;
+  padding: 14px;
+  background: linear-gradient(180deg, var(--panel-hi), var(--panel-lo));
+  border: 1px solid var(--line); border-radius: 14px;
+  box-shadow: 0 14px 44px rgba(0, 0, 0, .7), inset 0 1px 0 rgba(244, 205, 111, .08);
+}
+.market-pop .auc-item-preview { border: none; background: none; padding: 0; }
+.market-pop-close {
+  position: absolute; top: 7px; right: 7px; z-index: 1;
+  width: 26px; height: 26px; line-height: 1; font-size: 13px;
+  color: #cdbd8d; background: rgba(0, 0, 0, .35);
+  border: 1px solid var(--line-soft); border-radius: 8px; cursor: pointer;
+}
+.market-pop-close:hover { color: var(--gold-bright); }
+.auc-item-preview.clickable { cursor: pointer; transition: border-color .15s; }
+.auc-item-preview.clickable:hover { border-color: rgba(216, 169, 63, .6); }
+.auc-sel-ico.clickable { cursor: pointer; }
+.auc-sel-ico.clickable:hover { filter: brightness(1.12); }
 .auc-field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
 .auc-field.row { flex-direction: row; justify-content: space-between; align-items: center; }
 .auc-field.row b { color: var(--gold-bright); font-size: 13px; }
@@ -5378,8 +5403,6 @@ button.auc-chip:hover { color: var(--gold-bright); border-color: rgba(216, 169, 
 .exch-d-name { font-size: 15px; color: var(--text); font-weight: 600; }
 .exch-d-owned { margin-left: auto; font-size: 12px; color: var(--muted); }
 .exch-d-owned b { color: var(--gold-bright); }
-.exch-preview.hidden { display: none; }
-.exch-preview .auc-item-preview { border-color: rgba(216, 169, 63, .28); }
 .exch-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
 .exch-book { display: flex; flex-direction: column; gap: 3px; }
 .exch-book-title { font-size: 11.5px; font-family: var(--font-display); padding: 2px 0; }

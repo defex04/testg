@@ -95,7 +95,11 @@
       "PowerShell(if\\($?\\){\"BattleUI.js OK\"})",
       "PowerShell(if\\($?\\){\"main.js OK\"})",
       "PowerShell(docker cp \"C:/Users/andre/Downloads/new/server/mmorpg-local/backend/test-counter.mjs\" mmo-api:/app/test-counter.mjs)",
-      "PowerShell(docker exec mmo-api node /app/test-counter.mjs)"
+      "PowerShell(docker exec mmo-api node /app/test-counter.mjs)",
+      "Bash(curl -s -m 3 http://localhost:8080/api/me -o /dev/null -w \"%{http_code}\")",
+      "Bash(git -C \"C:/Users/andre/Downloads/new\" status --short)",
+      "Bash(git -C \"C:/Users/andre/Downloads/new\" diff .claude/settings.local.json)",
+      "Bash(git -c core.pager=cat diff arena-game/js/main.js)"
     ]
   }
 }

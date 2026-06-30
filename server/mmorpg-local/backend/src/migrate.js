@@ -234,6 +234,9 @@ const STATEMENTS = [
    ON CONFLICT (key) DO NOTHING`,
   `ALTER TABLE mail_messages ADD COLUMN IF NOT EXISTS deleted_by_sender BOOLEAN NOT NULL DEFAULT FALSE`,
   `ALTER TABLE mail_messages ADD COLUMN IF NOT EXISTS deleted_by_recipient BOOLEAN NOT NULL DEFAULT FALSE`,
+  // Бриллианты во вложении письма (отдельно от money_attached = медь): рынок
+  // доставляет почтой ЛЮБУЮ валюту, бриллиантовые выплаты/возвраты тоже едут письмом.
+  `ALTER TABLE mail_messages ADD COLUMN IF NOT EXISTS diamond_attached BIGINT NOT NULL DEFAULT 0`,
   `CREATE INDEX IF NOT EXISTS ix_mail_sender ON mail_messages (sender_id, created_at)
      WHERE deleted_by_sender = FALSE`,
   // --- Приватный чат (личка) ------------------------------------------

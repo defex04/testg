@@ -1,5 +1,6 @@
 import { randomUUID } from 'crypto';
 import { redis } from './db.js';
+import { CUR } from './economy.js';
 
 /**
  * Низкоуровневые транзакционные примитивы рынка (аукцион + биржа).
@@ -117,18 +118,19 @@ export async function lockSellableItem(client, charId, itemId, wantQty) {
  * type письма: 2 system, 3 auction.
  */
 export async function deliverMail(client, recipientId, {
-  subject = '', body = '', money = 0, items = [], type = 2, expireDays = 30,
+  subject = '', body = '', money = 0, diamond = 0, items = [], type = 2, expireDays = 30,
 } = {}) {
   const list = Array.isArray(items) ? items : [];
   const coins = Math.max(0, Math.trunc(Number(money) || 0));
-  if (coins === 0 && list.length === 0) return null;     // нечего слать
+  const gems = Math.max(0, Math.trunc(Number(diamond) || 0));
+  if (coins === 0 && gems === 0 && list.length === 0) return null;     // нечего слать
 
   const mailId = (await client.query(
     `INSERT INTO mail_messages
-        (recipient_id, sender_id, type, subject, body, money_attached, has_attachments, expires_at)
-     VALUES ($1, NULL, $2, $3, $4, $5, $6, now() + ($7 || ' days')::interval)
+        (recipient_id, sender_id, type, subject, body, money_attached, diamond_attached, has_attachments, expires_at)
+     VALUES ($1, NULL, $2, $3, $4, $5, $6, $7, now() + ($8 || ' days')::interval)
      RETURNING id`,
-    [recipientId, type, subject, body, coins, list.length > 0, String(expireDays)])).rows[0].id;
+    [recipientId, type, subject, body, coins, gems, list.length > 0, String(expireDays)])).rows[0].id;
 
   for (const it of list) {
     const destId = await moveQty(client, {
@@ -140,6 +142,17 @@ export async function deliverMail(client, recipientId, {
       [mailId, destId, it.qty]);
   }
   return Number(mailId);
+}
+
+/**
+ * Деньги рынка → поля письма для deliverMail. Цены аукциона/биржи хранятся в
+ * валюте лота: медь-тотал (gold/silver/copper свёрнуты в медь) ИЛИ бриллианты.
+ * Медь кладём в money_attached, бриллианты — в diamond_attached. Так почта несёт
+ * ЛЮБУЮ валюту, а клиент покажет её без переполнений.
+ */
+export function marketMailMoney(currencyId, amount) {
+  const n = Math.max(0, Math.trunc(Number(amount) || 0));
+  return Number(currencyId) === CUR.diamond ? { diamond: n } : { money: n };
 }
 
 /** Пинг получателям о новых письмах (счётчик «непрочитанных»). Вызывать ПОСЛЕ commit. */

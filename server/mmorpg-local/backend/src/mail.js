@@ -41,7 +41,7 @@ export async function unreadCount(charId) {
 export async function inbox(charId) {
   const { rows } = await game.query(
     `SELECT m.id, m.sender_id, m.subject, m.is_read, m.type,
-            m.money_attached, m.has_attachments, m.attachments_taken, m.created_at,
+            m.money_attached, m.diamond_attached, m.has_attachments, m.attachments_taken, m.created_at,
             s.name AS sender_name,
             (SELECT count(*)::int FROM mail_attachments a WHERE a.mail_id = m.id) AS att_count
        FROM mail_messages m
@@ -56,12 +56,14 @@ export async function inbox(charId) {
     subject: r.subject || '',
     isRead: r.is_read,
     money: Number(r.money_attached) || 0,
+    diamond: Number(r.diamond_attached) || 0,
     hasAttachments: r.has_attachments,
     attachmentsTaken: r.attachments_taken,
     attCount: r.att_count,
-    // забрать можно письмо с вложениями ИЛИ с деньгами (системные письма
-    // аукциона/биржи часто несут только медь — её тоже надо отдать получателю)
-    canClaim: (r.has_attachments || (Number(r.money_attached) || 0) > 0) && !r.attachments_taken,
+    // забрать можно письмо с вложениями ИЛИ с деньгами/бриллиантами (системные
+    // письма аукциона/биржи часто несут только валюту — её тоже надо отдать)
+    canClaim: (r.has_attachments || (Number(r.money_attached) || 0) > 0
+      || (Number(r.diamond_attached) || 0) > 0) && !r.attachments_taken,
     ts: new Date(r.created_at).getTime(),
   }));
 }
@@ -71,7 +73,7 @@ export async function inbox(charId) {
 export async function sent(charId) {
   const { rows } = await game.query(
     `SELECT m.id, m.recipient_id, m.subject, m.is_read, m.type,
-            m.money_attached, m.has_attachments, m.attachments_taken, m.created_at,
+            m.money_attached, m.diamond_attached, m.has_attachments, m.attachments_taken, m.created_at,
             r.name AS recipient_name,
             (SELECT count(*)::int FROM mail_attachments a WHERE a.mail_id = m.id) AS att_count
        FROM mail_messages m
@@ -86,6 +88,7 @@ export async function sent(charId) {
     subject: r.subject || '',
     isRead: r.is_read,
     money: Number(r.money_attached) || 0,
+    diamond: Number(r.diamond_attached) || 0,
     hasAttachments: r.has_attachments,
     attachmentsTaken: r.attachments_taken,
     attCount: r.att_count,
@@ -128,9 +131,11 @@ export async function readMail(charId, mailId) {
     subject: m.subject || '',
     body: m.body || '',
     money: Number(m.money_attached) || 0,
+    diamond: Number(m.diamond_attached) || 0,
     hasAttachments: m.has_attachments,
     attachmentsTaken: m.attachments_taken,
-    canClaim: (m.has_attachments || (Number(m.money_attached) || 0) > 0) && !m.attachments_taken,
+    canClaim: (m.has_attachments || (Number(m.money_attached) || 0) > 0
+      || (Number(m.diamond_attached) || 0) > 0) && !m.attachments_taken,
     ts: new Date(m.created_at).getTime(),
     attachments,
   };
@@ -153,6 +158,7 @@ export async function readSentMail(charId, mailId) {
     subject: m.subject || '',
     body: m.body || '',
     money: Number(m.money_attached) || 0,
+    diamond: Number(m.diamond_attached) || 0,
     hasAttachments: m.has_attachments,
     attachmentsTaken: m.attachments_taken,
     canClaim: false,
@@ -307,13 +313,14 @@ export async function sendMail(sender, { to, subject, body, items }) {
 export async function takeAttachments(charId, mailId) {
   return tx(async (c) => {
     const m = (await c.query(
-      `SELECT id, has_attachments, attachments_taken, money_attached
+      `SELECT id, has_attachments, attachments_taken, money_attached, diamond_attached
          FROM mail_messages
         WHERE id = $1 AND recipient_id = $2 AND deleted_by_recipient = FALSE
         FOR UPDATE`, [mailId, charId])).rows[0];
     if (!m) throw bad('not_found', 404);
     const hasMoney = (Number(m.money_attached) || 0) > 0;
-    if ((!m.has_attachments && !hasMoney) || m.attachments_taken) return { taken: 0 };
+    const hasDiamond = (Number(m.diamond_attached) || 0) > 0;
+    if ((!m.has_attachments && !hasMoney && !hasDiamond) || m.attachments_taken) return { taken: 0 };
 
     const att = (await c.query(
       `SELECT a.item_instance_id, a.quantity, i.template_id, i.version
@@ -335,22 +342,28 @@ export async function takeAttachments(charId, mailId) {
       await addCurrency(c, charId, CUR.copper, money, CURR_REASON_MAIL,
         { type: 5, id: mailId });
     }
+    const diamond = Number(m.diamond_attached) || 0;
+    if (diamond > 0) {
+      await addCurrency(c, charId, CUR.diamond, diamond, CURR_REASON_MAIL,
+        { type: 5, id: mailId });
+    }
     await c.query(
       `UPDATE mail_messages SET attachments_taken = TRUE, is_read = TRUE WHERE id = $1`,
       [mailId]);
-    return { taken: att.length, money };
+    return { taken: att.length, money, diamond };
   });
 }
 
 /** Удалить письмо у получателя; невзятые вложения сначала падают в рюкзак. */
 export async function deleteMail(charId, mailId) {
   const pre = (await game.query(
-    `SELECT has_attachments, attachments_taken, money_attached FROM mail_messages
+    `SELECT has_attachments, attachments_taken, money_attached, diamond_attached FROM mail_messages
       WHERE id = $1 AND recipient_id = $2 AND deleted_by_recipient = FALSE`,
     [mailId, charId])).rows[0];
   if (!pre) throw bad('not_found', 404);
-  // невзятые ценности (вложения ИЛИ деньги) сначала падают получателю
-  if ((pre.has_attachments || (Number(pre.money_attached) || 0) > 0) && !pre.attachments_taken) {
+  // невзятые ценности (вложения ИЛИ деньги/бриллианты) сначала падают получателю
+  if ((pre.has_attachments || (Number(pre.money_attached) || 0) > 0
+       || (Number(pre.diamond_attached) || 0) > 0) && !pre.attachments_taken) {
     await takeAttachments(charId, mailId);
   }
   await game.query(

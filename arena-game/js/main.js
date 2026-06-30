@@ -2289,7 +2289,7 @@ async function renderMailBox(box = 'inbox') {
     row.type = 'button';
     row.className = 'mail-row' + (mailBox === 'inbox' && !it.isRead ? ' unread' : '');
     const att = it.attCount ? `<span class="mail-clip" title="Вложения">📎${it.attCount}</span>` : '';
-    const coin = it.money ? `<span class="mail-clip" title="Медь">🪙${aucFmt(it.money)}</span>` : '';
+    const coin = mailValueChips(it.money, it.diamond);
     const peer = mailBox === 'sent'
       ? `Кому: ${esc(it.recipientName || '')}`
       : esc(it.senderName);
@@ -2352,9 +2352,9 @@ async function openLetter(id, box = mailBox) {
       ${readState}
       <div class="mail-read-subj">${esc(m.subject || '(без темы)')}</div>
       <div class="mail-read-body">${esc(m.body) || '<i>пусто</i>'}</div>
-      ${(attachments.length || m.money > 0) ? `<div class="mail-att-box">
+      ${(attachments.length || m.money > 0 || m.diamond > 0) ? `<div class="mail-att-box">
         <div class="mail-att-title">${attTitle}</div>
-        ${m.money > 0 ? `<div class="mail-att"><span class="mail-att-icon">🪙</span><span class="mail-att-name">${aucFmt(m.money)} меди</span></div>` : ''}${att}
+        ${mailValueRows(m.money, m.diamond)}${att}
         ${!sentBox && m.canClaim ? `<button type="button" class="mail-btn mail-take">Забрать${attachments.length ? ' в рюкзак' : ''}</button>` : ''}
       </div>` : ''}
       <div class="mail-read-actions">
@@ -2376,7 +2376,8 @@ async function openLetter(id, box = mailBox) {
       await refreshSelf();
       const got = [];
       if (r.taken) got.push('вещи в рюкзаке');
-      if (r.money) got.push(aucFmt(r.money) + ' меди');
+      const val = mailValueText(r.money, r.diamond);
+      if (val) got.push(val);
       showToast(got.length ? 'Получено: ' + got.join(', ') : 'Уже получено');
       refreshMailUnread();
       openLetter(id, 'inbox');
@@ -2677,6 +2678,26 @@ function currencyOptionsHtml(selected = 'copper') {
   return MARKET_CURRENCIES.map((c) =>
     `<option value="${c.id}" ${c.id === cur.id ? 'selected' : ''}>${c.label}</option>`).join('');
 }
+// Ценности во вложении письма. money — медь-тотал (раскладывается на золото/
+// серебро/медь, без «переполнения» в одну гигантскую медь), diamond — отдельно.
+function mailValueChips(money, diamond) {
+  const out = [];
+  if (Number(money) > 0) out.push(`<span class="mail-clip" title="Деньги">${priceHtml(money)}</span>`);
+  if (Number(diamond) > 0) out.push(`<span class="mail-clip" title="Бриллианты">${aucFmt(diamond)}${marketCurrency('diamond').icon}</span>`);
+  return out.join('');
+}
+function mailValueRows(money, diamond) {
+  let h = '';
+  if (Number(money) > 0) h += `<div class="mail-att"><span class="mail-att-icon">🪙</span><span class="mail-att-name">${moneyText(money)}</span></div>`;
+  if (Number(diamond) > 0) h += `<div class="mail-att"><span class="mail-att-icon">💎</span><span class="mail-att-name">${aucFmt(diamond)} бриллиантов</span></div>`;
+  return h;
+}
+function mailValueText(money, diamond) {
+  const out = [];
+  if (Number(money) > 0) out.push(moneyText(money));
+  if (Number(diamond) > 0) out.push(`${aucFmt(diamond)} бриллиантов`);
+  return out.join(', ');
+}
 function priceFieldsHtml(prefix, price = 0, cur = 'money', opts = {}) {
   const mode = priceModeFor(cur);
   const p = mode === 'diamond' ? { gold: 0, silver: 0, copper: 0, diamond: Math.max(0, Math.trunc(Number(price) || 0)) }
@@ -2774,12 +2795,14 @@ function marketCategoryName(type) {
   const hit = MARKET_CATEGORY_OPTIONS.find(([id]) => Number(id) === Number(type));
   return hit ? hit[1] : 'Предмет';
 }
-function marketItemPreviewHtml(it) {
+function marketItemPreviewHtml(it, opts = {}) {
   if (!it) return '';
   const q = it.quality || 1;
-  const desc = Number(it.type) === 4
+  // характеристики (сила/ловкость/эффект эликсира) показываем ТОЛЬКО в превью-окне;
+  // на карточках/строках/выбранном предмете их не рисуем (opts.stats === false)
+  const desc = opts.stats === false ? '' : (Number(it.type) === 4
     ? elixirEffectText(elixirKindFromStats(it.stats), it.stats)
-    : gearStatsText(it.stats);
+    : gearStatsText(it.stats));
   return `<div class="auc-item-preview${qClass(true, q)}">
     <div class="auc-preview-ico${qClass(true, q)}">${esc(itemIconText(it.icon, it.type, it.stats, it.slot))}</div>
     <div class="auc-preview-info">
@@ -2792,6 +2815,30 @@ function marketItemPreviewHtml(it) {
       ${desc ? `<div class="auc-preview-desc">${esc(desc)}</div>` : ''}
     </div>
   </div>`;
+}
+
+// Превью предмета — отдельное небольшое окно поверх (а не разворот внизу карточки).
+// Полные характеристики (сила/ловкость/эффект) показываем ТОЛЬКО здесь.
+let marketPopEl = null;
+function closeMarketPreview() {
+  if (marketPopEl) { marketPopEl.remove(); marketPopEl = null; }
+  document.removeEventListener('keydown', onMarketPopKey);
+}
+function onMarketPopKey(e) { if (e.key === 'Escape') closeMarketPreview(); }
+function openMarketPreview(item) {
+  closeMarketPreview();
+  if (!item) return;
+  const pop = document.createElement('div');
+  pop.className = 'market-pop-overlay';
+  pop.innerHTML = `<div class="market-pop" role="dialog" aria-label="Предмет">
+    <button type="button" class="market-pop-close" aria-label="Закрыть">✕</button>
+    ${marketItemPreviewHtml(item)}
+  </div>`;
+  document.body.appendChild(pop);
+  marketPopEl = pop;
+  pop.addEventListener('click', (e) => { if (e.target === pop) closeMarketPreview(); });
+  pop.querySelector('.market-pop-close').addEventListener('click', closeMarketPreview);
+  document.addEventListener('keydown', onMarketPopKey);
 }
 
 function aucTimeLeft(endsAt) {
@@ -2951,16 +2998,14 @@ function aucLotCard(lot) {
       ${lot.currentBid != null ? `<div class="auc-price-row bid"><span>Ставка</span><b>${coinsHtml(lot.currentBid, lot.currency)}</b></div>` : ''}
       ${lot.buyoutPrice != null ? `<div class="auc-price-row buyout"><span>Выкуп</span><b>${coinsHtml(lot.buyoutPrice, lot.currency)}</b></div>` : ''}
     </div>
-    ${actions}
-    <div class="auc-lot-preview hidden">${marketItemPreviewHtml(lot)}</div>`;
+    ${actions}`;
 
   bindPriceEditor(`auc-bid-${lot.id}`);
   card.querySelector('.auc-buyout')?.addEventListener('click', (ev) => aucDoBuyout(lot, ev.target));
   card.querySelector('.auc-bidbtn')?.addEventListener('click', (ev) => {
     aucDoBid(lot, readPriceEditor(`auc-bid-${lot.id}`), ev.target);
   });
-  card.querySelector('.auc-lot-ico')?.addEventListener('click', () =>
-    card.querySelector('.auc-lot-preview')?.classList.toggle('hidden'));
+  card.querySelector('.auc-lot-ico')?.addEventListener('click', () => openMarketPreview(lot));
   card.querySelector('.auc-cancel')?.addEventListener('click', (ev) => aucDoCancel(lot, ev.target));
   card.querySelector('.auc-edit')?.addEventListener('click', () => aucInlineEdit(lot, card));
   return card;
@@ -3102,17 +3147,14 @@ function aucRenderSelPreview() {
   if (!it) { host.innerHTML = '<div class="auc-sel-hint">Выберите вещь из рюкзака справа →</div>'; return; }
   const q = it.quality || 1;
   const stackable = it.quantity > 1;
-  const desc = it.type === 4
-    ? elixirEffectText(elixirKindFromStats(it.stats), it.stats)
-    : gearStatsText(it.stats);
   host.innerHTML = `
-    <div class="auc-sel-ico${qClass(true, q)}">${esc(itemIconText(it.icon, it.type, it.stats, it.slot))}</div>
+    <div class="auc-sel-ico clickable${qClass(true, q)}" title="Подробнее">${esc(itemIconText(it.icon, it.type, it.stats, it.slot))}</div>
     <div class="auc-sel-info">
       <div class="auc-sel-name${qClass(true, q)}">${esc(it.name)}</div>
       <div class="auc-sel-meta">${QUALITY_NAME[q] || ''}</div>
-      ${desc ? `<div class="auc-sel-desc">${esc(desc)}</div>` : ''}
       ${stackable ? `<label class="auc-sel-qty">Кол-во: <input id="anc-qty" type="number" min="1" max="${it.quantity}" value="${aucNew.qty}"></label>` : ''}
     </div>`;
+  host.querySelector('.auc-sel-ico')?.addEventListener('click', () => openMarketPreview(it));
   if (stackable) {
     $('anc-qty').addEventListener('input', () => {
       aucNew.qty = Math.max(1, Math.min(it.quantity, Math.trunc(+$('anc-qty').value || 1)));
@@ -3284,7 +3326,14 @@ function renderExchPickOptions() {
 
 function renderExchPickSelected(ins) {
   const host = $('exch-pick-selected'); if (!host) return;
-  host.innerHTML = ins ? marketItemPreviewHtml(ins) : '<div class="auc-empty">Выберите товар из списка</div>';
+  if (!ins) { host.innerHTML = '<div class="auc-empty">Выберите товар из списка</div>'; return; }
+  host.innerHTML = marketItemPreviewHtml(ins, { stats: false });
+  const card = host.querySelector('.auc-item-preview');
+  if (card) {
+    card.classList.add('clickable');
+    card.title = 'Подробнее';
+    card.addEventListener('click', () => openMarketPreview(ins));
+  }
 }
 
 async function renderExchange() {
@@ -3402,11 +3451,9 @@ function renderExchBoard(d, opts = {}) {
     <div class="exch-d-head">
       <button type="button" class="exch-d-ico${qClass(true, ins.quality)}">${esc(itemIconText(ins.icon, ins.type, ins.stats, ins.slot))}</button>
       <span class="exch-d-name">${esc(ins.name)}</span>
-      <span class="exch-d-owned">В рюкзаке: <b>${aucFmt(d.owned)}</b></span>
+      ${showForm ? '' : `<span class="exch-d-owned">У вас в рюкзаке: <b>${aucFmt(d.owned)}</b></span>`}
     </div>
-    <div class="exch-preview hidden">${marketItemPreviewHtml(ins)}</div>
     <div class="exch-newform">
-      <div class="exch-newform-title">Новая заявка на покупку</div>
       <div class="exch-newform-row">
         <div class="auc-field exch-price-cell"><span>Цена за шт</span>${priceFieldsHtml('exch-price', 0, 'money')}</div>
         <label class="auc-field"><span>Количество</span><input id="exch-qty" type="number" min="${ins.lotSize}" step="${ins.lotSize}" inputmode="numeric" value="${ins.lotSize}"></label>
@@ -3436,9 +3483,9 @@ function renderExchBoard(d, opts = {}) {
     qtyEl.addEventListener('input', recalc); recalc();
     $('exch-submit').addEventListener('click', () => exchCreateOrder(ins, qtyEl, $('exch-dur')));
   }
-  const togglePreview = () => host.querySelector('.exch-preview')?.classList.toggle('hidden');
-  host.querySelector('.exch-d-ico')?.addEventListener('click', togglePreview);
-  host.querySelectorAll('.exch-bo-ico').forEach((b) => b.addEventListener('click', togglePreview));
+  const showPreview = () => openMarketPreview(ins);
+  host.querySelector('.exch-d-ico')?.addEventListener('click', showPreview);
+  host.querySelectorAll('.exch-bo-ico').forEach((b) => b.addEventListener('click', showPreview));
   host.querySelectorAll('.exch-cancel').forEach((b) =>
     b.addEventListener('click', () => exchCancelOrder(b.dataset.order, b)));
   host.querySelectorAll('.exch-sell').forEach((b) => b.addEventListener('click', () => {

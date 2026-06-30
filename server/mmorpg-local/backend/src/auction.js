@@ -3,7 +3,7 @@ import { addCurrency, CUR, wallet } from './economy.js';
 import { product as itemCard } from './shop.js';
 import {
   OWNER, ITEM_REASON, CURR_REASON, REF, bad, moveQty, lockSellableItem,
-  deliverMail, publishMailNotify,
+  deliverMail, publishMailNotify, marketMailMoney,
 } from './escrow.js';
 import { displayMarketPrice, normalizeMarketPrice } from './marketCurrency.js';
 
@@ -276,10 +276,12 @@ export async function placeBid(bidder, lotId, raw) {
     // 1) списываем у нового претендента (insufficient_funds откатит всё)
     await addCurrency(c, bidder.id, Number(lot.currency_id) || CUR.copper, -amount, CURR_REASON.auction,
       { type: REF.auctionLot, id: lotId });
-    // 2) возвращаем прежнему лидеру его деньги
+    // 2) возвращаем прежнему лидеру его ставку — ПИСЬМОМ (все ценности через почту)
     if (lot.current_bidder_id != null) {
-      await addCurrency(c, lot.current_bidder_id, Number(lot.currency_id) || CUR.copper,
-        Number(lot.current_bid), CURR_REASON.auction, { type: REF.auctionLot, id: lotId });
+      await deliverMail(c, lot.current_bidder_id, { type: 3, subject: 'Ставка перебита',
+        body: 'Вашу ставку на аукционе перебили — деньги возвращены во вложении.',
+        ...marketMailMoney(lot.currency_id, Number(lot.current_bid)) });
+      notify.add(String(lot.current_bidder_id));
       await c.query(`UPDATE auction_bids SET status = 2 WHERE lot_id = $1 AND status = 1`, [lotId]);
     }
     // 3) фиксируем новую ставку
@@ -320,10 +322,12 @@ export async function buyout(buyer, lotId) {
     if (String(lot.seller_id) === String(buyer.id)) throw bad('cannot_buy_own');
 
     const price = Number(lot.buyout_price);
-    // вернуть деньги текущему лидеру ставок (если есть)
+    // вернуть ставку текущему лидеру (если есть) — ПИСЬМОМ
     if (lot.current_bidder_id != null) {
-      await addCurrency(c, lot.current_bidder_id, Number(lot.currency_id) || CUR.copper,
-        Number(lot.current_bid), CURR_REASON.auction, { type: REF.auctionLot, id: lotId });
+      await deliverMail(c, lot.current_bidder_id, { type: 3, subject: 'Ставка не сыграла',
+        body: 'Лот выкупили по «Цене выкупа» — ваша ставка возвращена во вложении.',
+        ...marketMailMoney(lot.currency_id, Number(lot.current_bid)) });
+      notify.add(String(lot.current_bidder_id));
       await c.query(`UPDATE auction_bids SET status = 4 WHERE lot_id = $1 AND status = 1`, [lotId]);
     }
     // списать с покупателя (это оплата, не доставка — снимаем сразу)
@@ -335,11 +339,13 @@ export async function buyout(buyer, lotId) {
       items: [{ itemId: lot.item_instance_id, qty: lot.quantity,
         expectType: OWNER.auction, expectId: lotId, refType: REF.auctionLot, refId: lotId }] });
     notify.add(String(buyer.id));
-    // выплатить продавцу за вычетом налога
+    // выплатить продавцу за вычетом налога — ПИСЬМОМ
     const tax = saleTax(price, t);
     if (price > tax) {
-      await addCurrency(c, lot.seller_id, Number(lot.currency_id) || CUR.copper, price - tax,
-        CURR_REASON.auction, { type: REF.auctionLot, id: lotId });
+      await deliverMail(c, lot.seller_id, { type: 3, subject: 'Лот продан',
+        body: 'Ваш лот выкупили на аукционе — выручка во вложении.',
+        ...marketMailMoney(lot.currency_id, price - tax) });
+      notify.add(String(lot.seller_id));
     }
 
     const upd = await c.query(
@@ -462,9 +468,10 @@ export async function processExpiredLots() {
           notify.add(String(lot.current_bidder_id));
           const tax = saleTax(Number(lot.current_bid), t);
           if (Number(lot.current_bid) > tax) {
-            await addCurrency(c, lot.seller_id, Number(lot.currency_id) || CUR.copper,
-              Number(lot.current_bid) - tax, CURR_REASON.auction,
-              { type: REF.auctionLot, id: lot.id });
+            await deliverMail(c, lot.seller_id, { type: 3, subject: 'Лот продан',
+              body: 'Ваш лот продан на торгах — выручка во вложении.',
+              ...marketMailMoney(lot.currency_id, Number(lot.current_bid) - tax) });
+            notify.add(String(lot.seller_id));
           }
           await c.query(`UPDATE auction_bids SET status = 3 WHERE lot_id = $1 AND status = 1`, [lot.id]);
           await c.query(
