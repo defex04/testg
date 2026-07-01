@@ -729,14 +729,17 @@ export function adminRoutes(app) {
     const quest = (await game.query(
       `SELECT id, name FROM quest_templates WHERE id = $1`, [id])).rows[0];
     if (!quest) throw bad(404, 'quest_not_found');
+    // и выполнившие (status 2), и идущие (status 1) — зависший квест
+    // тоже можно перезапустить, не дожидаясь завершения
     const { rows } = await game.query(
       `SELECT c.id AS character_id, c.name, c.level, c.status AS character_status,
+              cq.status AS quest_status, cq.progress,
               l.name AS location, cq.accepted_at, cq.completed_at, cq.available_again_at
          FROM character_quests cq
          JOIN characters c ON c.id = cq.character_id
          LEFT JOIN locations l ON l.id = c.location_id
-        WHERE cq.quest_id = $1 AND cq.status = 2
-        ORDER BY cq.completed_at DESC NULLS LAST, c.id`, [id]);
+        WHERE cq.quest_id = $1 AND cq.status IN (1, 2)
+        ORDER BY cq.status DESC, cq.completed_at DESC NULLS LAST, c.id`, [id]);
     res.json({ quest, characters: rows });
   });
 
@@ -752,7 +755,13 @@ export function adminRoutes(app) {
       `SELECT id, name FROM characters WHERE id = $1`, [charId])).rows[0];
     if (!ch) throw bad(404, 'character_not_found');
 
-    const result = await tx(async (c) => {
+    // сброс — через admin-пул: у игровой роли game_rw нет DELETE на
+    // character_quests / quest_history (схема «без DELETE везде»), из-за чего
+    // перезапуск падал с «permission denied»
+    const c = await adminPg().connect();
+    let result;
+    try {
+      await c.query('BEGIN');
       const current = (await c.query(
         `SELECT status, progress, accepted_at, completed_at, available_again_at
            FROM character_quests
@@ -765,12 +774,18 @@ export function adminRoutes(app) {
       const qh = await c.query(
         `DELETE FROM quest_history
           WHERE character_id = $1 AND quest_id = $2`, [charId, questId]);
-      return {
+      await c.query('COMMIT');
+      result = {
         previousStatus: Number(current.status),
         progressDeleted: cq.rowCount,
         historyDeleted: qh.rowCount,
       };
-    });
+    } catch (e) {
+      await c.query('ROLLBACK');
+      throw e;
+    } finally {
+      c.release();
+    }
     await audit('quest.reset_for_character', 6, questId,
       { characterId: charId, characterName: ch.name, questName: quest.name, note, ...result });
     res.json({ ok: true, quest, character: ch, ...result });

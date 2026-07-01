@@ -223,6 +223,7 @@ function rewardText(rewards = {}) {
   if (r.exp) parts.push(`+${r.exp} опыта`);
   const items = toArray(r.items).length;
   if (items) parts.push(`предметы: ${items}`);
+  if (r.reset_stats) parts.push('сброс характеристик (очки вернутся)');
   return parts.join(', ');
 }
 
@@ -520,6 +521,15 @@ async function grantRewards(client, charId, questId, rewards = {}) {
   }
   if (rewards.exp) await addExp(client, charId, asInt(rewards.exp, 0));
   for (const reward of toArray(rewards.items)) await addRewardItem(client, charId, questId, reward);
+  // сброс характеристик: ВСЕ вложенные очки (включая legacy intel/wis)
+  // возвращаются в свободные — игрок распределяет заново
+  if (rewards.reset_stats) {
+    await client.query(
+      `UPDATE character_stats
+          SET free_points = free_points + str + agi + vit + intel + wis,
+              str = 0, agi = 0, vit = 0, intel = 0, wis = 0
+        WHERE character_id = $1`, [charId]);
+  }
 }
 
 async function consumeItemObjective(client, charId, questId, o) {

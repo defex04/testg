@@ -266,6 +266,30 @@
   @media (max-width:640px){.modal-card,.modal-card.wide{width:100%}
     .stat-row{grid-template-columns:1fr 88px 30px}}
 
+  /* ── конструктор квестов: этапы → цели, реплики по NPC ── */
+  .qb-stage{border:1px solid var(--line);border-radius:6px;background:var(--ink2);
+    padding:10px 12px;margin-bottom:10px;display:flex;flex-direction:column;gap:8px}
+  .qb-stage-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .qb-stage-head b{font:600 12px var(--mono);color:var(--brass2);letter-spacing:.08em;white-space:nowrap}
+  .qb-stage-head input{flex:1;min-width:140px}
+  .qb-stage-btns{display:flex;gap:4px;margin-left:auto}
+  .qb-objs{display:flex;flex-direction:column;gap:6px}
+  .qb-obj{display:flex;align-items:center;gap:6px;flex-wrap:wrap;
+    padding:6px 8px;border:1px dashed var(--line);border-radius:4px}
+  .qb-obj select,.qb-obj input{padding:4px 7px;font-size:12.5px}
+  .qb-obj input[type=number]{width:82px}
+  .qb-item{display:flex;align-items:center;gap:4px}
+  .qb-item-name{font-size:11.5px;max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .qb-consume{display:flex;align-items:center;gap:4px;font-size:12px;color:var(--dim);margin:0}
+  .qb-consume input{width:auto}
+  .qb-talk{margin-bottom:8px}
+  .qb-ritem{display:flex;align-items:center;gap:6px;margin-bottom:6px;flex-wrap:wrap}
+  .qb-ritem input[type=number]{width:90px}
+  .qb-hint{font-size:12px;color:var(--dim);margin:2px 0 8px}
+  details.qb-adv{border:1px dashed var(--line);border-radius:4px;padding:8px 10px;margin-top:6px}
+  details.qb-adv summary{cursor:pointer;color:var(--dim);font-size:12.5px}
+  details.qb-adv .qb-adv-body{display:flex;flex-direction:column;gap:8px;margin-top:8px}
+
   #login{height:var(--admin-h);display:flex;align-items:center;justify-content:center;
     overflow:auto;padding:max(16px,env(safe-area-inset-top),var(--tg-inset-top))
             max(12px,env(safe-area-inset-right),var(--tg-inset-right))
@@ -2157,7 +2181,7 @@ R.quests = async () => {
     {h:'Цель',v:r=>objectiveSummary(r.objectives || {})},
     {h:'Награда',v:r=>{const w=r.rewards||{};return [w.copper&&w.copper+' меди',
       w.silver&&w.silver+' серебра',w.gold&&w.gold+' золота',w.exp&&w.exp+' опыта',
-      (w.items||[]).length&&'предметы'].filter(Boolean).join(', ')||'—';}},
+      (w.items||[]).length&&'предметы',w.reset_stats&&'сброс статов'].filter(Boolean).join(', ')||'—';}},
     {h:'Выполнили',html:r=>`<td><button class="sm" onclick="event.stopPropagation();openQuestCompletions(${r.id})">
       ${r.completed_by || 0}</button></td>`},
   ], rows, (r)=>`class="click" onclick="openQuest(${r.id})"`)}`;
@@ -2170,22 +2194,26 @@ window.openQuestCompletions = async (id) => {
   try {
     const d = await api(`/quests/${id}/completions`);
     const rows = d.characters || [];
-    openModal('Кто выполнил задание #' + d.quest.id, `
+    const doneN = rows.filter((r) => Number(r.quest_status) === 2).length;
+    openModal('Задание #' + d.quest.id + ' у игроков', `
       <div class="toolbar">
         <button onclick="closeModal();openQuest(${d.quest.id})">Открыть задание</button>
-        <span class="muted">${esc(d.quest.name)} · выполнений: ${rows.length}</span>
+        <span class="muted">${esc(d.quest.name)} · выполнили: ${doneN} · в процессе: ${rows.length - doneN}</span>
       </div>
       ${table([
         {h:'Игрок',html:r=>`<td><a href="#" onclick="closeModal();openChar(${r.character_id});return false"
           style="color:var(--brass2)">${esc(r.name)}</a> <span class="muted">#${r.character_id}</span></td>`},
         {h:'Ур.',v:r=>r.level},
         {h:'Локация',v:r=>r.location || '—'},
+        {h:'Статус',html:r=>`<td>${Number(r.quest_status) === 2
+          ? '<span class="credit">выполнено</span>'
+          : `в процессе · этап ${(Number((r.progress || {}).stage) || 0) + 1}`}</td>`},
         {h:'Выполнил',v:r=>dt(r.completed_at)},
         {h:'Повтор',v:r=>dt(r.available_again_at)},
         {h:'',html:r=>`<td><button class="sm danger"
           onclick="resetQuestForChar(${d.quest.id},${r.character_id},${esc(JSON.stringify(r.name || ''))})">Перезапустить</button></td>`},
       ], rows)}
-      <p class="muted">Перезапуск снимает прохождение у выбранного игрока и делает квест доступным заново. Уже выданные награды не отнимаются.</p>
+      <p class="muted">Перезапуск снимает прохождение (и прогресс) у выбранного игрока и делает квест доступным заново. Уже выданные награды не отнимаются.</p>
     `, { wide:true });
   } catch (e) { fail(e); }
 };
@@ -2201,80 +2229,549 @@ window.resetQuestForChar = async (questId, charId, name) => {
     openQuestCompletions(questId);
   } catch (e) { fail(e); }
 };
-window.editQuest = async (r) => {
-  const npcs = await api('/npcs');
-  const npcOpt = (sel, empty = '—') => opt(Object.fromEntries(npcs.map((n)=>[n.id, n.name + ' #' + n.id])), sel, empty);
-  const sampleObjectives = {
-    mode:'sequence',
-    stages:[
-      { title:'Разговор', objectives:[{ kind:'talk', npcId:101, count:1 }] },
-      { title:'Охота', objectives:[{ kind:'kill', npcId:1, count:3 }] },
-      { title:'Доставка', objectives:[
-        { kind:'item', templateId:202, count:1, consume:true },
-        { kind:'money', currency:'copper', amount:20, consume:true },
-      ] },
-    ],
+/* ── Конструктор квеста: произвольные связки этапов, целей и NPC ──────────
+   Этапы идут по порядку (или все сразу — режим). Цели этапа: поговорить с
+   любым NPC, победить NPC, принести предмет/деньги. Реплики разговоров —
+   отдельно на каждого NPC. JSON остаётся как «сложный режим» и синхронен. */
+let QB = null;              // состояние конструктора открытого квеста
+let qbNpcs = [];            // NPC для выпадашек
+const qbItemNames = {};     // id шаблона → имя (подписи у целей и наград)
+let qbJsonDirty = false;    // ручные правки в JSON ещё не применены
+
+const QB_KINDS = { talk:'Поговорить', kill:'Победить', item:'Принести предмет', money:'Принести деньги' };
+
+const qbNum = (v) => { const n = Math.trunc(Number(v)); return Number.isFinite(n) && n > 0 ? n : null; };
+
+function qbNormObjective(o = {}){
+  const kind = ['talk','kill','item','money'].includes(o.kind) ? o.kind
+    : (o.kind === 'hunt_wins' ? 'kill' : 'talk');
+  const rawCount = kind === 'money' ? (o.amount ?? o.count) : (o.count ?? o.amount);
+  return {
+    kind,
+    npcId: qbNum(o.npcId ?? o.npc_id ?? o.targetNpcId ?? o.target_npc_id),
+    templateId: qbNum(o.templateId ?? o.template_id ?? o.itemId ?? o.item_id),
+    currency: o.currency || o.code || 'copper',
+    count: Math.max(1, Math.trunc(Number(rawCount)) || 1),
+    consume: o.consume !== false,
   };
+}
+
+/** Любой исторический формат целей → состояние конструктора. */
+function qbFromObjectives(raw){
+  const src = raw && typeof raw === 'object' ? raw : {};
+  let stages;
+  if (Array.isArray(src.stages)) stages = src.stages;
+  else if (Array.isArray(raw)) stages = [{ objectives: raw }];
+  else if (Array.isArray(src.all) || Array.isArray(src.objectives))
+    stages = [{ title: src.title, objectives: src.all || src.objectives }];
+  else if (src.kind || src.type) stages = [{ objectives: [src] }];
+  else stages = [];
+  return {
+    mode: src.mode === 'all' ? 'all' : 'sequence',
+    stages: stages.map((s) => ({
+      title: s.title || s.name || '',
+      text: s.text || s.description || '',
+      objectives: (Array.isArray(s.objectives ?? s.all) ? (s.objectives ?? s.all) : [s])
+        .map(qbNormObjective),
+    })),
+  };
+}
+
+function qbTalkFromDialogue(d = {}){
+  const src = d && typeof d === 'object'
+    ? (d.talk ?? d.talkSteps ?? d.steps ?? d.conversation) : null;
+  const lines = (v) => Array.isArray(v)
+    ? v.map((x) => String(x || '').trim()).filter(Boolean)
+    : (typeof v === 'string' && v.trim() ? [v.trim()] : []);
+  const talk = {};
+  if (src && typeof src === 'object' && !Array.isArray(src)){
+    for (const [k, v] of Object.entries(src)){
+      const id = qbNum(k);
+      if (id && lines(v).length) talk[id] = lines(v);
+    }
+  } else if (src){
+    const ids = qbTalkNpcIds();          // единственный «поговорить»-NPC
+    if (ids.length === 1) talk[ids[0]] = lines(src);
+  }
+  return talk;
+}
+
+function qbTalkNpcIds(){
+  const ids = new Set();
+  for (const s of QB.stages) for (const o of s.objectives)
+    if (o.kind === 'talk' && o.npcId) ids.add(o.npcId);
+  return [...ids];
+}
+
+const qbNpcName = (id) => {
+  const n = qbNpcs.find((x) => Number(x.id) === Number(id));
+  return n ? `${n.name} #${n.id}` : `NPC #${id}`;
+};
+
+/** Опции NPC для цели: разговор — жители (kind 2/3), победа — боевые (1/3). */
+function qbNpcOptions(sel, forKind){
+  const kinds = forKind === 'talk' ? [2, 3] : [1, 3];
+  const list = qbNpcs.filter((n) => kinds.includes(Number(n.kind)));
+  const anyOpt = forKind === 'kill'
+    ? `<option value="" ${!sel ? 'selected' : ''}>любой противник</option>`
+    : `<option value="" ${!sel ? 'selected' : ''}>— выберите NPC —</option>`;
+  return anyOpt + list.map((n) =>
+    `<option value="${n.id}" ${Number(sel) === Number(n.id) ? 'selected' : ''}>${esc(n.name)} #${n.id}</option>`).join('');
+}
+
+function qbItemLabel(id){
+  return id ? (qbItemNames[id] || '') : '';
+}
+
+/** Дотянуть имена шаблонов предметов для подписей (объединённым запросом). */
+async function qbFetchItemNames(ids){
+  const need = [...new Set(ids.filter((id) => id && !qbItemNames[id]))];
+  if (!need.length) return false;
+  await Promise.all(need.map(async (id) => {
+    try {
+      const rows = await api('/item-templates?q=' + id);
+      const hit = rows.find((t) => Number(t.id) === Number(id));
+      qbItemNames[id] = hit ? hit.name : '(шаблон не найден)';
+    } catch { /* имя не критично */ }
+  }));
+  return true;
+}
+
+function qbObjHtml(o, si, oi){
+  let fields = '';
+  if (o.kind === 'talk' || o.kind === 'kill'){
+    fields = `<select data-qb="npcId" title="NPC">${qbNpcOptions(o.npcId, o.kind)}</select>
+      <input data-qb="count" type="number" min="1" value="${o.count}" title="Сколько раз">`;
+  } else if (o.kind === 'item'){
+    fields = `<span class="qb-item">
+        <input data-qb="templateId" type="number" min="1" value="${o.templateId ?? ''}" placeholder="ID предмета" style="width:104px">
+        <button type="button" class="sm" data-qb-act="pickitem" title="Найти предмет по названию">поиск…</button>
+        <span class="qb-item-name muted">${esc(qbItemLabel(o.templateId))}</span>
+      </span>
+      <input data-qb="count" type="number" min="1" value="${o.count}" title="Количество">
+      <label class="qb-consume" title="Забрать предметы у игрока при сдаче этапа">
+        <input data-qb="consume" type="checkbox" ${o.consume ? 'checked' : ''}>забрать</label>`;
+  } else if (o.kind === 'money'){
+    fields = `<select data-qb="currency">${opt(D.currency, o.currency)}</select>
+      <input data-qb="count" type="number" min="1" value="${o.count}" title="Сумма">
+      <label class="qb-consume" title="Списать деньги у игрока при сдаче этапа">
+        <input data-qb="consume" type="checkbox" ${o.consume ? 'checked' : ''}>списать</label>`;
+  }
+  return `<div class="qb-obj" data-si="${si}" data-oi="${oi}">
+    <select data-qb="kind" title="Тип цели">${opt(QB_KINDS, o.kind)}</select>
+    ${fields}
+    <button type="button" class="sm danger" data-qb-act="delobj" title="Убрать цель" style="margin-left:auto">✕</button>
+  </div>`;
+}
+
+function qbStageHtml(s, si){
+  return `<div class="qb-stage" data-si="${si}">
+    <div class="qb-stage-head">
+      <b>ЭТАП ${si + 1}</b>
+      <input data-qb="title" value="${esc(s.title)}" placeholder="Название этапа (видно игроку)">
+      <span class="qb-stage-btns">
+        <button type="button" class="sm" data-qb-act="up" title="Выше" ${si === 0 ? 'disabled' : ''}>↑</button>
+        <button type="button" class="sm" data-qb-act="down" title="Ниже" ${si === QB.stages.length - 1 ? 'disabled' : ''}>↓</button>
+        <button type="button" class="sm danger" data-qb-act="delstage">✕ этап</button>
+      </span>
+    </div>
+    <input data-qb="text" value="${esc(s.text)}" placeholder="Описание для игрока: что сделать на этом этапе" style="width:100%">
+    <div class="qb-objs">${s.objectives.map((o, oi) => qbObjHtml(o, si, oi)).join('')
+      || '<div class="muted" style="font-size:12px">Целей нет — добавьте хотя бы одну.</div>'}</div>
+    <div><button type="button" class="sm" data-qb-act="addobj">+ Цель этапа</button></div>
+  </div>`;
+}
+
+function qbRitemHtml(x, i){
+  return `<div class="qb-ritem" data-ri="${i}">
+    <input data-qbr="templateId" type="number" min="1" value="${x.templateId ?? ''}" placeholder="ID предмета">
+    <button type="button" class="sm" data-qb-act="pickritem">поиск…</button>
+    <span class="qb-item-name muted">${esc(qbItemLabel(x.templateId))}</span>
+    ×<input data-qbr="count" type="number" min="1" value="${x.count}" title="Количество">
+    <button type="button" class="sm danger" data-qb-act="delritem" title="Убрать">✕</button>
+  </div>`;
+}
+
+function qbRender(){
+  const host = $('#qb-stages');
+  if (!host) return;
+  host.innerHTML = QB.stages.map(qbStageHtml).join('')
+    || '<div class="muted">Этапов нет — без целей квест нельзя выполнить.</div>';
+  const rhost = $('#qb-ritems');
+  if (rhost) rhost.innerHTML = QB.rewardItems.map(qbRitemHtml).join('')
+    || '<div class="muted" style="font-size:12px">Предметы в награду не выданы.</div>';
+  qbRenderTalks();
+  qbSyncJson();
+}
+
+function qbRenderTalks(){
+  const host = $('#qb-talks');
+  if (!host) return;
+  const ids = qbTalkNpcIds();
+  if (!ids.length){
+    host.innerHTML = '<div class="muted" style="font-size:12px">Целей «Поговорить» нет — отдельные реплики не нужны.</div>';
+    return;
+  }
+  host.innerHTML = ids.map((id) => `
+    <div class="qb-talk">
+      <label>Разговор с «${esc(qbNpcName(id))}» — по строке на реплику (шаг диалога)</label>
+      <textarea data-qb-talk="${id}" rows="3">${esc((QB.talk[id] || []).join('\n'))}</textarea>
+    </div>`).join('');
+}
+
+/** Состояние конструктора → серверный формат целей. */
+function qbObjectives(){
+  return {
+    mode: QB.mode,
+    stages: QB.stages.map((s, i) => ({
+      id: 'stage-' + (i + 1),
+      title: s.title || '',
+      text: s.text || '',
+      objectives: s.objectives.map((o) => {
+        if (o.kind === 'money')
+          return { kind:'money', currency:o.currency, amount:o.count, consume:o.consume };
+        if (o.kind === 'item')
+          return { kind:'item', templateId:o.templateId, count:o.count, consume:o.consume };
+        return { kind:o.kind, npcId:o.npcId, count:o.count };
+      }),
+    })),
+  };
+}
+
+function qbDialogue(){
+  const val = (id) => ($('#' + id) ? $('#' + id).value.trim() : '');
+  const d = {
+    greeting: val('q-d-greeting'),
+    progress: val('q-d-progress'),
+    ready: val('q-d-ready'),
+    done: val('q-d-done'),
+  };
+  for (const k of Object.keys(d)) if (!d[k]) delete d[k];
+  const talk = {};
+  for (const id of qbTalkNpcIds()){
+    const lines = (QB.talk[id] || []).map((s) => s.trim()).filter(Boolean);
+    if (lines.length) talk[id] = lines;
+  }
+  if (Object.keys(talk).length) d.talk = talk;
+  return d;
+}
+
+function qbPrereq(){
+  const p = {};
+  const lvl = qbNum($('#q-p-level') && $('#q-p-level').value);
+  if (lvl && lvl > 1) p.level = lvl;
+  const quests = ($('#q-p-quests') ? $('#q-p-quests').value : '')
+    .split(',').map((s) => qbNum(s)).filter(Boolean);
+  if (quests.length) p.quests = quests;
+  return p;
+}
+
+/** Конструктор → JSON-редактор (сложный режим всегда синхронен). */
+function qbSyncJson(){
+  const objEl = $('#q-objectives'), dlgEl = $('#q-dialogue');
+  if (objEl) objEl.value = JSON.stringify(qbObjectives(), null, 2);
+  if (dlgEl) dlgEl.value = JSON.stringify(qbDialogue(), null, 2);
+  qbJsonDirty = false;
+  const note = $('#qb-json-note');
+  if (note) note.textContent = '';
+}
+
+/** Ручные правки JSON → конструктор; false, если JSON не читается. */
+function qbApplyJson(){
+  let objectives, dialogue;
+  try {
+    objectives = readJsonField('q-objectives');
+    dialogue = readJsonField('q-dialogue');
+  } catch { return false; }
+  if (!dialogue || typeof dialogue !== 'object' || Array.isArray(dialogue)) dialogue = {};
+  const rewardItems = QB.rewardItems;    // награды в JSON не входят — сохраняем
+  QB = { ...qbFromObjectives(objectives), talk: {}, rewardItems };
+  QB.talk = qbTalkFromDialogue(dialogue);
+  // базовые реплики из JSON — в поля
+  const put = (id, v) => { if ($('#' + id)) $('#' + id).value = v || ''; };
+  put('q-d-greeting', dialogue.greeting || dialogue.start);
+  put('q-d-progress', dialogue.progress);
+  put('q-d-ready', dialogue.ready);
+  put('q-d-done', dialogue.done || dialogue.completed);
+  qbRender();
+  const ids = [];
+  for (const s of QB.stages) for (const o of s.objectives)
+    if (o.templateId) ids.push(o.templateId);
+  qbFetchItemNames(ids).then((got) => { if (got) qbRender(); });
+  return true;
+}
+
+function qbValidate(){
+  const errs = [];
+  if (!QB.stages.length) errs.push('добавьте хотя бы один этап');
+  QB.stages.forEach((s, i) => {
+    if (!s.objectives.length) errs.push(`этап ${i + 1}: нет целей`);
+    s.objectives.forEach((o, j) => {
+      const at = `этап ${i + 1}, цель ${j + 1}`;
+      if (o.kind === 'talk' && !o.npcId) errs.push(`${at}: выберите NPC для разговора`);
+      if (o.kind === 'item' && !o.templateId) errs.push(`${at}: укажите предмет`);
+    });
+  });
+  return errs;
+}
+
+function qbBind(){
+  const host = $('#qb-stages');
+  host.addEventListener('input', (e) => {
+    const t = e.target, key = t.dataset.qb;
+    if (!key) return;
+    const stageEl = t.closest('.qb-stage');
+    if (!stageEl) return;
+    const s = QB.stages[+stageEl.dataset.si];
+    const objEl = t.closest('.qb-obj');
+    if (objEl){
+      const o = s.objectives[+objEl.dataset.oi];
+      if (key === 'kind'){
+        o.kind = t.value;
+        if (o.kind === 'money' && !o.currency) o.currency = 'copper';
+        qbRender();               // тип сменился — пересобрать поля строки
+        return;
+      }
+      if (key === 'consume') o.consume = t.checked;
+      else if (key === 'count') o.count = Math.max(1, Math.trunc(+t.value) || 1);
+      else if (key === 'npcId'){ o.npcId = qbNum(t.value); qbRenderTalks(); }
+      else if (key === 'templateId'){
+        o.templateId = qbNum(t.value);
+        const label = objEl.querySelector('.qb-item-name');
+        if (label) label.textContent = qbItemLabel(o.templateId);
+        qbFetchItemNames([o.templateId]).then((got) => {
+          if (got && label) label.textContent = qbItemLabel(o.templateId);
+        });
+      }
+      else if (key === 'currency') o.currency = t.value;
+    } else {
+      if (key === 'title') s.title = t.value;
+      if (key === 'text') s.text = t.value;
+    }
+    qbSyncJson();
+  });
+  host.addEventListener('click', async (e) => {
+    const btn = e.target.closest('[data-qb-act]');
+    if (!btn) return;
+    const act = btn.dataset.qbAct;
+    const stageEl = btn.closest('.qb-stage');
+    const si = stageEl ? +stageEl.dataset.si : -1;
+    const objEl = btn.closest('.qb-obj');
+    if (act === 'addobj')
+      QB.stages[si].objectives.push({ kind:'talk', npcId:null, templateId:null,
+        currency:'copper', count:1, consume:true });
+    else if (act === 'delobj') QB.stages[si].objectives.splice(+objEl.dataset.oi, 1);
+    else if (act === 'delstage') QB.stages.splice(si, 1);
+    else if (act === 'up' && si > 0)
+      QB.stages.splice(si - 1, 0, QB.stages.splice(si, 1)[0]);
+    else if (act === 'down' && si < QB.stages.length - 1)
+      QB.stages.splice(si + 1, 0, QB.stages.splice(si, 1)[0]);
+    else if (act === 'pickitem'){
+      const r = await formModal({ title:'Найти предмет', submit:'Выбрать',
+        fields:[{ key:'item', label:'Название или ID', type:'item', required:true }] });
+      if (!r || !r.item) return;
+      const o = QB.stages[si].objectives[+objEl.dataset.oi];
+      o.templateId = r.item;
+      await qbFetchItemNames([r.item]);
+    } else return;
+    qbRender();
+  });
+
+  $('#qb-talks').addEventListener('input', (e) => {
+    const id = e.target.dataset.qbTalk;
+    if (!id) return;
+    QB.talk[id] = e.target.value.split('\n');
+    qbSyncJson();
+  });
+
+  const rhost = $('#qb-ritems');
+  rhost.addEventListener('input', (e) => {
+    const t = e.target, key = t.dataset.qbr;
+    const row = t.closest('.qb-ritem');
+    if (!key || !row) return;
+    const x = QB.rewardItems[+row.dataset.ri];
+    if (key === 'count') x.count = Math.max(1, Math.trunc(+t.value) || 1);
+    if (key === 'templateId'){
+      x.templateId = qbNum(t.value);
+      const label = row.querySelector('.qb-item-name');
+      if (label) label.textContent = qbItemLabel(x.templateId);
+      qbFetchItemNames([x.templateId]).then((got) => {
+        if (got && label) label.textContent = qbItemLabel(x.templateId);
+      });
+    }
+  });
+  rhost.addEventListener('click', async (e) => {
+    const btn = e.target.closest('[data-qb-act]');
+    if (!btn) return;
+    const row = btn.closest('.qb-ritem');
+    if (btn.dataset.qbAct === 'delritem') QB.rewardItems.splice(+row.dataset.ri, 1);
+    else if (btn.dataset.qbAct === 'pickritem'){
+      const r = await formModal({ title:'Найти предмет', submit:'Выбрать',
+        fields:[{ key:'item', label:'Название или ID', type:'item', required:true }] });
+      if (!r || !r.item) return;
+      QB.rewardItems[+row.dataset.ri].templateId = r.item;
+      await qbFetchItemNames([r.item]);
+    } else return;
+    qbRender();
+  });
+}
+
+window.editQuest = async (r) => {
+  qbNpcs = await api('/npcs');
   const q = r || { id:'', name:'', description:'', image:'', level_req:1,
     repeatable:1, active:true, giver_npc_id:null, turnin_npc_id:null,
-    objectives:sampleObjectives, prereq:{}, dialogue:{
+    objectives:{ mode:'sequence', stages:[
+      { title:'', text:'', objectives:[{ kind:'talk', npcId:null, count:1 }] },
+    ] },
+    prereq:{}, dialogue:{
       greeting:'Мне нужна помощь. Возьмёшься?',
       progress:'Вернись, когда выполнишь поручение.',
       ready:'Отлично, покажи результат.',
       done:'Спасибо. Дело сделано.',
-      talk:{ 101:[
-        'Староста прислал тебя? Хорошо, слушай внимательно.',
-        'Видели разбойников на дороге. Их немного, но они проверяют путников.',
-        'Теперь ты знаешь, куда идти. Возвращайся, когда разберёшься.',
-      ] },
-    }, rewards:{copper:100,exp:100,items:[]} };
+    }, rewards:{ copper:100, exp:100, items:[] } };
   const w = q.rewards || {};
+  const d = q.dialogue || {};
+  const p = q.prereq || {};
+  QB = qbFromObjectives(q.objectives);
+  QB.talk = qbTalkFromDialogue(d);
+  QB.rewardItems = (Array.isArray(w.items) ? w.items : []).map((x) => ({
+    templateId: qbNum(x && typeof x === 'object' ? (x.templateId ?? x.template_id ?? x.id) : x),
+    count: Math.max(1, Math.trunc(Number(x && typeof x === 'object' ? (x.count ?? x.quantity) : 1)) || 1),
+  })).filter((x) => x.templateId);
+  const npcOpt = (sel, empty) => opt(Object.fromEntries(
+    qbNpcs.filter((n) => [2, 3].includes(Number(n.kind)))
+      .map((n) => [n.id, n.name + ' #' + n.id])), sel, empty);
+
   $('#main').innerHTML = `
   <div class="toolbar"><button onclick="show('quests')">← К списку</button>
     <h2 style="margin:0;font-family:Georgia,serif;font-variant:small-caps">
       ${r ? 'Задание #' + q.id : 'Новое задание'}</h2>
     ${r ? `<button onclick="openQuestCompletions(${q.id})">Кто выполнил</button>` : ''}</div>
-  <div class="panel"><div class="form">
+
+  <div class="panel"><h3>Основное</h3><div class="form">
     <div><label>Уникальный ID</label><input id="q-id" type="number" value="${q.id}" ${r?'disabled':''}></div>
-    <div><label>NPC выдаёт</label><select id="q-giver">${npcOpt(q.giver_npc_id)}</select></div>
-    <div><label>NPC принимает</label><select id="q-turnin">${npcOpt(q.turnin_npc_id)}</select></div>
     <div><label>Мин. уровень</label><input id="q-lvl" type="number" value="${q.level_req}"></div>
     <div><label>Повторяемость</label><select id="q-rep">${opt(D.rep, q.repeatable)}</select></div>
     <div><label>Включено</label><select id="q-active">
       <option value="1" ${q.active?'selected':''}>да</option>
       <option value="0" ${!q.active?'selected':''}>нет</option></select></div>
     <div class="wide"><label>Название</label><input id="q-name" value="${esc(q.name)}" style="width:100%"></div>
-    <div class="wide"><label>Описание</label><textarea id="q-desc" rows="3">${esc(q.description||'')}</textarea></div>
-    <div class="wide"><label>Диалоги JSON</label><textarea id="q-dialogue" rows="6">${jsonPretty(q.dialogue||{})}</textarea></div>
-    <div class="wide"><label>Цели JSON</label><textarea id="q-objectives" rows="13">${jsonPretty(q.objectives||{})}</textarea></div>
-    <div class="wide"><label>Условия prereq JSON</label><textarea id="q-prereq" rows="4">${jsonPretty(q.prereq||{})}</textarea></div>
-    <div><label>Награда: медь</label><input id="q-copper" type="number" value="${w.copper ?? 0}"></div>
-    <div><label>Награда: серебро</label><input id="q-silver" type="number" value="${w.silver ?? 0}"></div>
-    <div><label>Награда: золото</label><input id="q-gold" type="number" value="${w.gold ?? 0}"></div>
-    <div><label>Награда: опыт</label><input id="q-exp" type="number" value="${w.exp ?? 0}"></div>
-    <div class="wide"><label>Награда: ID предметов через запятую</label>
-      <input id="q-items" value="${esc((w.items||[]).map((x)=>x.templateId||x.id||x).join(', '))}" style="width:100%"></div>
+    <div class="wide"><label>Описание (видно игроку в списке заданий)</label>
+      <textarea id="q-desc" rows="3">${esc(q.description||'')}</textarea></div>
     <div class="wide"><label>Картинка</label>
       <input id="q-file" type="file" accept="image/*">
       <input id="q-image" value="${esc(q.image||'')}" placeholder="/uploads/..." style="width:60%">
       ${q.image ? `<div style="margin-top:8px"><img src="${esc(q.image)}"
         style="max-height:110px;border:1px solid var(--line);border-radius:3px"></div>` : ''}</div>
+  </div></div>
+
+  <div class="panel"><h3>Кто ведёт задание</h3>
+    <div class="qb-hint">Выдаёт — у кого игрок берёт квест; принимает — кому сдаёт.
+      Пусто у обоих — квест автоматический: подхватится сам (охота) и завершится без диалога.</div>
+    <div class="form">
+      <div><label>NPC выдаёт</label><select id="q-giver">${npcOpt(q.giver_npc_id, '— никто (автоквест)')}</select></div>
+      <div><label>NPC принимает</label><select id="q-turnin">${npcOpt(q.turnin_npc_id, '— тот же, кто выдал')}</select></div>
+    </div></div>
+
+  <div class="panel"><h3>Этапы и цели</h3>
+    <div class="qb-hint">Любые связки: этапы идут по порядку, в каждом — сколько угодно целей
+      (разговоры с разными NPC, победы, предметы, деньги). Между этапами игрок сдаёт
+      прогресс NPC-принимающему (или цели этапа закрываются сами, если квест автоматический).</div>
+    <div class="toolbar" style="margin-bottom:10px">
+      <div><label>Режим этапов</label><select id="qb-mode">
+        <option value="sequence" ${QB.mode !== 'all' ? 'selected' : ''}>по порядку (цепочка)</option>
+        <option value="all" ${QB.mode === 'all' ? 'selected' : ''}>все сразу (один этап)</option>
+      </select></div>
+      <button type="button" class="brass" id="qb-addstage">+ Добавить этап</button>
+    </div>
+    <div id="qb-stages"></div>
   </div>
+
+  <div class="panel"><h3>Диалоги</h3>
+    <div class="form">
+      <div class="wide"><label>Приветствие (квест ещё не взят)</label>
+        <input id="q-d-greeting" value="${esc(d.greeting || d.start || '')}" style="width:100%"></div>
+      <div><label>В процессе</label><input id="q-d-progress" value="${esc(d.progress || '')}" style="width:100%"></div>
+      <div><label>Цели выполнены</label><input id="q-d-ready" value="${esc(d.ready || '')}" style="width:100%"></div>
+      <div class="wide"><label>После завершения</label><input id="q-d-done" value="${esc(d.done || d.completed || '')}" style="width:100%"></div>
+    </div>
+    <div style="margin-top:10px" id="qb-talks"></div>
+  </div>
+
+  <div class="panel"><h3>Условия допуска</h3>
+    <div class="form">
+      <div><label>Мин. уровень (prereq)</label><input id="q-p-level" type="number" value="${p.level ?? p.minLevel ?? ''}" placeholder="—"></div>
+      <div class="wide"><label>Сначала выполнить задания (ID через запятую)</label>
+        <input id="q-p-quests" value="${esc((Array.isArray(p.quests) ? p.quests : (p.quests ? [p.quests] : [])).join(', '))}" style="width:100%"></div>
+    </div></div>
+
+  <div class="panel"><h3>Награда</h3><div class="form">
+    <div><label>Медь</label><input id="q-copper" type="number" value="${w.copper ?? 0}"></div>
+    <div><label>Серебро</label><input id="q-silver" type="number" value="${w.silver ?? 0}"></div>
+    <div><label>Золото</label><input id="q-gold" type="number" value="${w.gold ?? 0}"></div>
+    <div><label>Опыт</label><input id="q-exp" type="number" value="${w.exp ?? 0}"></div>
+    <div><label>Сброс характеристик</label><select id="q-reset">
+      <option value="0">нет</option>
+      <option value="1" ${w.reset_stats ? 'selected' : ''}>да — вернуть очки</option></select></div>
+    <div class="wide"><label>Предметы</label>
+      <div id="qb-ritems"></div>
+      <button type="button" class="sm" id="qb-addritem">+ Предмет в награду</button></div>
+  </div></div>
+
+  <details class="qb-adv"><summary>JSON для сложных случаев (синхронен с конструктором)</summary>
+    <div class="qb-adv-body">
+      <div><label>Цели JSON</label><textarea id="q-objectives" rows="12"></textarea></div>
+      <div><label>Диалоги JSON</label><textarea id="q-dialogue" rows="6"></textarea></div>
+      <div class="toolbar"><button type="button" class="sm" id="qb-applyjson">Применить JSON в конструктор</button>
+        <span class="muted" id="qb-json-note" style="font-size:12px"></span></div>
+    </div>
+  </details>
+
   <div class="toolbar" style="margin-top:12px">
-    <button class="brass" onclick="saveQuest()">Сохранить задание</button></div></div>`;
+    <button class="brass" onclick="saveQuest()">Сохранить задание</button></div>`;
+
   $('#q-file').addEventListener('change', async (e) => {
     const f = e.target.files[0]; if (!f) return;
     try { $('#q-image').value = await upload(f); ok('картинка загружена'); }
     catch (err) { fail(err); }
   });
+  $('#qb-mode').addEventListener('change', (e) => { QB.mode = e.target.value; qbSyncJson(); });
+  $('#qb-addstage').addEventListener('click', () => {
+    QB.stages.push({ title:'', text:'', objectives:[] });
+    qbRender();
+  });
+  $('#qb-addritem').addEventListener('click', () => {
+    QB.rewardItems.push({ templateId:null, count:1 });
+    qbRender();
+  });
+  $('#qb-applyjson').addEventListener('click', () => {
+    if (qbApplyJson()) ok('JSON применён к конструктору');
+  });
+  for (const id of ['q-objectives', 'q-dialogue']){
+    // отметить ручные правки: перед сохранением применим их к конструктору
+    $('#' + id).addEventListener('input', () => {
+      qbJsonDirty = true;
+      const note = $('#qb-json-note');
+      if (note) note.textContent = 'есть неприменённые правки JSON';
+    });
+  }
+  for (const id of ['q-d-greeting', 'q-d-progress', 'q-d-ready', 'q-d-done'])
+    $('#' + id).addEventListener('input', qbSyncJson);
+  qbBind();
+  qbRender();
+  const ids = QB.rewardItems.map((x) => x.templateId);
+  for (const s of QB.stages) for (const o of s.objectives)
+    if (o.templateId) ids.push(o.templateId);
+  qbFetchItemNames(ids).then((got) => { if (got) qbRender(); });
 };
+
 window.saveQuest = async () => {
-  let objectives, prereq, dialogue;
-  try {
-    objectives = readJsonField('q-objectives');
-    prereq = readJsonField('q-prereq');
-    dialogue = readJsonField('q-dialogue');
-  } catch { return; }
+  // несинхронизированные ручные правки JSON применяем перед сохранением
+  if (qbJsonDirty && !qbApplyJson()) return;
+  if (!(+$('#q-id').value) || !$('#q-name').value.trim())
+    return stamp('Отказано · нужны ID и название', true);
+  const errs = qbValidate();
+  if (errs.length) return stamp('Отказано · ' + errs[0], true);
   const body = {
     id:+$('#q-id').value, name:$('#q-name').value.trim(),
     description:$('#q-desc').value.trim(), image:$('#q-image').value.trim() || null,
@@ -2282,14 +2779,15 @@ window.saveQuest = async () => {
     active:$('#q-active').value === '1',
     giver_npc_id:+$('#q-giver').value || null,
     turnin_npc_id:+$('#q-turnin').value || null,
-    objectives, prereq, dialogue,
+    objectives: qbObjectives(), prereq: qbPrereq(), dialogue: qbDialogue(),
     rewards: {
       copper:+$('#q-copper').value || 0, silver:+$('#q-silver').value || 0,
       gold:+$('#q-gold').value || 0, exp:+$('#q-exp').value || 0,
-      items:$('#q-items').value.split(',').map((s)=>+s.trim()).filter(Boolean),
+      items: QB.rewardItems.filter((x) => x.templateId)
+        .map((x) => ({ templateId:x.templateId, count:x.count })),
+      ...($('#q-reset').value === '1' ? { reset_stats:true } : {}),
     },
   };
-  if (!body.id || !body.name) return stamp('Отказано · нужны ID и название', true);
   try { await api('/quests', body); ok('задание #' + body.id); show('quests'); }
   catch (e) { fail(e); }
 };

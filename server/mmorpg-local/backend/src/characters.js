@@ -77,8 +77,12 @@ export async function ensureCharacter(accountId, wantedName) {
       `INSERT INTO characters (account_id, name, faction, level, location_id, hp_cur)
        VALUES ($1, $2, 1, $3, $4, $5) RETURNING id`,
       [accountId, name, start.level, START_LOCATION, start.hp]);
-    await c.query(`INSERT INTO character_stats (character_id) VALUES ($1)`,
-      [ins.rows[0].id]);
+    // стартовые очки: POINTS_PER_LEVEL за каждый уровень, ВКЛЮЧАЯ первый —
+    // так полностью вложенный игрок ровно попадает в эталонную кривую баланса
+    // (pointsForLevel/expectedAllocFrac в gear.js считают 10·уровень)
+    await c.query(
+      `INSERT INTO character_stats (character_id, free_points) VALUES ($1, $2)`,
+      [ins.rows[0].id, POINTS_PER_LEVEL * Math.max(1, Number(start.level) || 1)]);
     return ins.rows[0].id;
   });
   return getCharacter(id);
@@ -273,10 +277,13 @@ export async function addExp(client, charId, amount) {
 }
 
 export const POINTS_PER_LEVEL = 10;
-const ALLOC_ATTRS = ['str', 'agi', 'vit', 'intel', 'wis'];
+// Прокачиваются только атрибуты, РЕАЛЬНО влияющие на бой: Сила→Мощь/Натиск,
+// Ловкость→Инициатива+Крит/Уклон, Выносливость→Здоровье/Оплот (см. composeBuild).
+// intel/wis остаются в БД под будущую магию, но очки в них не сливаются.
+const ALLOC_ATTRS = ['str', 'agi', 'vit'];
 
 /**
- * Распределить ОДНО очко в атрибут (str/agi/vit/intel/wis), списав 1 free_point.
+ * Распределить ОДНО очко в атрибут (str/agi/vit), списав 1 free_point.
  * Атрибуты задают ШКОЛУ треугольника (str→Натиск, agi→Уклон, vit→Оплот, см.
  * schoolFromStats). Возвращает обновлённые атрибуты + остаток очков.
  */

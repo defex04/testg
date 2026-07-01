@@ -4037,6 +4037,14 @@ button.belt-slot { padding: 0; font: inherit; color: inherit; -webkit-tap-highli
   border-radius: 10px;
 }
 .inv-preview.hidden { display: none; }
+/* рамка и имя превью подкрашены качеством выбранного предмета */
+.inv-preview.q1, .inv-preview.q2, .inv-preview.q3, .inv-preview.q4, .inv-preview.q5 {
+  border-color: rgba(var(--qc), .5);
+  background: linear-gradient(180deg, rgba(var(--qc), .1), rgba(20, 14, 8, .5));
+  box-shadow: 0 0 14px rgba(var(--qc), .14);
+}
+.inv-preview.q1 .ip-name, .inv-preview.q2 .ip-name, .inv-preview.q3 .ip-name,
+.inv-preview.q4 .ip-name, .inv-preview.q5 .ip-name { color: rgba(var(--qc), 1); }
 /* вкладка «Параметры»: занимает оставшуюся высоту и СКРОЛЛИТСЯ (видно низ) */
 .inv-params {
   flex: 1;
@@ -5048,16 +5056,19 @@ body.perf-mode * { backdrop-filter: none !important; -webkit-backdrop-filter: no
   background: rgba(5, 7, 3, .74); backdrop-filter: blur(2px);
 }
 .mail.hidden { display: none; }
+/* карточка почты — в формате окна рюкзака (.dressing-card): один вид у всех окон */
 .mail-card {
-  width: min(560px, calc(100vw - 28px));
-  height: min(640px, calc(100dvh - 44px));
+  width: min(880px, calc(100vw - 32px));
+  height: min(620px, calc(100dvh - 48px));
   display: flex; flex-direction: column;
   background: linear-gradient(180deg, var(--panel-hi), var(--panel-lo));
   border: 1px solid var(--line);
-  border-radius: 20px;
+  border-radius: 22px;
   box-shadow: 0 12px 50px rgba(0, 0, 0, .8), inset 0 1px 0 rgba(244, 205, 111, .09);
   overflow: hidden;
 }
+/* содержимое почты не растягивается на всю ширину широкой карточки */
+.mail-body > * { max-width: 640px; margin-left: auto; margin-right: auto; }
 .mail-compose-btn {
   font-family: var(--font-display);
   font-size: 12.5px;
@@ -5411,21 +5422,22 @@ body.hide-sys-chat .chat-line.system:not(.chat-error) { display: none; }
   background: rgba(5, 7, 3, .76); backdrop-filter: blur(2px);
 }
 .auction.hidden { display: none; }
+/* карточка аукциона — в формате окна рюкзака (.dressing-card): один вид у всех окон */
 .auction-card {
-  width: min(960px, calc(100vw - 24px));
-  height: min(680px, calc(100dvh - 40px));
+  width: min(880px, calc(100vw - 32px));
+  height: min(620px, calc(100dvh - 48px));
   display: flex; flex-direction: column;
   background: linear-gradient(180deg, var(--panel-hi), var(--panel-lo));
   border: 1px solid var(--line);
-  border-radius: 18px;
+  border-radius: 22px;
   box-shadow: 0 12px 50px rgba(0, 0, 0, .8), inset 0 1px 0 rgba(244, 205, 111, .09);
   overflow: hidden;
 }
 .auction-head {
   display: flex; align-items: center; gap: 10px;
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--line-soft);
-  background: linear-gradient(180deg, rgba(244, 205, 111, .06), transparent);
+  padding: 10px 16px;
+  border-bottom: 1px solid rgba(138, 111, 60, .4);
+  background: rgba(244, 205, 111, .04);
 }
 .auc-tabs { display: flex; gap: 6px; }
 .auc-tab {
@@ -5636,7 +5648,25 @@ button.auc-chip:hover { color: var(--gold-bright); border-color: rgba(216, 169, 
   border: 1px solid var(--line); border-radius: 14px;
   box-shadow: 0 14px 44px rgba(0, 0, 0, .7), inset 0 1px 0 rgba(244, 205, 111, .08);
 }
-.market-pop .auc-item-preview { border: none; background: none; padding: 0; }
+/* во всплывашке превью — витриной: крупная иконка со свечением качества,
+   имя и характеристики по центру (на карточках/строках остаётся компакт) */
+.market-pop .auc-item-preview {
+  border: none; background: none; padding: 6px 0 2px;
+  flex-direction: column; align-items: center; text-align: center; gap: 10px;
+}
+.market-pop .auc-preview-ico {
+  width: 74px; height: 74px; font-size: 42px; border-radius: 16px;
+  border-width: 2px;
+  box-shadow: 0 0 26px rgba(var(--qc, 154, 160, 166), .38),
+              inset 0 1px 0 rgba(255, 255, 255, .12);
+}
+.market-pop .auc-preview-info { align-items: center; gap: 6px; }
+.market-pop .auc-preview-name { font-size: 15px; }
+.market-pop .auc-preview-meta { justify-content: center; }
+.market-pop .auc-preview-desc {
+  padding: 7px 10px; border-radius: 9px;
+  background: rgba(0, 0, 0, .25); border: 1px solid rgba(138, 111, 60, .22);
+}
 .market-pop-close {
   position: absolute; top: 7px; right: 7px; z-index: 1;
   width: 26px; height: 26px; line-height: 1; font-size: 13px;
@@ -5786,7 +5816,6 @@ button.auc-chip:hover { color: var(--gold-bright); border-color: rgba(216, 169, 
 .exch-order.sell > span:first-child { color: #e58b76; }
 
 @media (max-width: 720px) {
-  .auction-card { width: calc(100vw - 12px); height: calc(100dvh - 18px); border-radius: 12px; }
   .auc-new { grid-template-columns: 1fr; }
   .exch { grid-template-columns: 1fr; }
   .exch-list { max-height: 160px; }
@@ -5846,16 +5875,6 @@ button.auc-chip:hover { color: var(--gold-bright); border-color: rgba(216, 169, 
 .exch-o-none { font-size: 11px; color: var(--muted); font-style: italic; }
 
 @media (max-width: 860px) {
-  .auction {
-    align-items: flex-start;
-    padding: max(74px, env(safe-area-inset-top)) 8px max(10px, env(safe-area-inset-bottom));
-  }
-  .auction-card {
-    width: 100%;
-    height: calc(100dvh - 88px - env(safe-area-inset-bottom));
-    max-height: calc(100dvh - 88px - env(safe-area-inset-bottom));
-    border-radius: 12px;
-  }
   .auction-body { padding: 10px; }
   .auc-searchbar { flex-wrap: wrap; }
   .auc-searchbar .auc-search { flex-basis: 100%; }
@@ -5882,4 +5901,22 @@ button.auc-chip:hover { color: var(--gold-bright); border-color: rgba(216, 169, 
   .exch-tools .auc-filters { grid-template-columns: 1fr; }
   .exch-newform-row { grid-template-columns: 1fr; }
   .auc-bid { flex-direction: column; align-items: stretch; }
+}
+
+/* ============================================================
+   Единый формат окон на телефоне: почта и аукцион — во весь экран,
+   как гардероб (.dressing-card в @media 700px), с безопасными зонами
+   полноэкранного Telegram
+   ============================================================ */
+@media (max-width: 700px) {
+  .mail-card,
+  .auction-card {
+    width: 100vw;
+    height: 100dvh;
+    max-height: none;
+    padding-top: var(--tg-inset-top);
+    padding-bottom: var(--tg-inset-bottom);
+    border-radius: 0;
+    border: none;
+  }
 }

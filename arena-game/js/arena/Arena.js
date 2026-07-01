@@ -36,7 +36,15 @@ export class Arena {
     // кадров (в оптимизации ~30 к/с). _fps/_cpuMs/_gpuMs — сглаженные метрики для
     // индикатора нагрузки под пингом (см. getPerf / main.js).
     this._perfMode = false;
-    this._dprCap = 2;
+    // телефон (сенсорный экран): рендер заметно экономнее уже ПО УМОЛЧАНИЮ —
+    // dpr-потолок 1.5 (на dpr-3 экранах это вдвое меньше пикселей, чем потолок 2)
+    // и простые PCF-тени вместо мягких. Визуальная разница на маленьком экране
+    // незаметна, а нагрев в бою — главный источник жалоб. Режим «Оптимизация»
+    // поверх этого по-прежнему режет сильнее (тени off, dpr 1, 30 к/с).
+    this._coarse = typeof matchMedia === 'function'
+      && matchMedia('(pointer: coarse)').matches;
+    this._dprDefault = this._coarse ? 1.5 : 2;
+    this._dprCap = this._dprDefault;
     this._minFrameMs = 0;
     this._lastTick = null;
     this._fps = 0;
@@ -50,7 +58,7 @@ export class Arena {
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.1;
     renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.shadowMap.type = this._coarse ? THREE.PCFShadowMap : THREE.PCFSoftShadowMap;
     renderer.domElement.className = 'arena-canvas';
     container.appendChild(renderer.domElement);
     this.renderer = renderer;
@@ -75,7 +83,10 @@ export class Arena {
     const key = new THREE.DirectionalLight(0xffffff, 2.2);
     key.position.set(2.5, 6, 4);
     key.castShadow = true;
-    key.shadow.mapSize.set(2048, 2048);
+    // на телефоне карта теней вдвое меньше: рендер теней — самый дорогой проход
+    // кадра; на маленьком экране разница 1024/2048 неразличима
+    const shadowRes = this._coarse ? 1024 : 2048;
+    key.shadow.mapSize.set(shadowRes, shadowRes);
     key.shadow.camera.left = -4;
     key.shadow.camera.right = 4;
     key.shadow.camera.top = 4;
@@ -268,7 +279,7 @@ export class Arena {
     });
     this.renderer.shadowMap.needsUpdate = true;
     // 2) плотность пикселей и 3) частота кадров
-    this._dprCap = on ? 1 : 2;
+    this._dprCap = on ? 1 : this._dprDefault;
     this._minFrameMs = on ? 30 : 0;   // 30мс ≈ 30 к/с при экране 60/120 Гц
     this._resize();                   // применить новый потолок dpr
   }

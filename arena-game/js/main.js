@@ -321,16 +321,31 @@ function confirmExit() {
   const bar = $('net-loadbar');
   const rawFetch = window.fetch.bind(window);
 
-  // индикатор загрузки: считаем активные запросы, оборачивая fetch
+  // индикатор загрузки: считаем активные запросы, оборачивая fetch.
+  // Дебаунс против мерцания: короткие запросы (< 150 мс) полоску не зажигают,
+  // а зажжённая гаснет не раньше чем через 300 мс — серия мелких запросов
+  // выглядит одной ровной загрузкой, а не стробоскопом.
   let pending = 0;
+  let showT = null, hideT = null, shownAt = 0;
   const isHealth = (u) => /\/api\/health(\?|$)/.test(u);
   window.fetch = (input, init) => {
     const u = typeof input === 'string' ? input : (input && input.url) || '';
     if (isHealth(u)) return rawFetch(input, init);   // пинг бар не мигает
     pending++;
-    bar?.classList.add('busy');
+    clearTimeout(hideT);
+    if (!showT && !bar?.classList.contains('busy')) {
+      showT = setTimeout(() => {
+        showT = null;
+        if (pending > 0 && bar) { bar.classList.add('busy'); shownAt = performance.now(); }
+      }, 150);
+    }
     return rawFetch(input, init).finally(() => {
-      if (--pending <= 0) { pending = 0; bar?.classList.remove('busy'); }
+      if (--pending <= 0) {
+        pending = 0;
+        clearTimeout(showT); showT = null;
+        const left = Math.max(0, 300 - (performance.now() - shownAt));
+        hideT = setTimeout(() => bar?.classList.remove('busy'), left);
+      }
     });
   };
 
@@ -406,6 +421,7 @@ applyPerfMode(perfModePref());
   if (!wrap || !fpsEl) return;
   const q = (el, val) => { if (el) el.dataset.q = val; };
   const update = () => {
+    if (document.hidden) return;   // в фоне индикатор не пересчитываем
     const p = (mode === 'battle' && arena.getPerf) ? arena.getPerf() : null;
     if (!p || !p.running) { wrap.style.display = 'none'; return; }
     wrap.style.display = 'flex';
@@ -5581,7 +5597,11 @@ function renderParamsPanel(el) {
         <button type="button" class="bi-join-btn" data-alloc="str"${fp < 1 ? ' disabled' : ''}>+Сила → Натиск</button>
         <button type="button" class="bi-join-btn" data-alloc="agi"${fp < 1 ? ' disabled' : ''}>+Ловкость → Уклон</button>
         <button type="button" class="bi-join-btn" data-alloc="vit"${fp < 1 ? ' disabled' : ''}>+Выносл. → Оплот</button>
-      </div></div>`;
+      </div>
+      <div style="font-size:11px;color:var(--muted);line-height:1.45;margin-top:8px">
+        Очки питают школу (растят все боевые статы своего угла) и дают:
+        Сила — Мощь (урон), Ловкость — Инициативу и Крит, Выносливость — Здоровье.
+        Сбросить очки можно у Травницы Леи — задание «Зелье забвения».</div></div>`;
   el.querySelectorAll('[data-alloc]').forEach((b) => {
     b.addEventListener('click', async () => {
       if (fp < 1) return;
@@ -5615,7 +5635,8 @@ function renderInvPreview(row) {
     rows.push(['В рюкзаке', '×' + owned]);
   }
 
-  invPreviewEl.classList.remove('hidden');
+  // рамка и подложка превью подкрашиваются качеством предмета (q1–q5)
+  invPreviewEl.className = 'inv-preview' + qClass(isElixir || !!slotName, quality);
   invPreviewEl.innerHTML = `
     <div class="ip-head">
       <span class="ip-ico${qClass(isElixir || !!slotName, quality)}">${item.icon || gearIconFromSlot(slotName) || '📦'}</span>

@@ -552,6 +552,34 @@ STATEMENTS.push(
   `GRANT SELECT, INSERT, UPDATE ON auction_lots, auction_bids, auction_price_history TO game_rw`,
   `GRANT SELECT, INSERT, UPDATE ON exchange_instruments, exchange_orders, exchange_trades, exchange_candles TO game_rw`,
   `GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO game_rw`,
+
+  // ── Характеристики: стартовые очки распределения ─────────────────────────
+  // Новые персонажи получают POINTS_PER_LEVEL очков сразу (см. characters.js):
+  // полностью вложенный игрок попадает в эталонную кривую баланса (10·уровень).
+  // Существующим — разовая доплата +10 (маркер в game_config: миграции гоняются
+  // при каждом старте, без маркера очки капали бы бесконечно).
+  `DO $$
+   BEGIN
+     IF NOT EXISTS (SELECT 1 FROM game_config WHERE key = 'migration.starter_points') THEN
+       UPDATE character_stats SET free_points = free_points + 10;
+       INSERT INTO game_config (key, value) VALUES ('migration.starter_points', 'true'::jsonb);
+     END IF;
+   END $$`,
+
+  // ── Регулярный квест «Зелье забвения»: сброс характеристик ────────────────
+  // Плата: разогнать 5 шаек разбойников (NPC 2) + 10 серебра. Награда —
+  // reset_stats (quests.js возвращает ВСЕ вложенные очки). Повтор — ежедневно.
+  `INSERT INTO quest_templates (id, type, repeatable, name, description, image, level_req,
+      active, giver_npc_id, turnin_npc_id, dialogue, prereq, objectives, rewards)
+   VALUES
+     (1010, 1, 2, 'Зелье забвения',
+      'Травница Лея умеет возвращать вложенные очки характеристик — но зелье забвения требует платы: разгони пять шаек разбойников и принеси 10 серебра на редкие травы.',
+      NULL, 2, TRUE, 101, 101,
+      '{"greeting":"Хочешь распределить силы заново? Есть зелье забвения. Но сначала докажи решимость: разгони пять шаек разбойников и принеси 10 серебра на травы.","progress":"Возвращайся, когда разгонишь пять шаек и соберёшь 10 серебра.","ready":"Всё готово. Выпей — и вложенные очки вернутся к тебе.","done":"Разум чист, очки свободны. Распредели их с умом — а понадобится снова, приходи завтра."}'::jsonb,
+      '{"level":2}'::jsonb,
+      '{"mode":"all","stages":[{"title":"Плата за забвение","text":"Разгони пять шаек разбойников и принеси 10 серебра на травы.","objectives":[{"kind":"kill","npcId":2,"count":5},{"kind":"money","currency":"silver","amount":10,"consume":true}]}]}'::jsonb,
+      '{"reset_stats":true}'::jsonb)
+   ON CONFLICT (id) DO NOTHING`,
 );
 
 export async function runMigrations() {

@@ -226,12 +226,15 @@ async function pairRotateCfg() {
  * при равной ловкости. Значение фиксируется в бойце движка и больше не меняется,
  * поэтому очередь раундов стабильна (см. engine._buildOrder).
  */
-const MAX_MP = 100;   // максимум маны в бою (как в окне «Бой #N»: /api/battles/:id)
-/** Текущая мана персонажа для бойца движка («Эликсир маны» восстанавливает её). */
-async function mpFor(charId) {
+const MAX_MP = 100;   // запасной максимум маны (старая механика без модели)
+/** Текущая мана персонажа для бойца движка («Эликсир маны» восстанавливает её).
+ *  maxMp — из модельного стата «Мана» (панель «Параметры» и бой показывают одно
+ *  и то же число), при выключенной модели — прежние 100. */
+async function mpFor(charId, maxMp = MAX_MP) {
+  const cap = Math.max(1, Math.round(Number(maxMp) || MAX_MP));
   const row = (await game.query(
     `SELECT mp_cur FROM characters WHERE id = $1`, [charId])).rows[0];
-  return { mp: row ? Number(row.mp_cur) || 0 : 0, maxMp: MAX_MP };
+  return { mp: Math.min(cap, row ? Number(row.mp_cur) || 0 : 0), maxMp: cap };
 }
 
 async function initiativeFor(charId, level) {
@@ -256,8 +259,9 @@ async function playerDef(ch, useModel, start, extra = {}) {
   const combat = useModel
     ? await combatModelFor(ch.id, ch.level)
     : await combatProfileFor(ch.id, start);
+  const manaCap = useModel && combat.stats ? combat.stats.mana : MAX_MP;
   return { id: ch.id, charId: ch.id, name: ch.name, level: ch.level, isAI: false,
-    ...combat, ...(await mpFor(ch.id)), ...extra };
+    ...combat, ...(await mpFor(ch.id, manaCap)), ...extra };
 }
 
 /** Подмешать модельные статы NPC (для модельного боя): школа из шаблона или нейтраль. */
@@ -1356,7 +1360,8 @@ export function battleRoutes(app, authed) {
             mp = mr ? mr.mp_cur : 0;
           }
           out.push({ name: f.name, level: f.level, hp: Math.round(f.hp),
-            maxHp: f.maxHp, mp: f.charId ? mp : 0, maxMp: 100, alive: f.alive });
+            maxHp: f.maxHp, mp: f.charId ? Math.min(mp, f.maxMp || MAX_MP) : 0,
+            maxMp: f.maxMp || MAX_MP, alive: f.alive });
         }
         return out;
       };
