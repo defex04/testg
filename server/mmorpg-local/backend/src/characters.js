@@ -303,7 +303,7 @@ export async function allocateStat(charId, attr, amount = 1) {
 export async function publicInfo({ id, name }) {
   const where = id ? `ch.id = $1` : `ch.name = $1`;
   const { rows } = await game.query(
-    `SELECT ch.id, ch.name, ch.level, ch.faction, ch.location_id,
+    `SELECT ch.id, ch.name, ch.level, ch.faction, ch.location_id, ch.online_at,
             l.name AS location_name, p.about
        FROM characters ch
        JOIN locations l ON l.id = ch.location_id
@@ -357,6 +357,7 @@ export async function publicInfo({ id, name }) {
   return {
     id: charId, name: r.name, level: r.level, faction: r.faction,
     location: r.location_name, about: r.about || '', online,
+    lastOnlineAt: r.online_at || null,
     stats, equipment, record,
     combat: combat ? {
       hp: combat.hp, dmgMin: combat.damage?.[0] ?? 0, dmgMax: combat.damage?.[1] ?? 0,

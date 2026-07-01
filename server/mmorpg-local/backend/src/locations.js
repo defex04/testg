@@ -5,11 +5,17 @@ import { activeBattlesInLocation, finishedBattlesInLocation } from './battle/man
 const key = (locId) => `loc:${locId}:players`;
 
 export async function enterLocation(ch) {
-  await redis.hSet(key(ch.location_id), String(ch.id),
-    JSON.stringify({ id: ch.id, name: ch.name, level: ch.level }));
+  await Promise.all([
+    redis.hSet(key(ch.location_id), String(ch.id),
+      JSON.stringify({ id: ch.id, name: ch.name, level: ch.level })),
+    game.query(`UPDATE characters SET online_at = now() WHERE id = $1`, [ch.id]),
+  ]);
 }
 export async function leavePresence(ch) {
-  await redis.hDel(key(ch.location_id), String(ch.id));
+  await Promise.all([
+    redis.hDel(key(ch.location_id), String(ch.id)),
+    game.query(`UPDATE characters SET online_at = now() WHERE id = $1`, [ch.id]),
+  ]);
 }
 
 export async function clearAllPresence() {

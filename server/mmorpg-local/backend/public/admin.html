@@ -10,9 +10,11 @@
     --ink:#12161F; --ink2:#181E2B; --panel:#1C2333; --line:#2A3147;
     --paper:#E9E1CD; --dim:#9A937F; --brass:#C9953F; --brass2:#E7BD6E;
     --credit:#7FBF7A; --debit:#E07A6A; --mono:"Cascadia Mono",ui-monospace,Consolas,monospace;
+    --admin-h:100dvh;
+    --tg-inset-top:0px; --tg-inset-bottom:0px; --tg-inset-left:0px; --tg-inset-right:0px;
   }
   *{box-sizing:border-box}
-  html,body{margin:0;height:100%}
+  html,body{margin:0;width:100%;height:var(--admin-h);overflow:hidden}
   body{background:var(--ink);color:var(--paper);font:14px/1.45 system-ui,"Segoe UI",sans-serif}
   ::selection{background:var(--brass);color:var(--ink)}
   button{font:inherit;cursor:pointer;background:var(--panel);color:var(--paper);
@@ -28,28 +30,33 @@
   textarea{font-family:var(--mono);font-size:12.5px;width:100%}
   label{font-size:12px;color:var(--dim);display:block;margin-bottom:3px}
 
-  #app{display:none;height:100%;grid-template-columns:208px 1fr;grid-template-rows:46px 1fr}
+  #app{display:none;height:var(--admin-h);min-height:0;overflow:hidden;
+    grid-template-columns:208px minmax(0,1fr);grid-template-rows:46px minmax(0,1fr);
+    padding:max(0px,env(safe-area-inset-top),var(--tg-inset-top))
+            max(0px,env(safe-area-inset-right),var(--tg-inset-right))
+            max(0px,env(safe-area-inset-bottom),var(--tg-inset-bottom))
+            max(0px,env(safe-area-inset-left),var(--tg-inset-left))}
   aside{grid-row:1/3;background:var(--ink2);border-right:1px solid var(--line);
-        display:flex;flex-direction:column}
+        display:flex;flex-direction:column;min-height:0;overflow:hidden}
   .wordmark{font-family:Georgia,'Times New Roman',serif;font-variant:small-caps;
     letter-spacing:.14em;font-size:19px;color:var(--brass2);
     padding:16px 18px 12px;border-bottom:1px solid var(--line)}
   .wordmark small{display:block;font:11px/1.4 var(--mono);letter-spacing:.08em;
     color:var(--dim);font-variant:normal}
-  nav{padding:10px 0;overflow:auto}
+  nav{flex:1 1 auto;min-height:0;padding:10px 0;overflow:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain}
   nav button{display:block;width:100%;text-align:left;background:none;border:none;
     border-left:3px solid transparent;border-radius:0;padding:8px 18px;color:var(--dim)}
   nav button:hover{color:var(--paper)}
   nav button.active{color:var(--brass2);border-left-color:var(--brass);
     background:rgba(201,149,63,.07)}
-  header{display:flex;align-items:center;gap:14px;padding:0 18px;
+  header{display:flex;align-items:center;gap:14px;min-width:0;min-height:0;padding:0 18px;
     border-bottom:1px solid var(--line);background:var(--ink2)}
   header h1{font-family:Georgia,serif;font-variant:small-caps;letter-spacing:.1em;
-    font-size:16px;font-weight:600;margin:0}
+    font-size:16px;font-weight:600;margin:0;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .stamp-env{font:11px var(--mono);letter-spacing:.18em;color:var(--brass2);
     border:1px solid var(--brass);padding:2px 8px;border-radius:2px}
-  #hdr-online{margin-left:auto;font:12px var(--mono);color:var(--dim)}
-  main{overflow:auto;padding:18px 22px 70px}
+  #hdr-online{margin-left:auto;font:12px var(--mono);color:var(--dim);white-space:nowrap}
+  main{min-height:0;overflow:auto;padding:18px 22px 70px}
 
   table{border-collapse:collapse;width:100%;font-family:var(--mono);font-size:12.5px}
   th{font:11px var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--dim);
@@ -186,17 +193,18 @@
 
   /* Телефон: боковое меню превращается в верхнюю ленту, всё в одну колонку */
   @media (max-width:640px){
-    #app{grid-template-columns:1fr;grid-template-rows:auto auto 1fr}
+    #app{grid-template-columns:minmax(0,1fr);grid-template-rows:auto auto minmax(0,1fr)}
     aside{grid-row:auto;grid-column:1;flex-direction:row;align-items:stretch;
-      border-right:none;border-bottom:1px solid var(--line);overflow-x:auto}
+      border-right:none;border-bottom:1px solid var(--line);overflow-x:auto;overflow-y:hidden}
     aside .wordmark{display:none}
-    nav{display:flex;flex-direction:row;padding:0;overflow-x:auto;width:100%}
+    nav{display:flex;flex-direction:row;min-width:0;padding:0;overflow-x:auto;overflow-y:hidden;width:100%}
     nav button{border-left:none;border-bottom:3px solid transparent;border-radius:0;
       white-space:nowrap;padding:11px 13px;font-size:13px}
     nav button.active{border-left:none;border-bottom-color:var(--brass);background:rgba(201,149,63,.07)}
-    header{padding:0 12px;gap:8px}
+    header{min-height:42px;padding:0 12px;gap:8px}
     header h1{font-size:14px}
     .stamp-env{display:none}
+    #hdr-online{display:none}
     main{padding:12px 12px 64px;overflow-x:auto;-webkit-overflow-scrolling:touch}
     .grid2,.form{grid-template-columns:1fr}
     .cards{gap:8px}.card{min-width:0;flex:1 1 44%;padding:10px 12px}
@@ -258,7 +266,11 @@
   @media (max-width:640px){.modal-card,.modal-card.wide{width:100%}
     .stat-row{grid-template-columns:1fr 88px 30px}}
 
-  #login{height:100%;display:flex;align-items:center;justify-content:center}
+  #login{height:var(--admin-h);display:flex;align-items:center;justify-content:center;
+    overflow:auto;padding:max(16px,env(safe-area-inset-top),var(--tg-inset-top))
+            max(12px,env(safe-area-inset-right),var(--tg-inset-right))
+            max(16px,env(safe-area-inset-bottom),var(--tg-inset-bottom))
+            max(12px,env(safe-area-inset-left),var(--tg-inset-left))}
   #login form{background:var(--ink2);border:1px solid var(--line);border-radius:4px;
     padding:28px 30px;width:300px;text-align:center}
   #login .wordmark{border:none;padding:0 0 14px}
@@ -297,6 +309,48 @@ const dt = (v) => v ? new Date(v).toLocaleString('ru-RU',
   {day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : '—';
 
 let KEY = sessionStorage.getItem('adminKey') || '';
+const ADMIN_TG = window.Telegram && window.Telegram.WebApp;
+
+function syncAdminViewport(){
+  const root = document.documentElement;
+  const vv = window.visualViewport;
+  let h = window.innerHeight || root.clientHeight || 0;
+  if (ADMIN_TG && ADMIN_TG.viewportHeight) h = Math.min(h, ADMIN_TG.viewportHeight);
+  if (vv && vv.height) h = Math.min(h, vv.height);
+  h = Math.round(h || window.innerHeight || root.clientHeight || 0);
+  if (h > 0) root.style.setProperty('--admin-h', h + 'px');
+
+  const sa = (ADMIN_TG && ADMIN_TG.safeAreaInset) || {};
+  const ca = (ADMIN_TG && ADMIN_TG.contentSafeAreaInset) || {};
+  const px = (a, b) => Math.max(0, Math.round(Number(a || 0) + Number(b || 0))) + 'px';
+  root.style.setProperty('--tg-inset-top', px(sa.top, ca.top));
+  root.style.setProperty('--tg-inset-bottom', px(sa.bottom, ca.bottom));
+  root.style.setProperty('--tg-inset-left', px(sa.left, ca.left));
+  root.style.setProperty('--tg-inset-right', px(sa.right, ca.right));
+}
+
+function initAdminViewport(){
+  if (ADMIN_TG) {
+    try { ADMIN_TG.ready(); ADMIN_TG.expand(); } catch (e) {}
+    try { if (ADMIN_TG.disableVerticalSwipes) ADMIN_TG.disableVerticalSwipes(); } catch (e) {}
+    if (ADMIN_TG.onEvent) {
+      ['viewportChanged', 'safeAreaChanged', 'contentSafeAreaChanged', 'fullscreenChanged']
+        .forEach((ev) => { try { ADMIN_TG.onEvent(ev, syncAdminViewport); } catch (e) {} });
+    }
+  }
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', syncAdminViewport);
+    window.visualViewport.addEventListener('scroll', syncAdminViewport);
+  }
+  window.addEventListener('resize', syncAdminViewport);
+  window.addEventListener('orientationchange', () => {
+    syncAdminViewport();
+    setTimeout(syncAdminViewport, 80);
+    setTimeout(syncAdminViewport, 320);
+  });
+  syncAdminViewport();
+}
+initAdminViewport();
 
 async function api(path, body){
   const r = await fetch('/admin/api' + path, {
@@ -656,7 +710,7 @@ R.chars = async (q = '') => {
       {h:'Опыт',v:r=>r.exp},{h:'HP',v:r=>r.hp_cur},{h:'Локация',v:r=>r.location},
       {h:'Аккаунт',html:r=>`<td>#${r.account_id} · ${r.provider===1
         ? (r.tg_username ? '@' + esc(r.tg_username) : 'telegram') : 'dev'}</td>`},
-      {h:'Был онлайн',v:r=>dt(r.online_at)},
+      {h:'Был онлайн',v:r=>r.online ? 'сейчас' : dt(r.online_at)},
     ], rows, (r)=>`class="click" onclick="openChar(${r.id})"`)}`;
 };
 R._cs = () => show('chars', $('#q-char').value.trim());
@@ -685,9 +739,10 @@ window.openChar = async (id) => {
   $('#main').innerHTML = `
   <div class="toolbar"><button onclick="show('chars')">← К списку</button>
     <h2 style="margin:0;font-family:Georgia,serif;font-variant:small-caps">
-      ${esc(c.name)} <span class="muted">#${c.id} · ур.${c.level} · ${esc(c.location)}</span></h2>
+      ${esc(c.name)} <span class="muted">#${c.id} · ур.${c.level} · ${esc(c.location)} · был онлайн ${c.online ? 'сейчас' : dt(c.online_at)}</span></h2>
     <button onclick="renameChar(${c.id},'${esc(c.name)}')">Переименовать</button></div>
   <div class="panel"><h3>Аккаунт</h3>${accountInfo}
+    <div class="logline"><span class="muted">Персонаж был онлайн:</span> ${c.online ? 'сейчас' : dt(c.online_at)}</div>
     <div class="toolbar" style="margin-top:10px">
       <button onclick="show('accounts')">Все аккаунты</button>
       ${a ? `<button class="danger" onclick="deleteAccount(${a.id})">Удалить аккаунт</button>` : ''}

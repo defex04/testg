@@ -183,14 +183,19 @@ export function adminRoutes(app) {
   app.get('/admin/api/characters', guard, async (req, res) => {
     const q = String(req.query.q || '').trim();
     const { rows } = await game.query(
-      `SELECT ch.id, ch.name, ch.level, ch.exp, l.name AS location,
+      `SELECT ch.id, ch.name, ch.level, ch.exp, ch.location_id, l.name AS location,
               ch.account_id, ch.hp_cur, ch.online_at, ch.created_at
          FROM characters ch JOIN locations l ON l.id = ch.location_id
         WHERE ch.status = 1
           AND ($1 = '' OR ch.name ILIKE '%' || $1 || '%' OR ch.id::text = $1)
         ORDER BY ch.id DESC LIMIT 100`, [q]);
     const byAcc = await accountIdentities([...new Set(rows.map((r) => r.account_id))]);
+    const online = Object.fromEntries(await Promise.all(rows.map(async (r) => [
+      r.id,
+      await redis.hExists(`loc:${r.location_id}:players`, String(r.id)).catch(() => false),
+    ])));
     res.json(rows.map((r) => ({ ...r,
+      online: !!online[r.id],
       provider: (byAcc[r.account_id] || {}).provider ?? null,
       tg_username: (byAcc[r.account_id] || {}).username ?? null })));
   });
@@ -201,6 +206,7 @@ export function adminRoutes(app) {
       `SELECT ch.*, l.name AS location FROM characters ch
          JOIN locations l ON l.id = ch.location_id WHERE ch.id = $1`, [id])).rows[0];
     if (!ch) throw bad(404, 'not_found');
+    ch.online = await redis.hExists(`loc:${ch.location_id}:players`, String(id)).catch(() => false);
     const [stats, inv, injuries, battles, ledger, quests] = await Promise.all([
       game.query(`SELECT * FROM character_stats WHERE character_id = $1`, [id]),
       game.query(   // рюкзак целиком: инвентарь, экипировка, банк

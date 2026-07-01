@@ -2520,6 +2520,7 @@ async function openPlayerInfo(peer) {
   binfoTitle.textContent = p.name;
   const self = String(p.id) === String(PLAYER.id);
   const sectionsHtml = pinfoSectionsHtml(p);   // атрибуты · параметры · снаряжение · статистика
+  const lastOnline = p.online ? 'сейчас' : (p.lastOnlineAt ? mailDate(p.lastOnlineAt) : '—');
   // распределение очков живёт во вкладке «Параметры» рюкзака; здесь карточка только показывает
 
   const actionsHtml = self ? '' : `
@@ -2535,6 +2536,7 @@ async function openPlayerInfo(peer) {
         <div class="pinfo-row"><span>Локация</span><b>${esc(p.location || '—')}</b></div>
         <div class="pinfo-row"><span>Статус</span>
           <b class="${p.online ? 'pinfo-on' : 'pinfo-off'}">${p.online ? 'в сети' : 'не в сети'}</b></div>
+        <div class="pinfo-row"><span>Был в сети</span><b>${esc(lastOnline)}</b></div>
       </div>
       ${p.about ? `<div class="pinfo-about">${esc(p.about)}</div>` : ''}
       ${sectionsHtml}
