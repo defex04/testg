@@ -842,6 +842,109 @@ function objectiveLine(o) {
   </div>`;
 }
 
+function questRewardItemIcon(it) {
+  const raw = it?.icon ? String(it.icon) : '';
+  if (raw && !/[A-Za-z]/.test(raw)) return raw;
+  const ek = Number(it?.type) === 4 ? elixirKindFromStats(it.stats) : null;
+  if (ek && ELIXIR_EMOJI[ek]) return ELIXIR_EMOJI[ek];
+  if (it?.kind === 'weapon' || it?.kind === 'armor' || it?.kind === 'amulet') {
+    return gearIconForItem(it);
+  }
+  return shopIcon(it?.kind || 'item', it);
+}
+
+function questRewardItemsHtml(q) {
+  const items = Array.isArray(q.rewardItems) ? q.rewardItems : [];
+  if (!items.length) return '';
+  return `<div class="npc-reward-items" aria-label="Предметы награды">
+    ${items.map((it, idx) => {
+      const count = Math.max(1, Number(it.count) || 1);
+      const quality = Math.min(5, Math.max(1, Number(it.quality) || 1));
+      return `<button type="button" class="npc-reward-item q${quality}"
+          data-reward-quest="${esc(q.id)}" data-reward-index="${idx}"
+          title="${esc(it.name || 'Предмет')}">
+        <span class="npc-reward-ico">${esc(questRewardItemIcon(it))}</span>
+        ${count > 1 ? `<b>×${esc(count)}</b>` : ''}
+      </button>`;
+    }).join('')}
+  </div>`;
+}
+
+function questRewardTypeLabel(it) {
+  const type = Number(it?.type);
+  if (type === 4) {
+    const ek = elixirKindFromStats(it.stats) || it.kind;
+    return ELIXIR_KIND_LABEL[ek] || 'Расходник';
+  }
+  if (it?.kind === 'weapon') return 'Оружие';
+  if (it?.kind === 'armor') return 'Броня';
+  if (it?.kind === 'amulet') return 'Амулет';
+  if (it?.kind === 'resource' || type === 3 || type === 6) return 'Ресурс';
+  return 'Предмет';
+}
+
+function questRewardRows(it) {
+  const rows = [];
+  const count = Math.max(1, Number(it?.count) || 1);
+  if (count > 1) rows.push(['Количество', '×' + count]);
+  rows.push(['Тип', questRewardTypeLabel(it)]);
+  if (Number(it?.levelReq) > 1) rows.push(['Уровень', 'с ' + Number(it.levelReq)]);
+  const slotName = slotNameFor(it?.slot);
+  if (slotName) rows.push(['Слот', SLOT_META[slotName]?.name || slotName]);
+  const stats = it?.stats || null;
+  const clsName = { natisk: 'Натиск', uklon: 'Уклон', oplot: 'Оплот' }[stats && stats.cls];
+  if (clsName) rows.push(['Класс', clsName]);
+  if (Number(it?.type) === 4) {
+    const ek = elixirKindFromStats(stats) || it.kind;
+    const fx = elixirEffectText(ek, stats);
+    if (fx) rows.push(['Эффект', fx]);
+  } else {
+    const gs = gearStatsText(stats);
+    if (gs) rows.push(['Характеристики', gs]);
+  }
+  return rows;
+}
+
+let questRewardPreviewCleanup = null;
+function closeQuestRewardPreview() {
+  if (questRewardPreviewCleanup) {
+    questRewardPreviewCleanup();
+    return;
+  }
+  document.querySelector('.quest-reward-preview')?.remove();
+}
+
+function openQuestRewardPreview(it) {
+  closeQuestRewardPreview();
+  const box = document.createElement('div');
+  box.className = 'quest-reward-preview';
+  const rows = questRewardRows(it);
+  box.innerHTML = `
+    <div class="qrp-card" role="dialog" aria-modal="true" aria-label="${esc(it?.name || 'Предмет')}">
+      <div class="qrp-head">
+        <span class="qrp-ico q${Math.min(5, Math.max(1, Number(it?.quality) || 1))}">${esc(questRewardItemIcon(it))}</span>
+        <div class="qrp-title">
+          <div class="qrp-name">${esc(it?.name || 'Предмет')}</div>
+          <div class="qrp-kind">${esc(questRewardTypeLabel(it))}</div>
+        </div>
+        <button type="button" class="qrp-close" title="Закрыть">×</button>
+      </div>
+      <div class="qrp-rows">${rows.map(([k, v]) =>
+        `<div class="qrp-row"><span>${esc(k)}</span><b>${esc(String(v))}</b></div>`).join('')}</div>
+    </div>`;
+  const onKey = (e) => { if (e.key === 'Escape') close(); };
+  const close = () => {
+    box.remove();
+    document.removeEventListener('keydown', onKey);
+    if (questRewardPreviewCleanup === close) questRewardPreviewCleanup = null;
+  };
+  box.addEventListener('click', (e) => { if (e.target === box) close(); });
+  box.querySelector('.qrp-close')?.addEventListener('click', close);
+  document.addEventListener('keydown', onKey);
+  questRewardPreviewCleanup = close;
+  document.body.appendChild(box);
+}
+
 function renderNpcQuest(q, npc) {
   const p = q.progress || {};
   const objectives = (p.objectives || []).map(objectiveLine).join('');
@@ -850,8 +953,10 @@ function renderNpcQuest(q, npc) {
     : '';
   const reward = q.rewardText
     ? `<div class="npc-quest-reward">Награда: ${esc(q.rewardText)}</div>` : '';
+  const rewardItems = questRewardItemsHtml(q);
   let action = '';
-  if (q.canAccept) action = `<button class="npc-quest-btn" data-quest-accept="${q.id}">Принять</button>`;
+  if (q.canTalk && q.conversation) action = `<button class="npc-quest-btn" data-quest-talk="${q.id}">Поговорить</button>`;
+  else if (q.canAccept) action = `<button class="npc-quest-btn" data-quest-accept="${q.id}">Принять</button>`;
   else if (q.canComplete || q.canAdvance) action =
     `<button class="npc-quest-btn" data-quest-complete="${q.id}">${q.canAdvance ? 'Продолжить' : 'Завершить'}</button>`;
   else if (q.status === 'active') action = `<button class="npc-quest-btn" disabled>В процессе</button>`;
@@ -866,8 +971,51 @@ function renderNpcQuest(q, npc) {
     ${p.stageText ? `<div class="npc-quest-text">${esc(p.stageText)}</div>` : ''}
     ${objectives ? `<div class="npc-objectives">${objectives}</div>` : ''}
     ${reward}
+    ${rewardItems}
     ${action ? `<div class="npc-quest-actions">${action}</div>` : ''}
   </div>`;
+}
+
+function startNpcConversation(npc, conv) {
+  let step = 0;
+  const steps = (conv.steps || []).filter(Boolean);
+  const draw = () => {
+    const last = step >= steps.length - 1;
+    npcDialogTitle.textContent = conv.title || npc.name || 'Разговор';
+    npcDialogBody.innerHTML = `
+      <div class="npc-convo">
+        ${npcAvatarHtml(npc, 'npc-portrait')}
+        <div class="npc-convo-main">
+          <div class="npc-convo-kicker">${esc(npc.name || 'NPC')}</div>
+          <div class="npc-convo-text">${esc(steps[step] || '...')}</div>
+          <div class="npc-convo-progress">${step + 1} / ${Math.max(1, steps.length)}</div>
+          <div class="npc-quest-actions">
+            <button class="npc-quest-btn secondary" type="button" data-convo-back>Назад</button>
+            <button class="npc-quest-btn" type="button" data-convo-next>
+              ${last ? esc(conv.finishLabel || 'Завершить разговор') : 'Далее'}
+            </button>
+          </div>
+        </div>
+      </div>`;
+    npcDialogBody.querySelector('[data-convo-back]').addEventListener('click', () => openNpcDialog(npc.id, true));
+    npcDialogBody.querySelector('[data-convo-next]').addEventListener('click', async (e) => {
+      if (!last) {
+        step++;
+        draw();
+        return;
+      }
+      e.currentTarget.disabled = true;
+      try {
+        const out = await api.npcTalk(npc.id, conv.questId);
+        showToast(out.updated ? 'Разговор завершён' : 'Разговор уже засчитан');
+        renderNpcDialog(out);
+      } catch (err) {
+        showToast('Не удалось завершить разговор: ' + (err.message || ''));
+        e.currentTarget.disabled = false;
+      }
+    });
+  };
+  draw();
 }
 
 function renderNpcDialog(data) {
@@ -887,6 +1035,12 @@ function renderNpcDialog(data) {
       ${dialogs.length ? dialogs.map((q) => renderNpcQuest(q, npc)).join('')
         : '<div class="npc-empty">Доступных диалогов сейчас нет.</div>'}
     </div>`;
+  npcDialogBody.querySelectorAll('[data-quest-talk]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const q = dialogs.find((x) => String(x.id) === String(btn.dataset.questTalk));
+      if (q?.conversation) startNpcConversation(npc, q.conversation);
+    });
+  });
   npcDialogBody.querySelectorAll('[data-quest-accept]').forEach((btn) => {
     btn.addEventListener('click', async () => {
       btn.disabled = true;
@@ -916,6 +1070,13 @@ function renderNpcDialog(data) {
       }
     });
   });
+  npcDialogBody.querySelectorAll('[data-reward-quest][data-reward-index]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const q = dialogs.find((x) => String(x.id) === String(btn.dataset.rewardQuest));
+      const item = q?.rewardItems?.[Number(btn.dataset.rewardIndex)];
+      if (item) openQuestRewardPreview(item);
+    });
+  });
 }
 
 async function openNpcDialog(id, quiet = false) {
@@ -932,9 +1093,15 @@ async function openNpcDialog(id, quiet = false) {
   }
 }
 
-$('npc-dialog-close')?.addEventListener('click', () => npcDialogEl.classList.add('hidden'));
+$('npc-dialog-close')?.addEventListener('click', () => {
+  closeQuestRewardPreview();
+  npcDialogEl.classList.add('hidden');
+});
 npcDialogEl?.addEventListener('click', (e) => {
-  if (e.target === npcDialogEl) npcDialogEl.classList.add('hidden');
+  if (e.target === npcDialogEl) {
+    closeQuestRewardPreview();
+    npcDialogEl.classList.add('hidden');
+  }
 });
 
 /** Испить живой воды: бафф +10% к HP и урону на 10 минут (применяется в бою/панели). */
@@ -961,7 +1128,7 @@ const SHOP_ERRORS = {
 let shopCharLevel = 1;          // уровень игрока для блокировки покупок не по уровню
 const SHOP_EMOJI = { health: '🧪', power: '⚗️', mana: '🔮', blood: '🩸',
   escape: '🏃', poison: '☠️', heal_scroll: '🩹', cleanse: '🌀', elixir: '⚗️',
-  weapon: '⚔️', armor: '🛡️', amulet: '📿' };
+  weapon: '⚔️', armor: '🛡️', amulet: '📿', resource: '⛏️', item: '📦' };
 
 // характеристики предмета (модель) → краткая строка для витрины/рюкзака
 const GEAR_STAT_LABEL = { power: 'Мощь', health: 'HP', accuracy: 'Точность',

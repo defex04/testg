@@ -226,6 +226,64 @@ function rewardText(rewards = {}) {
   return parts.join(', ');
 }
 
+function rewardItemSpec(reward) {
+  const templateId = asId(reward?.templateId ?? reward?.template_id ?? reward?.id ?? reward);
+  if (!templateId) return null;
+  return {
+    templateId,
+    count: Math.max(1, asInt(reward?.count ?? reward?.quantity ?? 1, 1)),
+  };
+}
+
+function rewardItemKind(tpl) {
+  const type = Number(tpl?.type);
+  if (type === 1) return 'weapon';
+  if (type === 2) return 'armor';
+  if (type === 5) return 'amulet';
+  if (type === 4) {
+    const s = tpl.base_stats || {};
+    if (s.escape) return 'escape';
+    if (s.scroll === 'poison') return 'poison';
+    if (s.scroll === 'heal') return 'heal_scroll';
+    if (s.scroll === 'cleanse') return 'cleanse';
+    if (s.kind === 'mana' || s.mana_pct != null) return 'mana';
+    if (s.kind === 'blood' || s.crit_add != null) return 'blood';
+    if (s.power_mult != null) return 'power';
+    if (s.heal_pct != null || s.heal != null) return 'health';
+    return 'elixir';
+  }
+  if (type === 3 || type === 6) return 'resource';
+  return 'item';
+}
+
+async function rewardItemsView(client, rewards = {}) {
+  const specs = toArray(rewards.items).map(rewardItemSpec).filter(Boolean);
+  if (!specs.length) return [];
+  const ids = [...new Set(specs.map((s) => s.templateId))];
+  const { rows } = await client.query(
+    `SELECT id, name, type, quality, level_req, slot, base_stats, icon, stackable
+       FROM item_templates
+      WHERE id = ANY($1::int[])`, [ids]);
+  const byId = new Map(rows.map((r) => [Number(r.id), r]));
+  return specs.map((spec) => {
+    const tpl = byId.get(spec.templateId);
+    if (!tpl) return null;
+    return {
+      templateId: Number(tpl.id),
+      count: spec.count,
+      name: tpl.name,
+      icon: tpl.icon || null,
+      type: Number(tpl.type) || 0,
+      kind: rewardItemKind(tpl),
+      quality: Number(tpl.quality) || 1,
+      levelReq: Number(tpl.level_req) || 1,
+      slot: tpl.slot != null ? Number(tpl.slot) : null,
+      stats: tpl.base_stats || null,
+      stackable: tpl.stackable === true,
+    };
+  }).filter(Boolean);
+}
+
 async function prereqOk(client, charId, q, level) {
   const p = q.prereq || {};
   const minLevel = Math.max(asInt(p.level ?? p.minLevel ?? 1, 1), asInt(q.level_req, 1));
@@ -295,6 +353,44 @@ function dialogueText(q, status, view) {
   return d.greeting || d.start || q.description || '';
 }
 
+const textLines = (v) => {
+  if (Array.isArray(v)) return v.map((x) => String(x || '').trim()).filter(Boolean);
+  if (typeof v === 'string' && v.trim()) return [v.trim()];
+  return [];
+};
+
+function conversationFor(q, npcId, view) {
+  const stage = view.norm.stages[view.stage] || { objectives: [] };
+  const talkIndex = stage.objectives.findIndex((o) =>
+    o.kind === 'talk' && objNpcId(o) === npcId);
+  if (talkIndex < 0) return null;
+  const activeTalk = view.objectives[talkIndex];
+  if (!activeTalk || activeTalk.done) return null;
+
+  const d = q.dialogue || {};
+  const byNpc = d.talk?.[npcId] ?? d.talk?.[String(npcId)]
+    ?? d.talkSteps?.[npcId] ?? d.talkSteps?.[String(npcId)]
+    ?? d.steps?.[npcId] ?? d.steps?.[String(npcId)];
+  let steps = textLines(byNpc);
+  if (!steps.length) {
+    steps = textLines(d.talk || d.talkSteps || d.conversation || d.steps);
+  }
+  if (!steps.length) {
+    steps = [
+      stage.text || d.progress || d.greeting || q.description || '',
+      'Я рассказал всё, что знаю. Теперь можно возвращаться к поручению.',
+    ].filter(Boolean);
+  }
+  if (steps.length === 1) steps.push('Разговор окончен. Запомни главное и передай дальше.');
+  return {
+    questId: q.id,
+    npcId,
+    title: stage.title || q.name,
+    steps,
+    finishLabel: d.finishLabel || 'Завершить разговор',
+  };
+}
+
 async function dialogEntries(client, charId, npcId) {
   const ch = await charLevelAndLocation(client, charId);
   const { rows: quests } = await client.query(
@@ -354,6 +450,8 @@ async function dialogEntries(client, charId, npcId) {
           : 'Завершено';
       }
     }
+    const conversation = row && Number(row.status) === 1
+      ? conversationFor(q, npcId, view) : null;
 
     entries.push({
       id: q.id,
@@ -365,10 +463,13 @@ async function dialogEntries(client, charId, npcId) {
       canAccept,
       canComplete,
       canAdvance,
+      canTalk: !!conversation,
+      conversation,
       dialogue: dialogueText(q, status, view),
       repeatable: q.repeatable,
       rewards: q.rewards || {},
       rewardText: rewardText(q.rewards || {}),
+      rewardItems: await rewardItemsView(client, q.rewards || {}),
       progress: {
         stage: view.stage,
         stages: view.stages,
@@ -542,13 +643,15 @@ export async function completeQuest(charId, questId, npcId = null) {
   return tx((client) => completeQuestInternal(client, charId, questId, npcId));
 }
 
-async function incrementActiveObjective(charId, kind, match, notify) {
+async function incrementActiveObjective(charId, kind, match, notify, questId = null) {
   const { rows } = await game.query(
     `SELECT q.*, cq.progress
        FROM character_quests cq
        JOIN quest_templates q ON q.id = cq.quest_id
       WHERE cq.character_id = $1 AND cq.status = 1 AND q.active = TRUE
-      ORDER BY q.id`, [charId]);
+        AND ($2::int IS NULL OR q.id = $2)
+      ORDER BY q.id`, [charId, questId]);
+  let updated = 0;
   for (const q of rows) {
     const view = await questProgressView(game, charId, q, { progress: q.progress });
     const stage = view.norm.stages[view.stage] || { objectives: [] };
@@ -566,6 +669,7 @@ async function incrementActiveObjective(charId, kind, match, notify) {
       }
     }
     if (!changed) continue;
+    updated++;
     await game.query(
       `UPDATE character_quests SET progress = $3
         WHERE character_id = $1 AND quest_id = $2`,
@@ -589,11 +693,12 @@ async function incrementActiveObjective(charId, kind, match, notify) {
       }
     }
   }
+  return { ok: true, updated };
 }
 
-export async function onNpcTalk(charId, npcId, notify = null) {
-  await incrementActiveObjective(charId, 'talk',
-    (o) => objNpcId(o) === Number(npcId), notify);
+export async function onNpcTalk(charId, npcId, notify = null, questId = null) {
+  return incrementActiveObjective(charId, 'talk',
+    (o) => objNpcId(o) === Number(npcId), notify, questId);
 }
 
 export async function onHuntVictory(charId, event = {}, notify = () => {}) {
@@ -647,8 +752,16 @@ export function questRoutes(app, authed) {
   app.get('/api/npcs/:id/dialog', authed, async (req, res) => {
     const npcId = Number(req.params.id);
     const npc = await validateNpcHere(game, req.session.character_id, npcId);
-    await onNpcTalk(req.session.character_id, npcId);
     res.json({ npc, dialogs: await dialogEntries(game, req.session.character_id, npcId) });
+  });
+
+  app.post('/api/npcs/:id/talk', authed, async (req, res) => {
+    const npcId = Number(req.params.id);
+    const questId = asId(req.body?.questId ?? req.body?.quest_id);
+    if (!questId) throw bad(400, 'quest_required');
+    const npc = await validateNpcHere(game, req.session.character_id, npcId);
+    const result = await onNpcTalk(req.session.character_id, npcId, null, questId);
+    res.json({ ...result, npc, dialogs: await dialogEntries(game, req.session.character_id, npcId) });
   });
 
   app.post('/api/quests/:id/accept', authed, async (req, res) => {

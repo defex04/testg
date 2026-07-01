@@ -2103,12 +2103,48 @@ R.quests = async () => {
     {h:'Награда',v:r=>{const w=r.rewards||{};return [w.copper&&w.copper+' меди',
       w.silver&&w.silver+' серебра',w.gold&&w.gold+' золота',w.exp&&w.exp+' опыта',
       (w.items||[]).length&&'предметы'].filter(Boolean).join(', ')||'—';}},
-    {h:'Выполнили',v:r=>r.completed_by},
+    {h:'Выполнили',html:r=>`<td><button class="sm" onclick="event.stopPropagation();openQuestCompletions(${r.id})">
+      ${r.completed_by || 0}</button></td>`},
   ], rows, (r)=>`class="click" onclick="openQuest(${r.id})"`)}`;
 };
 window.openQuest = async (id) => {
   const rows = await api('/quests');
   editQuest(rows.find((x) => x.id === id));
+};
+window.openQuestCompletions = async (id) => {
+  try {
+    const d = await api(`/quests/${id}/completions`);
+    const rows = d.characters || [];
+    openModal('Кто выполнил задание #' + d.quest.id, `
+      <div class="toolbar">
+        <button onclick="closeModal();openQuest(${d.quest.id})">Открыть задание</button>
+        <span class="muted">${esc(d.quest.name)} · выполнений: ${rows.length}</span>
+      </div>
+      ${table([
+        {h:'Игрок',html:r=>`<td><a href="#" onclick="closeModal();openChar(${r.character_id});return false"
+          style="color:var(--brass2)">${esc(r.name)}</a> <span class="muted">#${r.character_id}</span></td>`},
+        {h:'Ур.',v:r=>r.level},
+        {h:'Локация',v:r=>r.location || '—'},
+        {h:'Выполнил',v:r=>dt(r.completed_at)},
+        {h:'Повтор',v:r=>dt(r.available_again_at)},
+        {h:'',html:r=>`<td><button class="sm danger"
+          onclick="resetQuestForChar(${d.quest.id},${r.character_id},${esc(JSON.stringify(r.name || ''))})">Перезапустить</button></td>`},
+      ], rows)}
+      <p class="muted">Перезапуск снимает прохождение у выбранного игрока и делает квест доступным заново. Уже выданные награды не отнимаются.</p>
+    `, { wide:true });
+  } catch (e) { fail(e); }
+};
+window.resetQuestForChar = async (questId, charId, name) => {
+  const r = await formModal({ title: `Перезапустить квест для ${name || '#' + charId}`, submit:'Перезапустить', fields:[
+    { key:'note', label:'Причина (в аудит)', type:'text',
+      help:'Прогресс и отметка выполнения будут удалены; награды не отнимаются.' },
+  ]});
+  if (!r) return;
+  try {
+    await api(`/quests/${questId}/reset`, { character_id:charId, note:r.note || null });
+    ok(`квест #${questId} перезапущен для #${charId}`);
+    openQuestCompletions(questId);
+  } catch (e) { fail(e); }
 };
 window.editQuest = async (r) => {
   const npcs = await api('/npcs');
@@ -2131,12 +2167,18 @@ window.editQuest = async (r) => {
       progress:'Вернись, когда выполнишь поручение.',
       ready:'Отлично, покажи результат.',
       done:'Спасибо. Дело сделано.',
+      talk:{ 101:[
+        'Староста прислал тебя? Хорошо, слушай внимательно.',
+        'Видели разбойников на дороге. Их немного, но они проверяют путников.',
+        'Теперь ты знаешь, куда идти. Возвращайся, когда разберёшься.',
+      ] },
     }, rewards:{copper:100,exp:100,items:[]} };
   const w = q.rewards || {};
   $('#main').innerHTML = `
   <div class="toolbar"><button onclick="show('quests')">← К списку</button>
     <h2 style="margin:0;font-family:Georgia,serif;font-variant:small-caps">
-      ${r ? 'Задание #' + q.id : 'Новое задание'}</h2></div>
+      ${r ? 'Задание #' + q.id : 'Новое задание'}</h2>
+    ${r ? `<button onclick="openQuestCompletions(${q.id})">Кто выполнил</button>` : ''}</div>
   <div class="panel"><div class="form">
     <div><label>Уникальный ID</label><input id="q-id" type="number" value="${q.id}" ${r?'disabled':''}></div>
     <div><label>NPC выдаёт</label><select id="q-giver">${npcOpt(q.giver_npc_id)}</select></div>

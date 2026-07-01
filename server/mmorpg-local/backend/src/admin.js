@@ -718,6 +718,58 @@ export function adminRoutes(app) {
     res.json(rows);
   });
 
+  app.get('/admin/api/quests/:id/completions', guard, async (req, res) => {
+    const id = Number(req.params.id);
+    const quest = (await game.query(
+      `SELECT id, name FROM quest_templates WHERE id = $1`, [id])).rows[0];
+    if (!quest) throw bad(404, 'quest_not_found');
+    const { rows } = await game.query(
+      `SELECT c.id AS character_id, c.name, c.level, c.status AS character_status,
+              l.name AS location, cq.accepted_at, cq.completed_at, cq.available_again_at
+         FROM character_quests cq
+         JOIN characters c ON c.id = cq.character_id
+         LEFT JOIN locations l ON l.id = c.location_id
+        WHERE cq.quest_id = $1 AND cq.status = 2
+        ORDER BY cq.completed_at DESC NULLS LAST, c.id`, [id]);
+    res.json({ quest, characters: rows });
+  });
+
+  app.post('/admin/api/quests/:id/reset', guard, async (req, res) => {
+    const questId = Number(req.params.id);
+    const charId = Number((req.body || {}).character_id);
+    const note = (req.body || {}).note || null;
+    if (!questId || !charId) throw bad(400, 'quest_and_character_required');
+    const quest = (await game.query(
+      `SELECT id, name FROM quest_templates WHERE id = $1`, [questId])).rows[0];
+    if (!quest) throw bad(404, 'quest_not_found');
+    const ch = (await game.query(
+      `SELECT id, name FROM characters WHERE id = $1`, [charId])).rows[0];
+    if (!ch) throw bad(404, 'character_not_found');
+
+    const result = await tx(async (c) => {
+      const current = (await c.query(
+        `SELECT status, progress, accepted_at, completed_at, available_again_at
+           FROM character_quests
+          WHERE character_id = $1 AND quest_id = $2
+          FOR UPDATE`, [charId, questId])).rows[0];
+      if (!current) throw bad(404, 'quest_progress_not_found');
+      const cq = await c.query(
+        `DELETE FROM character_quests
+          WHERE character_id = $1 AND quest_id = $2`, [charId, questId]);
+      const qh = await c.query(
+        `DELETE FROM quest_history
+          WHERE character_id = $1 AND quest_id = $2`, [charId, questId]);
+      return {
+        previousStatus: Number(current.status),
+        progressDeleted: cq.rowCount,
+        historyDeleted: qh.rowCount,
+      };
+    });
+    await audit('quest.reset_for_character', 6, questId,
+      { characterId: charId, characterName: ch.name, questName: quest.name, note, ...result });
+    res.json({ ok: true, quest, character: ch, ...result });
+  });
+
   app.post('/admin/api/quests', guard, async (req, res) => {
     const b = req.body || {};
     const id = Number(b.id);

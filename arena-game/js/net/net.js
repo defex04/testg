@@ -156,6 +156,7 @@ export const api = {
   locationBattlesFinished: () => rest('/api/locations/battles/finished'),
   locationNpcs: () => rest('/api/npcs/location'),
   npcDialog: (id) => rest('/api/npcs/' + Number(id) + '/dialog'),
+  npcTalk: (id, questId) => rest('/api/npcs/' + Number(id) + '/talk', { questId }),
   questAccept: (id, npcId) => rest('/api/quests/' + Number(id) + '/accept', { npcId }),
   questComplete: (id, npcId) => rest('/api/quests/' + Number(id) + '/complete', { npcId }),
   inventory: () => rest('/api/inventory'),

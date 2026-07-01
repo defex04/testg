@@ -2047,6 +2047,143 @@ body.loc-castle.in-battle .sprite-main .sm-ico {
   font-size: 12px;
   margin-top: 6px;
 }
+.npc-reward-items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 7px;
+}
+.npc-reward-item {
+  position: relative;
+  flex: 0 0 38px;
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line-dim);
+  border-radius: 8px;
+  background: linear-gradient(180deg, #151c0d, #0d1208);
+  color: #fff3c6;
+  cursor: pointer;
+  box-shadow: inset 0 1px 0 rgba(255, 240, 200, .08);
+}
+.npc-reward-item.q1, .npc-reward-item.q2, .npc-reward-item.q3,
+.npc-reward-item.q4, .npc-reward-item.q5,
+.qrp-ico.q1, .qrp-ico.q2, .qrp-ico.q3, .qrp-ico.q4, .qrp-ico.q5 {
+  border-color: rgba(var(--qc), .9);
+  background: radial-gradient(120% 120% at 50% 20%, rgba(var(--qc), .52), rgba(var(--qc), .13) 68%),
+              linear-gradient(180deg, #1b2210, #101509);
+  box-shadow: 0 0 11px rgba(var(--qc), .36), inset 0 0 9px rgba(var(--qc), .2);
+}
+.npc-reward-item:hover {
+  transform: translateY(-1px);
+  border-color: var(--gold);
+}
+.npc-reward-ico {
+  font-size: 22px;
+  line-height: 1;
+}
+.npc-reward-item b {
+  position: absolute;
+  right: 3px;
+  bottom: 2px;
+  min-width: 16px;
+  padding: 1px 3px;
+  border-radius: 999px;
+  background: rgba(8, 10, 5, .86);
+  color: #fff0b8;
+  font-size: 10px;
+  line-height: 1.1;
+  text-align: center;
+  box-shadow: 0 0 0 1px rgba(244, 205, 111, .28);
+}
+.quest-reward-preview {
+  position: fixed;
+  inset: 0;
+  z-index: 115;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: max(14px, env(safe-area-inset-top), var(--tg-inset-top))
+           max(10px, env(safe-area-inset-right), var(--tg-inset-right))
+           max(14px, env(safe-area-inset-bottom), var(--tg-inset-bottom))
+           max(10px, env(safe-area-inset-left), var(--tg-inset-left));
+  background: rgba(0, 0, 0, .44);
+}
+.qrp-card {
+  width: min(360px, 100%);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: linear-gradient(180deg, rgba(30, 38, 20, .98), rgba(12, 16, 8, .98));
+  box-shadow: var(--frame-shadow), 0 0 30px rgba(0, 0, 0, .52);
+  padding: 12px;
+}
+.qrp-head {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) 24px;
+  gap: 10px;
+  align-items: center;
+}
+.qrp-ico {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line-dim);
+  border-radius: 8px;
+  background: linear-gradient(180deg, #151c0d, #0d1208);
+  font-size: 27px;
+  line-height: 1;
+}
+.qrp-title {
+  min-width: 0;
+}
+.qrp-name {
+  color: var(--gold-bright);
+  font: 700 16px var(--font-display);
+  overflow-wrap: anywhere;
+}
+.qrp-kind {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.qrp-close {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--line-dim);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.qrp-close:hover {
+  color: var(--text);
+  border-color: var(--gold);
+}
+.qrp-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-top: 11px;
+}
+.qrp-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+  line-height: 1.35;
+}
+.qrp-row span {
+  color: var(--muted);
+}
+.qrp-row b {
+  color: var(--text);
+  font-weight: 600;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
 .npc-quest-actions {
   display: flex;
   justify-content: flex-end;
@@ -2061,10 +2198,46 @@ body.loc-castle.in-battle .sprite-main .sm-ico {
   padding: 8px 13px;
   cursor: pointer;
 }
+.npc-quest-btn.secondary {
+  border-color: rgba(138, 111, 60, .46);
+  background: linear-gradient(180deg, #2b341b, #171d0d);
+  color: #d9cfaa;
+}
 .npc-quest-btn:disabled {
   opacity: .55;
   cursor: default;
   filter: grayscale(.25);
+}
+.npc-convo {
+  display: grid;
+  grid-template-columns: 112px minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+}
+.npc-convo-main {
+  min-height: 190px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border: 1px solid rgba(138, 111, 60, .42);
+  border-radius: 8px;
+  padding: 13px;
+  background: linear-gradient(180deg, rgba(31, 40, 19, .9), rgba(13, 17, 8, .9));
+}
+.npc-convo-kicker {
+  font: 13px var(--font-display);
+  color: var(--gold-bright);
+}
+.npc-convo-text {
+  flex: 1;
+  color: #eadfbd;
+  font-size: 15px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+.npc-convo-progress {
+  color: var(--muted);
+  font-size: 12px;
 }
 .npc-empty {
   color: var(--muted);
@@ -2076,11 +2249,15 @@ body.loc-castle.in-battle .sprite-main .sm-ico {
   .npc-dialog-card { max-height: 94vh; }
   .npc-profile { grid-template-columns: 78px minmax(0, 1fr); gap: 10px; }
   .npc-portrait { width: 78px; font-size: 28px; }
+  .npc-convo { grid-template-columns: 78px minmax(0, 1fr); gap: 10px; }
+  .npc-convo-main { min-height: 170px; }
+  .npc-convo-text { font-size: 13.5px; }
   .npc-profile h3 { font-size: 17px; }
   .npc-profile p,
   .npc-quest-text { font-size: 12.5px; }
   .npc-quest-head { flex-direction: column; gap: 5px; }
   .npc-quest-state { align-self: flex-start; }
+  .qrp-card { width: min(330px, 100%); }
 }
 
 /* ---------- экран боя ---------- */
